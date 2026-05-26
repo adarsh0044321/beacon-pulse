@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use openh264::{
-    encoder::{Encoder, EncoderConfig as Oh264Config, BitRate, FrameRate},
+    encoder::{BitRate, Encoder, EncoderConfig as Oh264Config, FrameRate},
     formats::YUVBuffer,
     OpenH264API,
 };
@@ -23,18 +23,29 @@ impl SoftwareEncoder {
     pub fn new(config: EncoderConfig) -> Result<Self> {
         let encoder = build_encoder(&config)?;
         info!(
-            width = config.width, height = config.height,
-            fps = config.fps, bitrate_bps = config.bitrate_bps,
+            width = config.width,
+            height = config.height,
+            fps = config.fps,
+            bitrate_bps = config.bitrate_bps,
             "SoftwareEncoder (OpenH264) initialized"
         );
-        Ok(Self { encoder, config, frame_count: 0, force_keyframe: true })
+        Ok(Self {
+            encoder,
+            config,
+            frame_count: 0,
+            force_keyframe: true,
+        })
     }
 
     fn reinit(&mut self) -> Result<()> {
         self.encoder = build_encoder(&self.config)?;
         self.frame_count = 0;
         self.force_keyframe = true;
-        debug!(width = self.config.width, height = self.config.height, "Encoder reinitialized");
+        debug!(
+            width = self.config.width,
+            height = self.config.height,
+            "Encoder reinitialized"
+        );
         Ok(())
     }
 }
@@ -47,8 +58,7 @@ fn build_encoder(config: &EncoderConfig) -> Result<Encoder> {
         .bitrate(BitRate::from_bps(config.bitrate_bps))
         .max_frame_rate(FrameRate::from_hz(config.fps as f32))
         .skip_frames(false); // Never skip frames — LAN has plenty of bandwidth
-    Encoder::with_api_config(api, enc_cfg)
-        .context("Failed to create OpenH264 encoder")
+    Encoder::with_api_config(api, enc_cfg).context("Failed to create OpenH264 encoder")
 }
 
 impl VideoEncoder for SoftwareEncoder {
@@ -61,8 +71,13 @@ impl VideoEncoder for SoftwareEncoder {
     ) -> Result<Option<EncodedPacket>> {
         // Reinitialize if dimensions changed
         if width != self.config.width || height != self.config.height {
-            debug!(old_w = self.config.width, old_h = self.config.height,
-                   new_w = width, new_h = height, "Encoder dimension change");
+            debug!(
+                old_w = self.config.width,
+                old_h = self.config.height,
+                new_w = width,
+                new_h = height,
+                "Encoder dimension change"
+            );
             self.config.width = width;
             self.config.height = height;
             self.reinit()?;
@@ -76,7 +91,9 @@ impl VideoEncoder for SoftwareEncoder {
 
         // Force IDR on keyframe request or interval
         let is_keyframe = self.force_keyframe
-            || self.frame_count.is_multiple_of(self.config.keyframe_interval as u64);
+            || self
+                .frame_count
+                .is_multiple_of(self.config.keyframe_interval as u64);
 
         if is_keyframe {
             self.encoder.force_intra_frame();
@@ -99,7 +116,8 @@ impl VideoEncoder for SoftwareEncoder {
         }
 
         // NAL type 5 = IDR — detect for accurate keyframe flag
-        let has_idr = nal_data.windows(5)
+        let has_idr = nal_data
+            .windows(5)
             .any(|w| w.len() >= 5 && (w[4] & 0x1F) == 5);
 
         self.frame_count += 1;

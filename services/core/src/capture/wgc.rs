@@ -8,7 +8,7 @@
 //! Requirements: Windows 10 1903+, WinRT runtime.
 //! Gracefully falls back (returns Err on start) on older OS.
 
-use super::{CapturedFrame, CaptureBackend, GpuTexture, GpuTextureInner, WindowCapture};
+use super::{CaptureBackend, CapturedFrame, GpuTexture, GpuTextureInner, WindowCapture};
 use crate::encoder::gpu_device::SharedGpuDeviceArc;
 use anyhow::{anyhow, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,7 +23,9 @@ pub struct WgcCapture;
 
 #[cfg(not(windows))]
 impl WgcCapture {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[cfg(not(windows))]
@@ -31,10 +33,14 @@ impl WindowCapture for WgcCapture {
     fn start(&mut self, _hwnd: isize) -> Result<()> {
         Err(anyhow!("WGC is Windows-only"))
     }
-    fn next_frame(&mut self) -> Result<Option<CapturedFrame>> { Ok(None) }
+    fn next_frame(&mut self) -> Result<Option<CapturedFrame>> {
+        Ok(None)
+    }
     fn stop(&mut self) {}
     fn resize_hint(&mut self, _w: u32, _h: u32) {}
-    fn backend(&self) -> CaptureBackend { CaptureBackend::WGC }
+    fn backend(&self) -> CaptureBackend {
+        CaptureBackend::WGC
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,40 +49,40 @@ impl WindowCapture for WgcCapture {
 
 #[cfg(windows)]
 pub struct WgcCapture {
-    inner:         Option<WgcInner>,
-    hwnd:          isize,
+    inner: Option<WgcInner>,
+    hwnd: isize,
     shared_device: Option<SharedGpuDeviceArc>,
 }
 
 #[cfg(windows)]
 #[allow(dead_code)]
 struct WgcInner {
-    device:       windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    context:      windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
-    frame_pool:   windows::Graphics::Capture::Direct3D11CaptureFramePool,
-    session:      windows::Graphics::Capture::GraphicsCaptureSession,
-    pending:      std::sync::Arc<std::sync::Mutex<Option<RawFrame>>>,
-    gpu_pending:  std::sync::Arc<std::sync::Mutex<Option<GpuRawFrame>>>,
+    device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    context: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+    frame_pool: windows::Graphics::Capture::Direct3D11CaptureFramePool,
+    session: windows::Graphics::Capture::GraphicsCaptureSession,
+    pending: std::sync::Arc<std::sync::Mutex<Option<RawFrame>>>,
+    gpu_pending: std::sync::Arc<std::sync::Mutex<Option<GpuRawFrame>>>,
     use_gpu_path: bool,
-    width:        u32,
-    height:       u32,
+    width: u32,
+    height: u32,
 }
 
 /// CPU-side raw frame (fallback path).
 #[cfg(windows)]
 struct RawFrame {
-    data:         Vec<u8>,
-    width:        u32,
-    height:       u32,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
     timestamp_us: u64,
 }
 
 /// GPU-side raw frame (zero-copy path).
 #[cfg(windows)]
 struct GpuRawFrame {
-    nv12_tex:     windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-    width:        u32,
-    height:       u32,
+    nv12_tex: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+    width: u32,
+    height: u32,
     timestamp_us: u64,
 }
 
@@ -94,7 +100,11 @@ unsafe impl<T> Sync for SendWrapper<T> {}
 #[cfg(windows)]
 impl WgcCapture {
     pub fn new() -> Self {
-        Self { inner: None, hwnd: 0, shared_device: None }
+        Self {
+            inner: None,
+            hwnd: 0,
+            shared_device: None,
+        }
     }
 
     /// Attach a shared GPU device before calling `start()` to enable the
@@ -107,22 +117,22 @@ impl WgcCapture {
     /// Try to initialize the WinRT capture pipeline for `hwnd`.
     fn try_init(&mut self, hwnd: isize) -> Result<()> {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::Graphics::Direct3D11::{
-            D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            D3D11_SDK_VERSION, ID3D11Device, ID3D11DeviceContext,
-        };
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
-        
+        use windows::Win32::Graphics::Direct3D11::{
+            D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            D3D11_SDK_VERSION,
+        };
+
         use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
         // windows-rs 0.58: WinRT D3D11 interop types moved to WinRT::Direct3D11
+        use windows::core::Interface;
+        use windows::Graphics::Capture::{
+            Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+        };
+        use windows::Graphics::DirectX::DirectXPixelFormat;
         use windows::Win32::System::WinRT::Direct3D11::{
             CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
         };
-        use windows::Graphics::Capture::{
-            Direct3D11CaptureFramePool, GraphicsCaptureSession, GraphicsCaptureItem,
-        };
-        use windows::Graphics::DirectX::DirectXPixelFormat;
-        use windows::core::Interface;
         use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 
         // Initialise WinRT COM apartment
@@ -134,40 +144,43 @@ impl WgcCapture {
         let device: ID3D11Device;
         let context: ID3D11DeviceContext;
         if let Some(ref shared) = self.shared_device {
-            device       = shared.d3d_device().clone();
-            context      = shared.d3d_context().clone();
+            device = shared.d3d_device().clone();
+            context = shared.d3d_context().clone();
             use_gpu_path = true;
         } else {
             let mut dd: Option<ID3D11Device> = None;
             let mut dc: Option<ID3D11DeviceContext> = None;
             unsafe {
                 D3D11CreateDevice(
-                    None, D3D_DRIVER_TYPE_HARDWARE, None,
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT, None, D3D11_SDK_VERSION,
-                    Some(&mut dd), None, Some(&mut dc),
+                    None,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    None,
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut dd),
+                    None,
+                    Some(&mut dc),
                 )?;
             }
-            device       = dd.ok_or_else(|| anyhow!("WGC: D3D11 device creation failed"))?;
-            context      = dc.ok_or_else(|| anyhow!("WGC: D3D11 context creation failed"))?;
+            device = dd.ok_or_else(|| anyhow!("WGC: D3D11 device creation failed"))?;
+            context = dc.ok_or_else(|| anyhow!("WGC: D3D11 context creation failed"))?;
             use_gpu_path = false;
         }
 
         // Wrap D3D11 device as a WinRT IDirect3DDevice
-        let dxgi_device: windows::Win32::Graphics::Dxgi::IDXGIDevice =
-            device.cast()?;
-        let winrt_device =
-            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+        let dxgi_device: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast()?;
+        let winrt_device = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
         let idirect3d: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice =
             winrt_device.cast()?;
 
         // Build GraphicsCaptureItem from HWND via interop
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-        let item: GraphicsCaptureItem =
-            unsafe { interop.CreateForWindow(HWND(hwnd as *mut _))? };
+        let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(HWND(hwnd as *mut _))? };
 
-        let size   = item.Size()?;
-        let width  = size.Width  as u32;
+        let size = item.Size()?;
+        let width = size.Width as u32;
         let height = size.Height as u32;
 
         // Create frame pool: BGRA8, 2 buffers
@@ -184,17 +197,23 @@ impl WgcCapture {
         let pending_cb = pending.clone();
         let gpu_pending: std::sync::Arc<std::sync::Mutex<Option<GpuRawFrame>>> =
             std::sync::Arc::new(std::sync::Mutex::new(None));
-        let gpu_pending_cb  = gpu_pending.clone();
+        let gpu_pending_cb = gpu_pending.clone();
         let use_gpu_path_cb = use_gpu_path;
-        let device_cb       = SendWrapper(device.clone());
+        let device_cb = SendWrapper(device.clone());
 
         // FrameArrived callback — copies GPU texture to system RAM
         frame_pool.FrameArrived(&windows::Foundation::TypedEventHandler::new(
             move |pool: &Option<Direct3D11CaptureFramePool>, _| {
-                let pool = match pool { Some(p) => p, None => return Ok(()) };
+                let pool = match pool {
+                    Some(p) => p,
+                    None => return Ok(()),
+                };
                 let frame = match pool.TryGetNextFrame() {
                     Ok(f) => f,
-                    Err(e) => { warn!("WGC: TryGetNextFrame failed: {}", e); return Ok(()); }
+                    Err(e) => {
+                        warn!("WGC: TryGetNextFrame failed: {}", e);
+                        return Ok(());
+                    }
                 };
 
                 // Access the captured D3D11 texture via IDirect3DDxgiInterfaceAccess
@@ -204,21 +223,24 @@ impl WgcCapture {
                 let src_tex: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D =
                     unsafe { access.GetInterface()? };
 
-                let mut desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+                let mut desc =
+                    windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
                 unsafe { src_tex.GetDesc(&mut desc) };
 
                 // ── Phase 4c: GPU zero-copy path ──────────────────────────
                 if use_gpu_path_cb {
                     let ts = SystemTime::now()
-                        .duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
-                    if let Ok(nv12) = blit_bgra_to_nv12(
-                        &device_cb.0, &src_tex, desc.Width, desc.Height,
-                    ) {
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_micros() as u64;
+                    if let Ok(nv12) =
+                        blit_bgra_to_nv12(&device_cb.0, &src_tex, desc.Width, desc.Height)
+                    {
                         if let Ok(mut g) = gpu_pending_cb.lock() {
                             *g = Some(GpuRawFrame {
                                 nv12_tex: nv12,
-                                width:    desc.Width,
-                                height:   desc.Height,
+                                width: desc.Width,
+                                height: desc.Height,
                                 timestamp_us: ts,
                             });
                         }
@@ -229,23 +251,31 @@ impl WgcCapture {
 
                 // Create a staging (CPU-readable) texture with same dims
                 let staging_desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC {
-                    Width:     desc.Width,
-                    Height:    desc.Height,
+                    Width: desc.Width,
+                    Height: desc.Height,
                     MipLevels: 1,
                     ArraySize: 1,
-                    Format:    windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                    Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
                     SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
-                        Count: 1, Quality: 0,
+                        Count: 1,
+                        Quality: 0,
                     },
                     Usage: windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING,
                     // windows-rs 0.58: flag fields in D3D11_TEXTURE2D_DESC are plain u32;
                     // the newtype inner fields are i32, so cast explicitly.
-                    BindFlags:      windows::Win32::Graphics::Direct3D11::D3D11_BIND_FLAG(0).0 as u32,
-                    CPUAccessFlags: windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32,
-                    MiscFlags:      windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0 as u32,
+                    BindFlags: windows::Win32::Graphics::Direct3D11::D3D11_BIND_FLAG(0).0 as u32,
+                    CPUAccessFlags: windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0
+                        as u32,
+                    MiscFlags: windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0
+                        as u32,
                 };
-                let mut staging: Option<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> = None;
-                unsafe { device_cb.0.CreateTexture2D(&staging_desc, None, Some(&mut staging))? };
+                let mut staging: Option<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> =
+                    None;
+                unsafe {
+                    device_cb
+                        .0
+                        .CreateTexture2D(&staging_desc, None, Some(&mut staging))?
+                };
                 let staging = staging.unwrap();
 
                 // Copy GPU → staging
@@ -282,9 +312,8 @@ impl WgcCapture {
                 let mut out = Vec::with_capacity(w * h * 4);
                 let src_ptr = mapped.pData as *const u8;
                 for row in 0..h {
-                    let row_slice = unsafe {
-                        std::slice::from_raw_parts(src_ptr.add(row * stride), w * 4)
-                    };
+                    let row_slice =
+                        unsafe { std::slice::from_raw_parts(src_ptr.add(row * stride), w * 4) };
                     out.extend_from_slice(row_slice);
                 }
                 unsafe {
@@ -295,7 +324,9 @@ impl WgcCapture {
                 }
 
                 let ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_micros() as u64;
 
                 if let Ok(mut guard) = pending_cb.lock() {
                     *guard = Some(RawFrame {
@@ -332,7 +363,10 @@ impl WgcCapture {
             height,
         });
 
-        info!(hwnd = hwnd, width, height, "WGC capture started (real implementation)");
+        info!(
+            hwnd = hwnd,
+            width, height, "WGC capture started (real implementation)"
+        );
         Ok(())
     }
 }
@@ -354,7 +388,7 @@ impl WindowCapture for WgcCapture {
         use std::sync::Arc;
         let inner = match &mut self.inner {
             Some(i) => i,
-            None    => return Ok(None),
+            None => return Ok(None),
         };
         // Phase 4c: try GPU path first
         if inner.use_gpu_path {
@@ -362,12 +396,13 @@ impl WindowCapture for WgcCapture {
                 if let Some(gpu) = g.take() {
                     let tex = GpuTexture(Arc::new(GpuTextureInner {
                         texture: gpu.nv12_tex,
-                        width:   gpu.width,
-                        height:  gpu.height,
+                        width: gpu.width,
+                        height: gpu.height,
                     }));
                     return Ok(Some(CapturedFrame {
                         data: vec![],
-                        width: gpu.width, height: gpu.height,
+                        width: gpu.width,
+                        height: gpu.height,
                         timestamp_us: gpu.timestamp_us,
                         source: CaptureBackend::WGC,
                         is_stale: false,
@@ -379,11 +414,12 @@ impl WindowCapture for WgcCapture {
         // CPU fallback
         let raw = match inner.pending.lock() {
             Ok(mut g) => g.take(),
-            Err(_)    => None,
+            Err(_) => None,
         };
         Ok(raw.map(|r| CapturedFrame {
             data: r.data,
-            width: r.width, height: r.height,
+            width: r.width,
+            height: r.height,
             timestamp_us: r.timestamp_us,
             source: CaptureBackend::WGC,
             is_stale: false,
@@ -439,44 +475,53 @@ impl WindowCapture for WgcCapture {
 /// Processor.  Runs entirely on the GPU — no CPU memory is touched.
 #[cfg(windows)]
 fn blit_bgra_to_nv12(
-    device:  &windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
     src_tex: &windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
     w: u32,
     h: u32,
 ) -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> {
+    use windows::core::Interface;
+    use windows::Win32::Foundation::BOOL;
     use windows::Win32::Graphics::Direct3D11::*;
     use windows::Win32::Graphics::Dxgi::Common::*;
-    use windows::Win32::Foundation::BOOL;
-    use windows::core::Interface;
 
     // NV12 render-target texture (GPU-only)
     let nv12_desc = D3D11_TEXTURE2D_DESC {
-        Width: w, Height: h, MipLevels: 1, ArraySize: 1,
+        Width: w,
+        Height: h,
+        MipLevels: 1,
+        ArraySize: 1,
         Format: DXGI_FORMAT_NV12,
-        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
         Usage: D3D11_USAGE_DEFAULT,
         BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
-        CPUAccessFlags: 0, MiscFlags: 0,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
     };
     let mut nv12_opt: Option<ID3D11Texture2D> = None;
     unsafe { device.CreateTexture2D(&nv12_desc, None, Some(&mut nv12_opt))? };
     let nv12 = nv12_opt.unwrap();
 
     // Cast to video device / context
-    let vdev: ID3D11VideoDevice  = device.cast()?;
+    let vdev: ID3D11VideoDevice = device.cast()?;
     let ctx: ID3D11DeviceContext = unsafe { device.GetImmediateContext()? };
     let vctx: ID3D11VideoContext = ctx.cast()?;
 
     // Video processor
     let cdesc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
         InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-        InputWidth: w, InputHeight: h,
-        OutputWidth: w, OutputHeight: h,
+        InputWidth: w,
+        InputHeight: h,
+        OutputWidth: w,
+        OutputHeight: h,
         Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
         ..Default::default()
     };
     // windows-rs 0.58: Create* methods return the COM object directly
-    let vp_enum  = unsafe { vdev.CreateVideoProcessorEnumerator(&cdesc)? };
+    let vp_enum = unsafe { vdev.CreateVideoProcessorEnumerator(&cdesc)? };
     let processor = unsafe { vdev.CreateVideoProcessor(&vp_enum, 0)? };
 
     // Input view (BGRA source)
@@ -484,7 +529,10 @@ fn blit_bgra_to_nv12(
         FourCC: 0,
         ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
         Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
-            Texture2D: D3D11_TEX2D_VPIV { MipSlice: 0, ArraySlice: 0 },
+            Texture2D: D3D11_TEX2D_VPIV {
+                MipSlice: 0,
+                ArraySlice: 0,
+            },
         },
     };
     let src_res: ID3D11Resource = src_tex.cast()?;
@@ -501,7 +549,9 @@ fn blit_bgra_to_nv12(
     };
     let dst_res: ID3D11Resource = nv12.cast()?;
     let mut ov_opt: Option<ID3D11VideoProcessorOutputView> = None;
-    unsafe { vdev.CreateVideoProcessorOutputView(&dst_res, &vp_enum, &ov_desc, Some(&mut ov_opt))? };
+    unsafe {
+        vdev.CreateVideoProcessorOutputView(&dst_res, &vp_enum, &ov_desc, Some(&mut ov_opt))?
+    };
     let output_view = ov_opt.unwrap();
 
     // Execute BGRA→NV12 conversion on GPU

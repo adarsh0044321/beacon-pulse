@@ -1,24 +1,24 @@
 use anyhow::{Context, Result};
-use std::sync::Arc;
 use std::io::Write;
+use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::AppState;
-use crate::logging::session_logger::SessionId;
-use crate::network::session::SessionManager;
 use crate::auth::PairingManager;
 use crate::capture::window_list;
 use crate::host_session;
+use crate::logging::session_logger::SessionId;
 use crate::network;
+use crate::network::session::SessionManager;
 use crate::registry;
+use crate::AppState;
 
 struct HostArgs {
     window_title: Option<String>,
     port: Option<u16>,
     code: Option<String>,
     control_port: Option<u16>,
-    quality: Option<u32>,   // bitrate in Mbps
+    quality: Option<u32>, // bitrate in Mbps
 }
 
 /// Hide the console window (Windows only).
@@ -49,7 +49,7 @@ fn hide_console_window() {}
 fn auto_select_window() -> Result<crate::capture::WindowInfo> {
     let last_proc = registry::read_string("LastWindowProcess");
     let last_title = registry::read_string("LastWindowTitle");
-    
+
     // We try to find the window. We retry up to 15 times (each with a 2-second sleep)
     // in case the application starts slowly on system boot.
     for attempt in 1..=15 {
@@ -57,13 +57,21 @@ fn auto_select_window() -> Result<crate::capture::WindowInfo> {
         if !wins.is_empty() {
             // 1. Try to match by process name
             if let Some(ref proc) = last_proc {
-                if let Some(w) = wins.iter().find(|w| w.process_name.to_lowercase() == proc.to_lowercase()).cloned() {
+                if let Some(w) = wins
+                    .iter()
+                    .find(|w| w.process_name.to_lowercase() == proc.to_lowercase())
+                    .cloned()
+                {
                     return Ok(w);
                 }
             }
             // 2. Try to match by title
             if let Some(ref title) = last_title {
-                if let Some(w) = wins.iter().find(|w| w.title.to_lowercase().contains(&title.to_lowercase())).cloned() {
+                if let Some(w) = wins
+                    .iter()
+                    .find(|w| w.title.to_lowercase().contains(&title.to_lowercase()))
+                    .cloned()
+                {
                     return Ok(w);
                 }
             }
@@ -131,10 +139,13 @@ fn spawn_background_process(
 pub fn run(args: Vec<String>) -> Result<()> {
     // Parse arguments
     let mut host_args = HostArgs {
-        window_title: None, port: None, code: None,
-        control_port: None, quality: None,
+        window_title: None,
+        port: None,
+        code: None,
+        control_port: None,
+        quality: None,
     };
-    
+
     let is_startup = args.iter().any(|arg| arg == "--startup");
     let is_bg_service = args.iter().any(|arg| arg == "--bg-service");
 
@@ -159,7 +170,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--control-port" | "-cp" => {
                 if i + 1 < args.len() {
-                    host_args.control_port = Some(args[i + 1].parse().context("Invalid control port number")?);
+                    host_args.control_port =
+                        Some(args[i + 1].parse().context("Invalid control port number")?);
                     i += 2;
                 } else {
                     return Err(anyhow::anyhow!("Missing value for --control-port"));
@@ -175,7 +187,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--quality" | "-q" => {
                 if i + 1 < args.len() {
-                    let mbps: u32 = args[i + 1].parse().context("Invalid quality value (use Mbps, e.g. 20)")?;
+                    let mbps: u32 = args[i + 1]
+                        .parse()
+                        .context("Invalid quality value (use Mbps, e.g. 20)")?;
                     host_args.quality = Some(mbps);
                     i += 2;
                 } else {
@@ -198,7 +212,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
         let _bg_mutex = {
             #[link(name = "kernel32")]
             extern "system" {
-                fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut std::ffi::c_void;
+                fn CreateMutexW(
+                    attrs: *const u8,
+                    initial_owner: i32,
+                    name: *const u16,
+                ) -> *mut std::ffi::c_void;
                 fn GetLastError() -> u32;
             }
             let name: Vec<u16> = "Local\\BeaconBgService\0".encode_utf16().collect();
@@ -216,9 +234,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
         let wins = window_list::list_visible_windows()?;
         let selected_win = if let Some(ref title) = host_args.window_title {
-            let matched: Vec<_> = wins.iter()
-                .filter(|w| w.title.to_lowercase().contains(&title.to_lowercase()) 
-                         || w.process_name.to_lowercase().contains(&title.to_lowercase()))
+            let matched: Vec<_> = wins
+                .iter()
+                .filter(|w| {
+                    w.title.to_lowercase().contains(&title.to_lowercase())
+                        || w.process_name
+                            .to_lowercase()
+                            .contains(&title.to_lowercase())
+                })
                 .collect();
             if matched.is_empty() {
                 return Err(anyhow::anyhow!("No matching window found for bg service"));
@@ -276,9 +299,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
             println!("  ==================================================");
             println!("  Welcome to Beacon. Let's configure your options.");
             println!();
-            
+
             // 1. Startup permission
-            print!("  [1] Would you like Beacon to start automatically on Windows startup? [y/N]: ");
+            print!(
+                "  [1] Would you like Beacon to start automatically on Windows startup? [y/N]: "
+            );
             std::io::stdout().flush().ok();
             let mut startup_input = String::new();
             if std::io::stdin().read_line(&mut startup_input).is_ok() {
@@ -298,7 +323,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         let path_str = startup_exe.to_string_lossy();
                         if registry::write_startup(&path_str, "") {
                             registry::write_dword("StartupEnabled", 1);
-                            println!("      ✓ Enabled: Added to Windows startup (with crash recovery).");
+                            println!(
+                                "      ✓ Enabled: Added to Windows startup (with crash recovery)."
+                            );
                         } else {
                             println!("      ✗ Failed to configure Windows startup.");
                         }
@@ -361,7 +388,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
     loop {
         println!();
         println!("  ╔══════════════════════════════════════════╗");
-        println!("  ║         Beacon  v{}          ║", env!("CARGO_PKG_VERSION"));
+        println!(
+            "  ║         Beacon  v{}          ║",
+            env!("CARGO_PKG_VERSION")
+        );
         println!("  ╚══════════════════════════════════════════╝");
         println!();
         println!("    [1] Start Sharing Window");
@@ -381,33 +411,48 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 // ── Start Sharing Flow ──
                 let wins = window_list::list_visible_windows()?;
                 if wins.is_empty() {
-                    println!("  ✗ No visible windows found. Make sure at least one application is open.");
+                    println!(
+                        "  ✗ No visible windows found. Make sure at least one application is open."
+                    );
                     continue;
                 }
 
                 let selected_win = if let Some(ref title) = host_args.window_title {
-                    let matched: Vec<_> = wins.iter()
-                        .filter(|w| w.title.to_lowercase().contains(&title.to_lowercase()) 
-                                 || w.process_name.to_lowercase().contains(&title.to_lowercase()))
+                    let matched: Vec<_> = wins
+                        .iter()
+                        .filter(|w| {
+                            w.title.to_lowercase().contains(&title.to_lowercase())
+                                || w.process_name
+                                    .to_lowercase()
+                                    .contains(&title.to_lowercase())
+                        })
                         .collect();
                     if matched.is_empty() {
-                        println!("  ✗ No window found matching '{}'. Showing options instead:\n", title);
+                        println!(
+                            "  ✗ No window found matching '{}'. Showing options instead:\n",
+                            title
+                        );
                         for (i, w) in wins.iter().enumerate() {
                             println!("    [{}] {} ({})", i + 1, w.title, w.process_name);
                         }
                         continue;
                     }
-                    println!("  Auto-selected: {} ({})", matched[0].title, matched[0].process_name);
+                    println!(
+                        "  Auto-selected: {} ({})",
+                        matched[0].title, matched[0].process_name
+                    );
                     matched[0].clone()
                 } else {
                     println!("  Available windows to share:\n");
                     for (i, w) in wins.iter().enumerate() {
                         let dims = format!("{}x{}", w.width, w.height);
-                        println!("    [{:>2}]  {:50} {:>10}  ({})", 
-                                 i + 1, 
-                                 truncate_str(&w.title, 50),
-                                 dims,
-                                 w.process_name);
+                        println!(
+                            "    [{:>2}]  {:50} {:>10}  ({})",
+                            i + 1,
+                            truncate_str(&w.title, 50),
+                            dims,
+                            w.process_name
+                        );
                     }
                     println!();
                     print!("  Select window (1-{}): ", wins.len());
@@ -416,7 +461,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     std::io::stdin().read_line(&mut input)?;
                     let idx: usize = match input.trim().parse() {
                         Ok(num) => num,
-                        Err(_) => { println!("  ✗ Invalid input."); continue; }
+                        Err(_) => {
+                            println!("  ✗ Invalid input.");
+                            continue;
+                        }
                     };
                     if idx == 0 || idx > wins.len() {
                         println!("  ✗ Selection out of range.");
@@ -454,11 +502,17 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 } else {
                     println!();
                     println!("  ┌──────────────────────────────────────────┐");
-                    println!("  │  Window:  {:30}  │", truncate_str(&selected_win.title, 30));
+                    println!(
+                        "  │  Window:  {:30}  │",
+                        truncate_str(&selected_win.title, 30)
+                    );
                     println!("  │                                          │");
                     println!("  │  ┌────────────────────────────────────┐  │");
                     println!("  │  │                                    │  │");
-                    println!("  │  │     Pairing Code:  {:>6}          │  │", code.as_ref().unwrap());
+                    println!(
+                        "  │  │     Pairing Code:  {:>6}          │  │",
+                        code.as_ref().unwrap()
+                    );
                     println!("  │  │                                    │  │");
                     println!("  │  └────────────────────────────────────┘  │");
                     println!("  │                                          │");
@@ -483,9 +537,22 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     println!("  ==================================================");
                     println!("                Configuration Settings");
                     println!("  ==================================================");
-                    println!("    [1] Windows Startup App:   {}", if startup { "ENABLED" } else { "DISABLED" });
-                    println!("    [2] Unattended Mode:       {}", if unattended { "ENABLED (No code)" } else { "DISABLED (Needs code)" });
-                    println!("    [3] Keyboard/Mouse Control: {}", if control { "ENABLED" } else { "DISABLED" });
+                    println!(
+                        "    [1] Windows Startup App:   {}",
+                        if startup { "ENABLED" } else { "DISABLED" }
+                    );
+                    println!(
+                        "    [2] Unattended Mode:       {}",
+                        if unattended {
+                            "ENABLED (No code)"
+                        } else {
+                            "DISABLED (Needs code)"
+                        }
+                    );
+                    println!(
+                        "    [3] Keyboard/Mouse Control: {}",
+                        if control { "ENABLED" } else { "DISABLED" }
+                    );
                     println!("    [4] Back to Main Menu");
                     println!();
                     print!("    Select setting to toggle (1-4): ");
@@ -522,11 +589,17 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         "2" => {
                             if unattended {
                                 registry::write_dword("Unattended", 0);
-                                println!("      ✓ Unattended access disabled. Pairing code required.");
+                                println!(
+                                    "      ✓ Unattended access disabled. Pairing code required."
+                                );
                             } else {
                                 registry::write_dword("Unattended", 1);
-                                println!("      ✓ Unattended access enabled. Pairing code disabled.");
-                                println!("      [WARNING] Unattended mode allows direct screen access!");
+                                println!(
+                                    "      ✓ Unattended access enabled. Pairing code disabled."
+                                );
+                                println!(
+                                    "      [WARNING] Unattended mode allows direct screen access!"
+                                );
                             }
                         }
                         "3" => {
@@ -555,7 +628,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 println!();
                 println!("    Flags:");
                 println!("      -w, --window <title>  Match a window name to share automatically.");
-                println!("      -c, --code <code>     Specify a static pairing code (e.g. 123456).");
+                println!(
+                    "      -c, --code <code>     Specify a static pairing code (e.g. 123456)."
+                );
                 println!("      -q, --quality <mbps>  Set target bitrate in Mbps (default: 20).");
                 println!("      -p, --port <port>     Set the UDP video streaming port.");
                 println!("      -cp, --control-port   Set the TCP control handshake port.");

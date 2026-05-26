@@ -31,12 +31,16 @@ use crate::encoder::yuv;
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub enum HwVendor { Nvidia, Amd, Intel }
+pub enum HwVendor {
+    Nvidia,
+    Amd,
+    Intel,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HwEncoderInfo {
     pub vendor: HwVendor,
-    pub name:   String,
+    pub name: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,37 +48,48 @@ pub struct HwEncoderInfo {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn probe_hardware_encoders() -> Vec<HwEncoderInfo> {
-    #[cfg(windows)]    { probe_mf().unwrap_or_default() }
-    #[cfg(not(windows))] { vec![] }
+    #[cfg(windows)]
+    {
+        probe_mf().unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        vec![]
+    }
 }
 
 #[cfg(windows)]
 fn probe_mf() -> Result<Vec<HwEncoderInfo>> {
     use windows::Win32::Media::MediaFoundation::{
-        MFStartup, MFTEnumEx, MFT_CATEGORY_VIDEO_ENCODER,
-        MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER,
-        MFT_REGISTER_TYPE_INFO, MFVideoFormat_H264, MFMediaType_Video,
-        MFT_FRIENDLY_NAME_Attribute, MFSTARTUP_NOSOCKET, MF_VERSION,
+        MFMediaType_Video, MFStartup, MFTEnumEx, MFT_FRIENDLY_NAME_Attribute, MFVideoFormat_H264,
+        MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE,
+        MFT_ENUM_FLAG_SORTANDFILTER, MFT_REGISTER_TYPE_INFO, MF_VERSION,
     };
 
-    unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).ok(); }
+    unsafe {
+        MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).ok();
+    }
 
     let output_type = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
-        guidSubtype:   MFVideoFormat_H264,
+        guidSubtype: MFVideoFormat_H264,
     };
-    let mut activates_ptr: *mut Option<windows::Win32::Media::MediaFoundation::IMFActivate>
-        = std::ptr::null_mut();
+    let mut activates_ptr: *mut Option<windows::Win32::Media::MediaFoundation::IMFActivate> =
+        std::ptr::null_mut();
     let mut count: u32 = 0;
 
     unsafe {
         let hr = MFTEnumEx(
             MFT_CATEGORY_VIDEO_ENCODER,
             MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
-            None, Some(&output_type),
-            &mut activates_ptr, &mut count,
+            None,
+            Some(&output_type),
+            &mut activates_ptr,
+            &mut count,
         );
-        if hr.is_err() || count == 0 { return Ok(vec![]); }
+        if hr.is_err() || count == 0 {
+            return Ok(vec![]);
+        }
     }
 
     let mut results = Vec::new();
@@ -85,7 +100,9 @@ fn probe_mf() -> Result<Vec<HwEncoderInfo>> {
             let _ = activate.GetString(&MFT_FRIENDLY_NAME_Attribute, &mut [], Some(&mut name_len));
             let mut name_buf = vec![0u16; (name_len as usize).saturating_add(1)];
             let _ = activate.GetString(&MFT_FRIENDLY_NAME_Attribute, &mut name_buf, None);
-            let name = String::from_utf16_lossy(&name_buf).trim_end_matches('\0').to_string();
+            let name = String::from_utf16_lossy(&name_buf)
+                .trim_end_matches('\0')
+                .to_string();
 
             let lower = name.to_lowercase();
             let vendor = if lower.contains("nvidia") || lower.contains("nvenc") {
@@ -102,7 +119,9 @@ fn probe_mf() -> Result<Vec<HwEncoderInfo>> {
     }
 
     results.sort_by_key(|r| match r.vendor {
-        HwVendor::Nvidia => 0u8, HwVendor::Amd => 1, HwVendor::Intel => 2,
+        HwVendor::Nvidia => 0u8,
+        HwVendor::Amd => 1,
+        HwVendor::Intel => 2,
     });
     Ok(results)
 }
@@ -119,25 +138,20 @@ mod codec_api {
     use windows::core::GUID;
 
     /// Rate control mode: 0 = CBR, 1 = VBR
-    pub const CODECAPI_AVEncCommonRateControlMode: GUID = GUID::from_u128(
-        0x1c0608e9_0002_4003_a15b_c1b5f5d1d430
-    );
+    pub const CODECAPI_AVEncCommonRateControlMode: GUID =
+        GUID::from_u128(0x1c0608e9_0002_4003_a15b_c1b5f5d1d430);
     /// Target (average) bitrate in bits/sec
-    pub const CODECAPI_AVEncCommonMeanBitRate: GUID = GUID::from_u128(
-        0xf7222374_2144_4815_b550_a37f8e12ee52
-    );
+    pub const CODECAPI_AVEncCommonMeanBitRate: GUID =
+        GUID::from_u128(0xf7222374_2144_4815_b550_a37f8e12ee52);
     /// Number of B-frames (0 = low latency)
-    pub const CODECAPI_AVEncMPVDefaultBPictureCount: GUID = GUID::from_u128(
-        0x8d390aac_dc5c_4200_b57f_814d04babab2
-    );
+    pub const CODECAPI_AVEncMPVDefaultBPictureCount: GUID =
+        GUID::from_u128(0x8d390aac_dc5c_4200_b57f_814d04babab2);
     /// Encoding quality vs speed: 1 = real-time
-    pub const CODECAPI_AVEncCommonQuality: GUID = GUID::from_u128(
-        0xfcbfbe16_2b64_4b4a_9b13_ce5a07f7c359
-    );
+    pub const CODECAPI_AVEncCommonQuality: GUID =
+        GUID::from_u128(0xfcbfbe16_2b64_4b4a_9b13_ce5a07f7c359);
     /// Low-latency mode hint (BOOL)
-    pub const CODECAPI_AVLowLatencyMode: GUID = GUID::from_u128(
-        0x9c27891a_ed7a_40e1_88e8_b22727a024ee
-    );
+    pub const CODECAPI_AVLowLatencyMode: GUID =
+        GUID::from_u128(0x9c27891a_ed7a_40e1_88e8_b22727a024ee);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,11 +160,11 @@ mod codec_api {
 
 #[cfg(windows)]
 struct MfInner {
-    transform:     windows::Win32::Media::MediaFoundation::IMFTransform,
-    config:        EncoderConfig,
-    vendor:        HwVendor,
-    name:          String,
-    frame_count:   u64,
+    transform: windows::Win32::Media::MediaFoundation::IMFTransform,
+    config: EncoderConfig,
+    vendor: HwVendor,
+    name: String,
+    frame_count: u64,
     force_keyframe: bool,
 }
 
@@ -188,7 +202,9 @@ impl MfHardwareEncoder {
 
             // Update hw_encoder_active metric
             let hw_id: u32 = match best.vendor {
-                HwVendor::Nvidia => 1, HwVendor::Amd => 2, HwVendor::Intel => 3,
+                HwVendor::Nvidia => 1,
+                HwVendor::Amd => 2,
+                HwVendor::Intel => 3,
             };
             crate::logging::metrics::METRICS
                 .hw_encoder_active
@@ -199,7 +215,7 @@ impl MfHardwareEncoder {
                     transform,
                     config,
                     vendor: best.vendor.clone(),
-                    name:   best.name.clone(),
+                    name: best.name.clone(),
                     frame_count: 0,
                     force_keyframe: true,
                 },
@@ -210,12 +226,24 @@ impl MfHardwareEncoder {
     }
 
     pub fn vendor(&self) -> &HwVendor {
-        #[cfg(windows)]     { &self.inner.vendor }
-        #[cfg(not(windows))]{ unreachable!() }
+        #[cfg(windows)]
+        {
+            &self.inner.vendor
+        }
+        #[cfg(not(windows))]
+        {
+            unreachable!()
+        }
     }
     pub fn name(&self) -> &str {
-        #[cfg(windows)]     { &self.inner.name }
-        #[cfg(not(windows))]{ unreachable!() }
+        #[cfg(windows)]
+        {
+            &self.inner.name
+        }
+        #[cfg(not(windows))]
+        {
+            unreachable!()
+        }
     }
 
     // ── Phase 3: ICodecAPI low-latency configuration ────────────────────────
@@ -225,8 +253,8 @@ impl MfHardwareEncoder {
         transform: &windows::Win32::Media::MediaFoundation::IMFTransform,
         config: &EncoderConfig,
     ) {
-        use windows::Win32::Media::MediaFoundation::ICodecAPI;
         use windows::core::{Interface, VARIANT};
+        use windows::Win32::Media::MediaFoundation::ICodecAPI;
 
         let codec_api: ICodecAPI = match transform.cast() {
             Ok(c) => c,
@@ -256,10 +284,7 @@ impl MfHardwareEncoder {
             );
 
             // Low-latency mode
-            let _ = codec_api.SetValue(
-                &codec_api::CODECAPI_AVLowLatencyMode,
-                &VARIANT::from(true),
-            );
+            let _ = codec_api.SetValue(&codec_api::CODECAPI_AVLowLatencyMode, &VARIANT::from(true));
         }
         debug!("ICodecAPI: CBR low-latency mode configured");
     }
@@ -268,8 +293,8 @@ impl MfHardwareEncoder {
 
     #[cfg(windows)]
     fn apply_bitrate_via_codec_api(&self, bps: u32) {
-        use windows::Win32::Media::MediaFoundation::ICodecAPI;
         use windows::core::{Interface, VARIANT};
+        use windows::Win32::Media::MediaFoundation::ICodecAPI;
 
         let codec_api: ICodecAPI = match self.inner.transform.cast() {
             Ok(c) => c,
@@ -292,12 +317,12 @@ impl MfHardwareEncoder {
         _info: &HwEncoderInfo,
     ) -> Result<windows::Win32::Media::MediaFoundation::IMFTransform> {
         use windows::Win32::Media::MediaFoundation::{
-            MFCreateMediaType, MFStartup, MFTEnumEx,
-            MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER,
-            MFT_REGISTER_TYPE_INFO, MFVideoFormat_H264, MFVideoFormat_NV12, MFMediaType_Video,
-            MFVideoInterlace_Progressive, MFSTARTUP_NOSOCKET, MF_VERSION,
-            MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_MT_FRAME_SIZE, MF_MT_FRAME_RATE,
-            MF_MT_AVG_BITRATE, MF_MT_INTERLACE_MODE, IMFTransform, IMFMediaType,
+            IMFMediaType, IMFTransform, MFCreateMediaType, MFMediaType_Video, MFStartup, MFTEnumEx,
+            MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
+            MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE,
+            MFT_ENUM_FLAG_SORTANDFILTER, MFT_REGISTER_TYPE_INFO, MF_MT_AVG_BITRATE,
+            MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
+            MF_MT_SUBTYPE, MF_VERSION,
         };
 
         unsafe {
@@ -305,43 +330,53 @@ impl MfHardwareEncoder {
 
             let output_type = MFT_REGISTER_TYPE_INFO {
                 guidMajorType: MFMediaType_Video,
-                guidSubtype:   MFVideoFormat_H264,
+                guidSubtype: MFVideoFormat_H264,
             };
-            let mut activates_ptr: *mut Option<windows::Win32::Media::MediaFoundation::IMFActivate>
-                = std::ptr::null_mut();
+            let mut activates_ptr: *mut Option<
+                windows::Win32::Media::MediaFoundation::IMFActivate,
+            > = std::ptr::null_mut();
             let mut count: u32 = 0;
 
             MFTEnumEx(
                 MFT_CATEGORY_VIDEO_ENCODER,
                 MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
-                None, Some(&output_type),
-                &mut activates_ptr, &mut count,
-            ).context("MFTEnumEx")?;
+                None,
+                Some(&output_type),
+                &mut activates_ptr,
+                &mut count,
+            )
+            .context("MFTEnumEx")?;
 
-            if count == 0 { return Err(anyhow!("No hardware MF transforms available")); }
+            if count == 0 {
+                return Err(anyhow!("No hardware MF transforms available"));
+            }
 
-            let activate = (*activates_ptr).as_ref()
+            let activate = (*activates_ptr)
+                .as_ref()
                 .ok_or_else(|| anyhow!("Null IMFActivate"))?;
-            let transform: IMFTransform = activate.ActivateObject()
-                .context("ActivateObject")?;
+            let transform: IMFTransform = activate.ActivateObject().context("ActivateObject")?;
 
             // Output type: H.264
             let out_mt: IMFMediaType = MFCreateMediaType()?;
             out_mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
-            out_mt.SetGUID(&MF_MT_SUBTYPE,    &MFVideoFormat_H264)?;
+            out_mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264)?;
             out_mt.SetUINT64(&MF_MT_FRAME_SIZE, pack_u64(config.width, config.height))?;
             out_mt.SetUINT64(&MF_MT_FRAME_RATE, pack_u64(config.fps, 1))?;
             out_mt.SetUINT32(&MF_MT_AVG_BITRATE, config.bitrate_bps)?;
             out_mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            transform.SetOutputType(0, &out_mt, 0).context("SetOutputType")?;
+            transform
+                .SetOutputType(0, &out_mt, 0)
+                .context("SetOutputType")?;
 
             // Input type: NV12
             let in_mt: IMFMediaType = MFCreateMediaType()?;
             in_mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
-            in_mt.SetGUID(&MF_MT_SUBTYPE,    &MFVideoFormat_NV12)?;
+            in_mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)?;
             in_mt.SetUINT64(&MF_MT_FRAME_SIZE, pack_u64(config.width, config.height))?;
             in_mt.SetUINT64(&MF_MT_FRAME_RATE, pack_u64(config.fps, 1))?;
-            transform.SetInputType(0, &in_mt, 0).context("SetInputType")?;
+            transform
+                .SetInputType(0, &in_mt, 0)
+                .context("SetInputType")?;
 
             windows::Win32::System::Com::CoTaskMemFree(Some(activates_ptr as *const _));
             Ok(transform)
@@ -353,8 +388,7 @@ impl MfHardwareEncoder {
     #[cfg(windows)]
     fn push_frame(&mut self, nv12: &[u8], timestamp_us: u64) -> Result<Option<EncodedPacket>> {
         use windows::Win32::Media::MediaFoundation::{
-            MFCreateSample, MFCreateMemoryBuffer,
-            MFSampleExtension_CleanPoint,
+            MFCreateMemoryBuffer, MFCreateSample, MFSampleExtension_CleanPoint,
             MFT_OUTPUT_DATA_BUFFER, MF_E_TRANSFORM_NEED_MORE_INPUT,
         };
 
@@ -374,7 +408,7 @@ impl MfHardwareEncoder {
 
             let sample = MFCreateSample()?;
             sample.AddBuffer(&buffer)?;
-            sample.SetSampleTime((timestamp_us * 10) as i64)?;   // 100ns units
+            sample.SetSampleTime((timestamp_us * 10) as i64)?; // 100ns units
             sample.SetSampleDuration(10_000_000i64 / inner.config.fps as i64)?;
 
             if inner.force_keyframe {
@@ -384,11 +418,12 @@ impl MfHardwareEncoder {
 
             inner.transform.ProcessInput(0, &sample, 0)?;
 
-            let mut out_buf  = MFT_OUTPUT_DATA_BUFFER::default();
+            let mut out_buf = MFT_OUTPUT_DATA_BUFFER::default();
             let mut status: u32 = 0;
-            let result = inner.transform.ProcessOutput(
-                0, std::slice::from_mut(&mut out_buf), &mut status,
-            );
+            let result =
+                inner
+                    .transform
+                    .ProcessOutput(0, std::slice::from_mut(&mut out_buf), &mut status);
 
             if let Err(ref e) = result {
                 if e.code() == windows::core::HRESULT(MF_E_TRANSFORM_NEED_MORE_INPUT.0) {
@@ -398,22 +433,28 @@ impl MfHardwareEncoder {
             result.context("ProcessOutput")?;
 
             if let Some(out_sample) = out_buf.pSample.take() {
-                let contig_buf = out_sample.ConvertToContiguousBuffer()
+                let contig_buf = out_sample
+                    .ConvertToContiguousBuffer()
                     .context("ConvertToContiguousBuffer")?;
 
                 let mut ptr: *mut u8 = std::ptr::null_mut();
-                let mut len: u32     = 0;
+                let mut len: u32 = 0;
                 contig_buf.Lock(&mut ptr, None, Some(&mut len))?;
                 let bytes = std::slice::from_raw_parts(ptr, len as usize).to_vec();
                 contig_buf.Unlock()?;
 
                 let is_keyframe = out_sample
                     .GetUINT32(&MFSampleExtension_CleanPoint)
-                    .unwrap_or(0) != 0;
+                    .unwrap_or(0)
+                    != 0;
 
                 inner.frame_count += 1;
                 return Ok(Some(EncodedPacket {
-                    data: bytes, timestamp_us, is_keyframe, width: w, height: h,
+                    data: bytes,
+                    timestamp_us,
+                    is_keyframe,
+                    width: w,
+                    height: h,
                 }));
             }
         }
@@ -430,12 +471,13 @@ impl MfHardwareEncoder {
         &self,
         mgr: &windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager,
     ) -> Result<()> {
-        use windows::Win32::Media::MediaFoundation::MFT_MESSAGE_SET_D3D_MANAGER;
         use windows::core::Interface;
+        use windows::Win32::Media::MediaFoundation::MFT_MESSAGE_SET_D3D_MANAGER;
         let unk: windows::core::IUnknown = mgr.cast()?;
         let ptr = unk.as_raw() as usize;
         unsafe {
-            self.inner.transform
+            self.inner
+                .transform
                 .ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, ptr)?;
         }
         debug!("MF encoder: DXGI device manager set — GPU surface input enabled");
@@ -456,13 +498,12 @@ impl MfHardwareEncoder {
         tex: &windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
         timestamp_us: u64,
     ) -> Result<Option<EncodedPacket>> {
-        use windows::Win32::Media::MediaFoundation::{
-            MFCreateSample, MFCreateDXGISurfaceBuffer, IMFMediaBuffer,
-            MFSampleExtension_CleanPoint,
-            MFT_OUTPUT_DATA_BUFFER, MF_E_TRANSFORM_NEED_MORE_INPUT,
-        };
-        use windows::Win32::Foundation::BOOL;
         use windows::core::Interface;
+        use windows::Win32::Foundation::BOOL;
+        use windows::Win32::Media::MediaFoundation::{
+            IMFMediaBuffer, MFCreateDXGISurfaceBuffer, MFCreateSample,
+            MFSampleExtension_CleanPoint, MFT_OUTPUT_DATA_BUFFER, MF_E_TRANSFORM_NEED_MORE_INPUT,
+        };
 
         let inner = &mut self.inner;
         let w = inner.config.width;
@@ -491,9 +532,10 @@ impl MfHardwareEncoder {
 
             let mut out_buf = MFT_OUTPUT_DATA_BUFFER::default();
             let mut status: u32 = 0;
-            let result = inner.transform.ProcessOutput(
-                0, std::slice::from_mut(&mut out_buf), &mut status,
-            );
+            let result =
+                inner
+                    .transform
+                    .ProcessOutput(0, std::slice::from_mut(&mut out_buf), &mut status);
 
             if let Err(ref e) = result {
                 if e.code() == windows::core::HRESULT(MF_E_TRANSFORM_NEED_MORE_INPUT.0) {
@@ -503,7 +545,8 @@ impl MfHardwareEncoder {
             result.context("ProcessOutput (GPU path)")?;
 
             if let Some(out_sample) = out_buf.pSample.take() {
-                let contig_buf = out_sample.ConvertToContiguousBuffer()
+                let contig_buf = out_sample
+                    .ConvertToContiguousBuffer()
                     .context("ConvertToContiguousBuffer (GPU path)")?;
                 let mut ptr: *mut u8 = std::ptr::null_mut();
                 let mut len: u32 = 0;
@@ -512,10 +555,15 @@ impl MfHardwareEncoder {
                 contig_buf.Unlock()?;
                 let is_keyframe = out_sample
                     .GetUINT32(&MFSampleExtension_CleanPoint)
-                    .unwrap_or(0) != 0;
+                    .unwrap_or(0)
+                    != 0;
                 inner.frame_count += 1;
                 return Ok(Some(EncodedPacket {
-                    data: bytes, timestamp_us, is_keyframe, width: w, height: h,
+                    data: bytes,
+                    timestamp_us,
+                    is_keyframe,
+                    width: w,
+                    height: h,
                 }));
             }
         }
@@ -528,7 +576,13 @@ impl MfHardwareEncoder {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl VideoEncoder for MfHardwareEncoder {
-    fn encode_bgra(&mut self, bgra: &[u8], width: u32, height: u32, ts: u64) -> Result<Option<EncodedPacket>> {
+    fn encode_bgra(
+        &mut self,
+        bgra: &[u8],
+        width: u32,
+        height: u32,
+        ts: u64,
+    ) -> Result<Option<EncodedPacket>> {
         let nv12 = yuv::bgra_to_nv12(bgra, width, height);
         #[cfg(windows)]
         return self.push_frame(&nv12, ts);
@@ -537,19 +591,25 @@ impl VideoEncoder for MfHardwareEncoder {
     }
 
     fn request_keyframe(&mut self) {
-        #[cfg(windows)] { self.inner.force_keyframe = true; }
+        #[cfg(windows)]
+        {
+            self.inner.force_keyframe = true;
+        }
     }
 
     /// Phase 3: Applies new bitrate immediately via ICodecAPI (no re-init needed).
     fn set_bitrate(&mut self, bps: u32) {
-        #[cfg(windows)] {
+        #[cfg(windows)]
+        {
             self.inner.config.bitrate_bps = bps;
             self.apply_bitrate_via_codec_api(bps);
             info!(bps, "MF encoder bitrate updated dynamically via ICodecAPI");
         }
     }
 
-    fn codec(&self) -> VideoCodec { VideoCodec::H264 }
+    fn codec(&self) -> VideoCodec {
+        VideoCodec::H264
+    }
 }
 
 // SAFETY: single-threaded access guaranteed by &mut self discipline.
@@ -572,16 +632,30 @@ macro_rules! vendor_encoder {
             }
             #[allow(dead_code)]
             pub fn is_available() -> bool {
-                probe_hardware_encoders().iter().any(|e| e.vendor == HwVendor::$variant)
+                probe_hardware_encoders()
+                    .iter()
+                    .any(|e| e.vendor == HwVendor::$variant)
             }
         }
         impl VideoEncoder for $name {
-            fn encode_bgra(&mut self, b: &[u8], w: u32, h: u32, ts: u64) -> Result<Option<EncodedPacket>> {
+            fn encode_bgra(
+                &mut self,
+                b: &[u8],
+                w: u32,
+                h: u32,
+                ts: u64,
+            ) -> Result<Option<EncodedPacket>> {
                 self.0.encode_bgra(b, w, h, ts)
             }
-            fn request_keyframe(&mut self) { self.0.request_keyframe(); }
-            fn set_bitrate(&mut self, bps: u32) { self.0.set_bitrate(bps); }
-            fn codec(&self) -> VideoCodec { VideoCodec::H264 }
+            fn request_keyframe(&mut self) {
+                self.0.request_keyframe();
+            }
+            fn set_bitrate(&mut self, bps: u32) {
+                self.0.set_bitrate(bps);
+            }
+            fn codec(&self) -> VideoCodec {
+                VideoCodec::H264
+            }
         }
         // SAFETY: inherited from MfHardwareEncoder
         unsafe impl Send for $name {}
@@ -589,8 +663,8 @@ macro_rules! vendor_encoder {
 }
 
 vendor_encoder!(NvencEncoder, Nvidia);
-vendor_encoder!(AmfEncoder,   Amd);
-vendor_encoder!(QsvEncoder,   Intel);
+vendor_encoder!(AmfEncoder, Amd);
+vendor_encoder!(QsvEncoder, Intel);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

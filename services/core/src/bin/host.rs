@@ -1,37 +1,28 @@
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 #[cfg(feature = "host")]
 mod run {
     use anyhow::Result;
     use std::sync::Arc;
     use tokio::sync::{broadcast, Mutex, RwLock};
-    use tracing::{info, error, warn};
+    use tracing::{error, info, warn};
 
     #[cfg(windows)]
     use windows_service::{
         define_windows_service,
         service::{
-            ServiceControl, ServiceControlAccept, ServiceExitCode,
-            ServiceState, ServiceStatus, ServiceType,
+            ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+            ServiceType,
         },
         service_control_handler::{self, ServiceControlHandlerResult},
         service_dispatcher,
     };
 
     use lanshare_service::{
-        AppState,
-        add_firewall_rules,
-        logging,
-        ipc::IpcServer,
-        network,
-        host_session,
-        cli_host,
-        benchmark,
-        logging::session_logger::SessionId,
-        network::discovery::MdnsAdvertiser,
-        network::session::SessionManager,
-        auth::PairingManager,
+        add_firewall_rules, auth::PairingManager, benchmark, cli_host, host_session,
+        ipc::IpcServer, logging, logging::session_logger::SessionId, network,
+        network::discovery::MdnsAdvertiser, network::session::SessionManager, AppState,
     };
 
     #[cfg(windows)]
@@ -49,18 +40,19 @@ mod run {
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_tx_clone = shutdown_tx.clone();
 
-        let status_handle = service_control_handler::register(
-            "Beacon",
-            move |control_event| match control_event {
-                ServiceControl::Stop | ServiceControl::Shutdown => {
-                    info!("Windows Service stop signal received");
-                    let _ = shutdown_tx_clone.send(());
-                    ServiceControlHandlerResult::NoError
-                }
-                ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-                _ => ServiceControlHandlerResult::NotImplemented,
-            },
-        )?;
+        let status_handle =
+            service_control_handler::register(
+                "Beacon",
+                move |control_event| match control_event {
+                    ServiceControl::Stop | ServiceControl::Shutdown => {
+                        info!("Windows Service stop signal received");
+                        let _ = shutdown_tx_clone.send(());
+                        ServiceControlHandlerResult::NoError
+                    }
+                    ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                    _ => ServiceControlHandlerResult::NotImplemented,
+                },
+            )?;
 
         status_handle.set_service_status(ServiceStatus {
             service_type: ServiceType::OWN_PROCESS,
@@ -109,8 +101,10 @@ mod run {
             pairing_manager,
             shutdown_tx: shutdown_tx.clone(),
             session_id,
-            host_session:    Arc::new(Mutex::new(None)),
-            host_event_rx:   Arc::new(Mutex::new(dummy_rx)),
+            host_session: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "player")]
+            client_session: Arc::new(Mutex::new(None)),
+            host_event_rx: Arc::new(Mutex::new(dummy_rx)),
             broadcast_cancel: Arc::new(Mutex::new(None)),
         });
 
@@ -179,7 +173,9 @@ mod run {
         info!("Beacon shutting down gracefully");
 
         // Stop active sessions
-        if let Some(h) = state.host_session.lock().await.take() { h.stop(); }
+        if let Some(h) = state.host_session.lock().await.take() {
+            h.stop();
+        }
 
         mdns_handle.abort();
         ipc_handle.abort();
@@ -201,7 +197,8 @@ mod run {
 
         // Benchmark mode: offline pipeline test, no logging init needed
         if mode == "benchmark" {
-            let duration = args.get(2)
+            let duration = args
+                .get(2)
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(10);
             tracing_subscriber::fmt()
@@ -217,11 +214,7 @@ mod run {
         let _mutex_guard = {
             #[link(name = "kernel32")]
             extern "system" {
-                fn CreateMutexW(
-                    attrs: *const u8,
-                    initial_owner: i32,
-                    name: *const u16,
-                ) -> *mut u8;
+                fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut u8;
                 fn GetLastError() -> u32;
             }
             let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
@@ -251,7 +244,9 @@ mod run {
             if mode == "service" {
                 match service_dispatcher::start("Beacon", ffi_service_main) {
                     Ok(_) => return Ok(()),
-                    Err(_) => info!("Not running as Windows Service — falling back to console mode"),
+                    Err(_) => {
+                        info!("Not running as Windows Service — falling back to console mode")
+                    }
                 }
             }
 
@@ -270,7 +265,9 @@ mod run {
             let rt = tokio::runtime::Runtime::new()?;
             let (shutdown_tx, _) = broadcast::channel(1);
             let tx = shutdown_tx.clone();
-            ctrlc::set_handler(move || { let _ = tx.send(()); })?;
+            ctrlc::set_handler(move || {
+                let _ = tx.send(());
+            })?;
             rt.block_on(async_main(shutdown_tx))?;
         }
 

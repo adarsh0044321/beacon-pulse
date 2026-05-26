@@ -1,7 +1,7 @@
 //! System Tray icon implementation for LANShare Host background mode.
 
 use tokio::sync::broadcast;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
@@ -46,7 +46,10 @@ pub fn spawn(shutdown_tx: broadcast::Sender<()>, shared_window_title: String) {
     });
 }
 
-fn run_tray_loop(shutdown_tx: broadcast::Sender<()>, shared_window_title: String) -> anyhow::Result<()> {
+fn run_tray_loop(
+    shutdown_tx: broadcast::Sender<()>,
+    shared_window_title: String,
+) -> anyhow::Result<()> {
     let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None)? };
     let class_name: Vec<u16> = "BeaconTrayClass\0".encode_utf16().collect();
 
@@ -128,7 +131,9 @@ fn run_tray_loop(shutdown_tx: broadcast::Sender<()>, shared_window_title: String
     let hwnd_raw = hwnd.0 as isize;
     let mut shutdown_rx = shutdown_tx.subscribe();
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         rt.block_on(async {
             let _ = shutdown_rx.recv().await;
             let hwnd_val = HWND(hwnd_raw as *mut std::ffi::c_void);
@@ -168,12 +173,7 @@ fn run_tray_loop(shutdown_tx: broadcast::Sender<()>, shared_window_title: String
     Ok(())
 }
 
-unsafe extern "system" fn wndproc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == WM_NCCREATE {
         let createstruct = lparam.0 as *const CREATESTRUCTW;
         if !createstruct.is_null() {
@@ -208,10 +208,10 @@ unsafe extern "system" fn wndproc(
                 GetCursorPos(&mut pt).ok();
 
                 let hmenu = CreatePopupMenu().ok().unwrap();
-                
+
                 let change_text: Vec<u16> = "Change Shared Window\0".encode_utf16().collect();
                 let exit_text: Vec<u16> = "Exit Sharing\0".encode_utf16().collect();
-                
+
                 let _ = AppendMenuW(hmenu, MENU_ITEM_FLAGS(0), 1, PCWSTR(change_text.as_ptr()));
                 let _ = AppendMenuW(hmenu, MENU_ITEM_FLAGS(0), 2, PCWSTR(exit_text.as_ptr()));
 
@@ -257,4 +257,3 @@ fn relaunch_visible() {
             .spawn();
     }
 }
-

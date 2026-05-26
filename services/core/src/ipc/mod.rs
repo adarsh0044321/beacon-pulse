@@ -4,25 +4,25 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, warn};
 #[cfg(any(feature = "host", feature = "player"))]
 use tracing::error;
+use tracing::{info, warn};
 
-use crate::AppState;
-#[cfg(feature = "host")]
-use crate::capture::{CaptureBackend, AppKind};
 #[cfg(feature = "host")]
 use crate::capture::window_list;
-#[cfg(feature = "player")]
-use crate::network::discovery;
 #[cfg(feature = "host")]
-use crate::network::broadcast;
-#[cfg(feature = "host")]
-use crate::host_session;
+use crate::capture::{AppKind, CaptureBackend};
 #[cfg(feature = "player")]
 use crate::client_session;
 #[cfg(feature = "host")]
+use crate::host_session;
+#[cfg(feature = "host")]
 use crate::logging::metrics::METRICS;
+#[cfg(feature = "host")]
+use crate::network::broadcast;
+#[cfg(feature = "player")]
+use crate::network::discovery;
+use crate::AppState;
 
 /// Messages sent from UI → Service
 #[derive(Debug, Deserialize)]
@@ -31,30 +31,47 @@ pub enum UiCommand {
     #[cfg(feature = "host")]
     ListWindows,
     #[cfg(feature = "host")]
-    StartShare { hwnd: isize },
+    StartShare {
+        hwnd: isize,
+    },
     #[cfg(feature = "host")]
     StopShare,
     // Client side: join a host stream
     #[cfg(feature = "player")]
-    JoinStream { host_ip: String, stream_port: u16, recv_port: u16, pairing_code: Option<String> },
+    JoinStream {
+        host_ip: String,
+        stream_port: u16,
+        recv_port: u16,
+        pairing_code: Option<String>,
+    },
     #[cfg(feature = "player")]
     LeaveStream,
     #[cfg(feature = "host")]
     GeneratePairingCode,
     #[allow(dead_code)]
-    SetPermission { client_id: String, perm: String, value: bool },
+    SetPermission {
+        client_id: String,
+        perm: String,
+        value: bool,
+    },
     #[cfg(feature = "host")]
-    KickClient { client_id: String },
+    KickClient {
+        client_id: String,
+    },
     #[cfg(feature = "player")]
     DiscoverHosts,
     #[cfg(feature = "host")]
     RequestKeyframe,
     /// Phase 3: apply new bitrate immediately (kbps)
     #[cfg(feature = "host")]
-    SetBitrate { kbps: u32 },
+    SetBitrate {
+        kbps: u32,
+    },
     Shutdown,
     #[cfg(feature = "player")]
-    SendInput { event: crate::network::InputMsg },
+    SendInput {
+        event: crate::network::InputMsg,
+    },
 }
 
 /// Messages sent from Service → UI
@@ -62,50 +79,112 @@ pub enum UiCommand {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum ServiceEvent {
     #[cfg(feature = "host")]
-    WindowList { windows: Vec<crate::capture::WindowInfo> },
+    WindowList {
+        windows: Vec<crate::capture::WindowInfo>,
+    },
     #[cfg(feature = "host")]
-    ShareStarted { hwnd: isize, width: u32, height: u32, stream_port: u16 },
+    ShareStarted {
+        hwnd: isize,
+        width: u32,
+        height: u32,
+        stream_port: u16,
+    },
     #[cfg(feature = "host")]
-    ShareStopped { reason: String },
+    ShareStopped {
+        reason: String,
+    },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
-    ClientConnected { client_id: String, display_name: String, addr: String },
+    ClientConnected {
+        client_id: String,
+        display_name: String,
+        addr: String,
+    },
     #[cfg(feature = "host")]
-    ClientDisconnected { client_id: String },
+    ClientDisconnected {
+        client_id: String,
+    },
     #[cfg(feature = "host")]
-    PairingCode { code: String, expires_in: u64 },
-    Stats { fps: f32, encode_ms: f32, latency_ms: u32, bitrate_kbps: u32, client_count: u32, gpu_path_active: bool },
+    PairingCode {
+        code: String,
+        expires_in: u64,
+    },
+    Stats {
+        fps: f32,
+        encode_ms: f32,
+        latency_ms: u32,
+        bitrate_kbps: u32,
+        client_count: u32,
+        gpu_path_active: bool,
+    },
     #[cfg(feature = "player")]
-    HostList { hosts: Vec<discovery::DiscoveredHost> },
-    Error { message: String },
+    HostList {
+        hosts: Vec<discovery::DiscoveredHost>,
+    },
+    Error {
+        message: String,
+    },
 
     // Capture state events
     #[cfg(feature = "host")]
-    CaptureBackendSwitched { from: CaptureBackend, to: CaptureBackend, reason: String },
+    CaptureBackendSwitched {
+        from: CaptureBackend,
+        to: CaptureBackend,
+        reason: String,
+    },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
-    RenderSuspended { hwnd: isize, app_kind: AppKind },
+    RenderSuspended {
+        hwnd: isize,
+        app_kind: AppKind,
+    },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
-    RenderResumed { hwnd: isize },
+    RenderResumed {
+        hwnd: isize,
+    },
     #[cfg(feature = "host")]
-    CaptureLost { hwnd: isize, reason: String },
+    CaptureLost {
+        hwnd: isize,
+        reason: String,
+    },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
-    CaptureRecovered { hwnd: isize, backend: CaptureBackend },
+    CaptureRecovered {
+        hwnd: isize,
+        backend: CaptureBackend,
+    },
 
     // Client-side: video chunk for WebCodecs decoder
     #[cfg(feature = "player")]
-    VideoChunk { data: String, timestamp_us: u64, is_keyframe: bool, width: u16, height: u16 },
+    VideoChunk {
+        data: String,
+        timestamp_us: u64,
+        is_keyframe: bool,
+        width: u16,
+        height: u16,
+    },
     #[cfg(feature = "player")]
-    StreamConnected { host_addr: String, recv_port: u16 },
-    StreamDisconnected { reason: String },
+    StreamConnected {
+        host_addr: String,
+        recv_port: u16,
+    },
+    StreamDisconnected {
+        reason: String,
+    },
     #[cfg(feature = "player")]
-    RecvStats { fps: f32, packet_loss_pct: f32 },
+    RecvStats {
+        fps: f32,
+        packet_loss_pct: f32,
+    },
 
     /// Phase 3: sent immediately after hardware encoder activates
     #[cfg(feature = "host")]
-    EncoderReady { encoder_name: String, vendor: String, hw_accelerated: bool },
+    EncoderReady {
+        encoder_name: String,
+        vendor: String,
+        hw_accelerated: bool,
+    },
 }
 
 pub struct IpcServer {
@@ -142,7 +221,9 @@ impl IpcServer {
         #[cfg(not(windows))]
         {
             info!("IPC server: non-Windows stub running");
-            loop { tokio::time::sleep(tokio::time::Duration::from_secs(60)).await; }
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            }
         }
     }
 }
@@ -206,8 +287,7 @@ async fn handle_pipe_client(
 async fn dispatch_cmd(
     cmd: UiCommand,
     state: &Arc<AppState>,
-    #[allow(unused_variables)]
-    push_tx: tokio::sync::mpsc::UnboundedSender<ServiceEvent>,
+    #[allow(unused_variables)] push_tx: tokio::sync::mpsc::UnboundedSender<ServiceEvent>,
 ) -> ServiceEvent {
     match cmd {
         // ── Window list ─────────────────────────────────────────────────────
@@ -227,7 +307,9 @@ async fn dispatch_cmd(
             tokio::spawn(async move {
                 while let Some(ev) = host_event_rx.recv().await {
                     let se = host_event_to_service(ev);
-                    if push.send(se).is_err() { break; }
+                    if push.send(se).is_err() {
+                        break;
+                    }
                 }
             });
 
@@ -267,18 +349,29 @@ async fn dispatch_cmd(
                         .hw_encoder_active
                         .load(std::sync::atomic::Ordering::Relaxed);
                     let (encoder_name, vendor, hw_accelerated) = match hw_id {
-                        1 => ("NVENC".into(),     "NVIDIA".into(), true),
-                        2 => ("AMF".into(),       "AMD".into(),    true),
-                        3 => ("QuickSync".into(), "Intel".into(),  true),
-                        _ => ("OpenH264".into(),  "Software".into(), false),
+                        1 => ("NVENC".into(), "NVIDIA".into(), true),
+                        2 => ("AMF".into(), "AMD".into(), true),
+                        3 => ("QuickSync".into(), "Intel".into(), true),
+                        _ => ("OpenH264".into(), "Software".into(), false),
                     };
-                    let _ = push_tx.send(ServiceEvent::EncoderReady { encoder_name, vendor, hw_accelerated });
+                    let _ = push_tx.send(ServiceEvent::EncoderReady {
+                        encoder_name,
+                        vendor,
+                        hw_accelerated,
+                    });
 
-                    ServiceEvent::ShareStarted { hwnd, width: 0, height: 0, stream_port: port }
+                    ServiceEvent::ShareStarted {
+                        hwnd,
+                        width: 0,
+                        height: 0,
+                        stream_port: port,
+                    }
                 }
                 Err(e) => {
                     error!(error = %e, "StartShare failed");
-                    ServiceEvent::Error { message: e.to_string() }
+                    ServiceEvent::Error {
+                        message: e.to_string(),
+                    }
                 }
             }
         }
@@ -294,19 +387,28 @@ async fn dispatch_cmd(
             if let Some(h) = session.take() {
                 h.stop();
             }
-            ServiceEvent::ShareStopped { reason: "User stopped".to_string() }
+            ServiceEvent::ShareStopped {
+                reason: "User stopped".to_string(),
+            }
         }
-
 
         // ── Join as client ───────────────────────────────────────────────────
         #[cfg(feature = "player")]
-        UiCommand::JoinStream { host_ip, stream_port, recv_port, pairing_code } => {
-            let host_addr: std::net::SocketAddr = match
-                format!("{}:{}", host_ip, stream_port).parse()
-            {
-                Ok(a) => a,
-                Err(_) => return ServiceEvent::Error { message: "Invalid host address".into() },
-            };
+        UiCommand::JoinStream {
+            host_ip,
+            stream_port,
+            recv_port,
+            pairing_code,
+        } => {
+            let host_addr: std::net::SocketAddr =
+                match format!("{}:{}", host_ip, stream_port).parse() {
+                    Ok(a) => a,
+                    Err(_) => {
+                        return ServiceEvent::Error {
+                            message: "Invalid host address".into(),
+                        }
+                    }
+                };
 
             // Bridge client events → push_tx
             let (client_ev_tx, mut client_ev_rx) =
@@ -315,7 +417,9 @@ async fn dispatch_cmd(
             tokio::spawn(async move {
                 while let Some(ev) = client_ev_rx.recv().await {
                     let se = client_event_to_service(ev);
-                    if push.send(se).is_err() { break; }
+                    if push.send(se).is_err() {
+                        break;
+                    }
                 }
             });
 
@@ -331,7 +435,9 @@ async fn dispatch_cmd(
                 }
                 Err(e) => {
                     error!(error = %e, "JoinStream failed");
-                    ServiceEvent::Error { message: e.to_string() }
+                    ServiceEvent::Error {
+                        message: e.to_string(),
+                    }
                 }
             }
         }
@@ -343,7 +449,9 @@ async fn dispatch_cmd(
             if let Some(h) = cs.take() {
                 h.stop();
             }
-            ServiceEvent::StreamDisconnected { reason: "User left".to_string() }
+            ServiceEvent::StreamDisconnected {
+                reason: "User left".to_string(),
+            }
         }
 
         // ── Pairing code ─────────────────────────────────────────────────────
@@ -351,7 +459,10 @@ async fn dispatch_cmd(
         UiCommand::GeneratePairingCode => {
             let mut pm = state.pairing_manager.write().await;
             let code = pm.generate_code();
-            ServiceEvent::PairingCode { code, expires_in: 120 }
+            ServiceEvent::PairingCode {
+                code,
+                expires_in: 120,
+            }
         }
 
         // ── Kick client ───────────────────────────────────────────────────────
@@ -369,8 +480,17 @@ async fn dispatch_cmd(
             if let Some(h) = state.host_session.lock().await.as_ref() {
                 h.request_keyframe();
             }
-            ServiceEvent::Stats { fps: 0.0, encode_ms: 0.0, latency_ms: 0, bitrate_kbps: 0, client_count: 0,
-                gpu_path_active: METRICS.gpu_path_active.load(std::sync::atomic::Ordering::Relaxed) != 0 }
+            ServiceEvent::Stats {
+                fps: 0.0,
+                encode_ms: 0.0,
+                latency_ms: 0,
+                bitrate_kbps: 0,
+                client_count: 0,
+                gpu_path_active: METRICS
+                    .gpu_path_active
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    != 0,
+            }
         }
 
         // ── Discovery ────────────────────────────────────────────────────────
@@ -397,14 +517,20 @@ async fn dispatch_cmd(
 
             // Merge broadcast results
             for bh in bcast_hosts {
-                if !hosts.iter().any(|h| h.address == bh.address && h.port == bh.port) {
+                if !hosts
+                    .iter()
+                    .any(|h| h.address == bh.address && h.port == bh.port)
+                {
                     hosts.push(bh);
                 }
             }
 
             // Merge TCP scan results
             for th in tcp_hosts {
-                if !hosts.iter().any(|h| h.address == th.address && h.port == th.port) {
+                if !hosts
+                    .iter()
+                    .any(|h| h.address == th.address && h.port == th.port)
+                {
                     hosts.push(th);
                 }
             }
@@ -421,9 +547,13 @@ async fn dispatch_cmd(
         UiCommand::Shutdown => {
             let _ = state.shutdown_tx.send(());
             #[cfg(feature = "player")]
-            let event = ServiceEvent::StreamDisconnected { reason: "Service shutting down".to_string() };
+            let event = ServiceEvent::StreamDisconnected {
+                reason: "Service shutting down".to_string(),
+            };
             #[cfg(not(feature = "player"))]
-            let event = ServiceEvent::Error { message: "Service shutting down".to_string() };
+            let event = ServiceEvent::Error {
+                message: "Service shutting down".to_string(),
+            };
             event
         }
 
@@ -433,24 +563,40 @@ async fn dispatch_cmd(
             if let Some(h) = state.host_session.lock().await.as_ref() {
                 h.set_bitrate(kbps * 1000);
             }
-            ServiceEvent::Stats { fps: 0.0, encode_ms: 0.0, latency_ms: 0, bitrate_kbps: kbps, client_count: 0,
-                gpu_path_active: METRICS.gpu_path_active.load(std::sync::atomic::Ordering::Relaxed) != 0 }
+            ServiceEvent::Stats {
+                fps: 0.0,
+                encode_ms: 0.0,
+                latency_ms: 0,
+                bitrate_kbps: kbps,
+                client_count: 0,
+                gpu_path_active: METRICS
+                    .gpu_path_active
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    != 0,
+            }
         }
 
-        UiCommand::SetPermission { .. } => {
-            ServiceEvent::Error { message: "SetPermission: not yet implemented".to_string() }
-        }
+        UiCommand::SetPermission { .. } => ServiceEvent::Error {
+            message: "SetPermission: not yet implemented".to_string(),
+        },
 
         #[cfg(feature = "player")]
         UiCommand::SendInput { event } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::InputEvent { event }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::InputEvent { event })
+                {
                     error!(error = %e, "Failed to send input to host");
-                    return ServiceEvent::Error { message: e.to_string() };
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
                 }
             }
-            ServiceEvent::RecvStats { fps: 0.0, packet_loss_pct: 0.0 }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+            }
         }
     }
 }
@@ -458,57 +604,102 @@ async fn dispatch_cmd(
 #[cfg(feature = "host")]
 fn host_event_to_service(ev: host_session::HostEvent) -> ServiceEvent {
     match ev {
-        host_session::HostEvent::StreamStarted { hwnd, width, height, port } =>
-            ServiceEvent::ShareStarted { hwnd, width, height, stream_port: port },
-        host_session::HostEvent::StreamStopped { reason } =>
-            ServiceEvent::ShareStopped { reason },
-        host_session::HostEvent::CaptureLost { hwnd } =>
-            ServiceEvent::CaptureLost { hwnd, reason: "Capture lost".to_string() },
+        host_session::HostEvent::StreamStarted {
+            hwnd,
+            width,
+            height,
+            port,
+        } => ServiceEvent::ShareStarted {
+            hwnd,
+            width,
+            height,
+            stream_port: port,
+        },
+        host_session::HostEvent::StreamStopped { reason } => ServiceEvent::ShareStopped { reason },
+        host_session::HostEvent::CaptureLost { hwnd } => ServiceEvent::CaptureLost {
+            hwnd,
+            reason: "Capture lost".to_string(),
+        },
         // Fix: BackendSwitched was incorrectly mapped to ServiceEvent::Error.
         // Parse the backend name strings back to their enum variants.
         host_session::HostEvent::BackendSwitched { from, to } => {
             let parse_backend = |s: &str| match s {
-                "WGC"         => crate::capture::CaptureBackend::WGC,
-                "DDA"         => crate::capture::CaptureBackend::DDA,
-                "DXShared"    => crate::capture::CaptureBackend::DXShared,
+                "WGC" => crate::capture::CaptureBackend::WGC,
+                "DDA" => crate::capture::CaptureBackend::DDA,
+                "DXShared" => crate::capture::CaptureBackend::DXShared,
                 "PrintWindow" => crate::capture::CaptureBackend::PrintWindow,
-                _             => crate::capture::CaptureBackend::PrintWindow, // safe fallback
+                _ => crate::capture::CaptureBackend::PrintWindow, // safe fallback
             };
             ServiceEvent::CaptureBackendSwitched {
-                from:   parse_backend(&from),
-                to:     parse_backend(&to),
+                from: parse_backend(&from),
+                to: parse_backend(&to),
                 reason: format!("Switched from {} to {}", from, to),
             }
         }
         // Wire latency_ms from encode_ms (encode latency is the dominant pipeline latency
         // until Phase 4 adds RTCP round-trip measurement).
-        host_session::HostEvent::Stats { fps, encode_ms, bitrate_kbps, client_count, gpu_path_active } =>
-            ServiceEvent::Stats {
-                fps,
-                encode_ms,
-                latency_ms: encode_ms.round() as u32,
-                bitrate_kbps,
-                client_count,
-                gpu_path_active,
-            },
-        host_session::HostEvent::ClientConnected { client_id, display_name, addr } =>
-            ServiceEvent::ClientConnected { client_id, display_name, addr },
-        host_session::HostEvent::ClientDisconnected { client_id } =>
-            ServiceEvent::ClientDisconnected { client_id },
+        host_session::HostEvent::Stats {
+            fps,
+            encode_ms,
+            bitrate_kbps,
+            client_count,
+            gpu_path_active,
+        } => ServiceEvent::Stats {
+            fps,
+            encode_ms,
+            latency_ms: encode_ms.round() as u32,
+            bitrate_kbps,
+            client_count,
+            gpu_path_active,
+        },
+        host_session::HostEvent::ClientConnected {
+            client_id,
+            display_name,
+            addr,
+        } => ServiceEvent::ClientConnected {
+            client_id,
+            display_name,
+            addr,
+        },
+        host_session::HostEvent::ClientDisconnected { client_id } => {
+            ServiceEvent::ClientDisconnected { client_id }
+        }
     }
 }
 
 #[cfg(feature = "player")]
 fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
     match ev {
-        client_session::ClientEvent::VideoChunk { data, timestamp_us, is_keyframe, width, height } =>
-            ServiceEvent::VideoChunk { data, timestamp_us, is_keyframe, width, height },
-        client_session::ClientEvent::Connected { host_addr, recv_port } =>
-            ServiceEvent::StreamConnected { host_addr, recv_port },
-        client_session::ClientEvent::Disconnected { reason } =>
-            ServiceEvent::StreamDisconnected { reason },
-        client_session::ClientEvent::RecvStats { fps, packet_loss_pct } =>
-            ServiceEvent::RecvStats { fps, packet_loss_pct },
+        client_session::ClientEvent::VideoChunk {
+            data,
+            timestamp_us,
+            is_keyframe,
+            width,
+            height,
+        } => ServiceEvent::VideoChunk {
+            data,
+            timestamp_us,
+            is_keyframe,
+            width,
+            height,
+        },
+        client_session::ClientEvent::Connected {
+            host_addr,
+            recv_port,
+        } => ServiceEvent::StreamConnected {
+            host_addr,
+            recv_port,
+        },
+        client_session::ClientEvent::Disconnected { reason } => {
+            ServiceEvent::StreamDisconnected { reason }
+        }
+        client_session::ClientEvent::RecvStats {
+            fps,
+            packet_loss_pct,
+        } => ServiceEvent::RecvStats {
+            fps,
+            packet_loss_pct,
+        },
     }
 }
 
@@ -518,7 +709,7 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
 /// Runs 50 parallel TCP connect attempts for speed (~3s total per subnet).
 #[cfg(feature = "player")]
 async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
-    use std::net::{TcpStream, SocketAddr, Ipv4Addr};
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -532,8 +723,7 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
     tracing::info!(subnets = ?local_ips, "TCP scan: starting subnet scan");
 
     tokio::task::spawn_blocking(move || {
-        let results: Arc<Mutex<Vec<discovery::DiscoveredHost>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let results: Arc<Mutex<Vec<discovery::DiscoveredHost>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Build list of all IPs to scan across all subnets
         let mut targets: Vec<Ipv4Addr> = Vec::new();
@@ -555,7 +745,9 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
                 let results = Arc::clone(&results);
                 let handle = std::thread::spawn(move || {
                     let addr = SocketAddr::new(target_ip.into(), control_port);
-                    if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
+                    if let Ok(stream) =
+                        TcpStream::connect_timeout(&addr, Duration::from_millis(500))
+                    {
                         drop(stream);
                         let ip_str = target_ip.to_string();
                         let name = format!("Beacon@{}", ip_str);
@@ -589,7 +781,6 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
     .await
     .unwrap_or_default()
 }
-
 
 /// Get all local IPv4 addresses (non-loopback, non-APIPA).
 #[cfg(feature = "player")]

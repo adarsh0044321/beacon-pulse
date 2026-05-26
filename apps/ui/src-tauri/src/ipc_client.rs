@@ -17,9 +17,9 @@
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write, BufWriter};
-use std::sync::{mpsc, Arc, Mutex};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -35,7 +35,7 @@ type PendingSlot = Arc<Mutex<Option<mpsc::SyncSender<Result<Value>>>>>;
 
 pub struct IpcClient {
     #[cfg(windows)]
-    cmd_tx:   mpsc::SyncSender<CmdItem>,
+    cmd_tx: mpsc::SyncSender<CmdItem>,
     #[cfg(windows)]
     event_rx: mpsc::Receiver<Value>,
     #[cfg(windows)]
@@ -48,14 +48,18 @@ impl IpcClient {
         {
             // Bounded channel with capacity 4 — small enough to never accumulate
             // a dangerous backlog, but large enough to absorb brief bursts.
-            let (cmd_tx, cmd_rx)     = mpsc::sync_channel::<CmdItem>(4);
+            let (cmd_tx, cmd_rx) = mpsc::sync_channel::<CmdItem>(4);
             let (event_tx, event_rx) = mpsc::channel::<Value>();
             let connected = Arc::new(AtomicBool::new(false));
             let connected_for_thread = Arc::clone(&connected);
 
             thread::spawn(move || io_thread(pipe_path, cmd_rx, event_tx, connected_for_thread));
 
-            Self { cmd_tx, event_rx, connected }
+            Self {
+                cmd_tx,
+                event_rx,
+                connected,
+            }
         }
         #[cfg(not(windows))]
         Self {}
@@ -80,7 +84,9 @@ impl IpcClient {
             match self.cmd_tx.try_send((cmd, resp_tx)) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(_)) => {
-                    return Err(anyhow!("IPC command queue full — service may be busy or unresponsive"));
+                    return Err(anyhow!(
+                        "IPC command queue full — service may be busy or unresponsive"
+                    ));
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     return Err(anyhow!("IPC I/O thread has died"));
@@ -132,9 +138,7 @@ fn io_thread(
             // Drain again on each retry tick so the Tauri thread never blocks.
             drain_pending_commands(&cmd_rx);
 
-            match OpenOptions::new().read(true).write(true)
-                .open(&pipe_path)
-            {
+            match OpenOptions::new().read(true).write(true).open(&pipe_path) {
                 Ok(p) => break p,
                 Err(_) => thread::sleep(Duration::from_secs(1)),
             }
@@ -171,8 +175,10 @@ fn io_thread(
                     Ok(_) => {}
                 }
                 let trimmed = line.trim();
-                if trimmed.is_empty() { continue; }
-                
+                if trimmed.is_empty() {
+                    continue;
+                }
+
                 let envelope: Value = match serde_json::from_str(trimmed) {
                     Ok(v) => v,
                     Err(_) => continue,
@@ -228,9 +234,7 @@ fn io_thread(
                     continue;
                 }
             };
-            if writer.write_all(line.as_bytes()).is_err()
-                || writer.flush().is_err()
-            {
+            if writer.write_all(line.as_bytes()).is_err() || writer.flush().is_err() {
                 // Clear the slot and send error to the caller
                 if let Ok(mut slot) = pending.lock() {
                     if let Some(tx) = slot.take() {
@@ -304,17 +308,17 @@ fn is_push_event_legacy(val: &Value) -> bool {
         val.get("event").and_then(Value::as_str),
         Some(
             "stats"
-            | "capture_backend_switched"
-            | "render_suspended"
-            | "render_resumed"
-            | "capture_lost"
-            | "capture_recovered"
-            | "client_connected"
-            | "client_disconnected"
-            | "recv_stats"
-            | "video_chunk"
-            | "pairing_code"
-            | "encoder_ready"
+                | "capture_backend_switched"
+                | "render_suspended"
+                | "render_resumed"
+                | "capture_lost"
+                | "capture_recovered"
+                | "client_connected"
+                | "client_disconnected"
+                | "recv_stats"
+                | "video_chunk"
+                | "pairing_code"
+                | "encoder_ready"
         )
     )
 }

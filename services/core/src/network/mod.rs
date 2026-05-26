@@ -2,14 +2,14 @@ pub mod broadcast;
 pub mod discovery;
 #[cfg(feature = "host")]
 pub mod listener;
-pub mod session;
-#[cfg(feature = "host")]
-pub mod udp_stream;
-pub mod rtp;
-#[cfg(feature = "host")]
-pub mod streamer;
 #[cfg(feature = "player")]
 pub mod receiver;
+pub mod rtp;
+pub mod session;
+#[cfg(feature = "host")]
+pub mod streamer;
+#[cfg(feature = "host")]
+pub mod udp_stream;
 
 use serde::{Deserialize, Serialize};
 
@@ -86,8 +86,27 @@ pub struct Permissions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InputMsg {
-    MouseMove { x: f32, y: f32, viewport_w: u32, viewport_h: u32 },
-    MouseButton { button: u8, pressed: bool, x: f32, y: f32, viewport_w: u32, viewport_h: u32 },
-    MouseScroll { delta_x: f32, delta_y: f32 },
-    KeyPress { vk_code: u32, scan_code: u32, pressed: bool },
+    MouseMove {
+        x: f32,
+        y: f32,
+        viewport_w: u32,
+        viewport_h: u32,
+    },
+    MouseButton {
+        button: u8,
+        pressed: bool,
+        x: f32,
+        y: f32,
+        viewport_w: u32,
+        viewport_h: u32,
+    },
+    MouseScroll {
+        delta_x: f32,
+        delta_y: f32,
+    },
+    KeyPress {
+        vk_code: u32,
+        scan_code: u32,
+        pressed: bool,
+    },
 }

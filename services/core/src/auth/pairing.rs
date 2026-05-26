@@ -14,7 +14,7 @@
 //!   - HMAC binds code to the specific challenge session.
 //!   - ring's constant-time verify prevents timing side-channels.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rand::Rng;
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -22,23 +22,23 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 const CODE_EXPIRY_SECS: u64 = 120;
-const CHALLENGE_LEN:    usize = 32;
+const CHALLENGE_LEN: usize = 32;
 
 pub struct PairingManager {
-    current_code:     Option<String>,
-    issued_at:        Option<Instant>,
+    current_code: Option<String>,
+    issued_at: Option<Instant>,
     /// Server-side challenge bytes; cleared after first use or expiry.
     active_challenge: Option<[u8; CHALLENGE_LEN]>,
-    is_custom:        bool,
+    is_custom: bool,
 }
 
 impl PairingManager {
     pub fn new() -> Self {
         Self {
-            current_code:     None,
-            issued_at:        None,
+            current_code: None,
+            issued_at: None,
             active_challenge: None,
-            is_custom:        false,
+            is_custom: false,
         }
     }
 
@@ -47,20 +47,23 @@ impl PairingManager {
         let code: String = rand::thread_rng()
             .gen_range(100_000u32..=999_999u32)
             .to_string();
-        self.current_code     = Some(code.clone());
-        self.issued_at        = Some(Instant::now());
+        self.current_code = Some(code.clone());
+        self.issued_at = Some(Instant::now());
         self.active_challenge = None; // reset any stale challenge
-        self.is_custom        = false;
-        info!("Pairing code generated: {} (expires in {}s)", code, CODE_EXPIRY_SECS);
+        self.is_custom = false;
+        info!(
+            "Pairing code generated: {} (expires in {}s)",
+            code, CODE_EXPIRY_SECS
+        );
         code
     }
 
     /// Set a custom pairing code.
     pub fn set_code(&mut self, code: String) {
-        self.current_code     = Some(code.clone());
-        self.issued_at        = Some(Instant::now());
+        self.current_code = Some(code.clone());
+        self.issued_at = Some(Instant::now());
         self.active_challenge = None;
-        self.is_custom        = true;
+        self.is_custom = true;
         info!("Custom pairing code set: {}", code);
     }
 
@@ -87,20 +90,19 @@ impl PairingManager {
     /// The challenge is invalidated after the first call (success or failure)
     /// to prevent replay attacks within the same session.
     pub fn verify_hmac(&mut self, response_b64: &str) -> bool {
-        let (code, issued_at, challenge) = match (
-            &self.current_code,
-            self.issued_at,
-            &self.active_challenge,
-        ) {
-            (Some(c), Some(i), Some(ch)) => (c.clone(), i, *ch),
-            _ => {
-                warn!("verify_hmac: no active pairing session");
-                return false;
-            }
-        };
+        let (code, issued_at, challenge) =
+            match (&self.current_code, self.issued_at, &self.active_challenge) {
+                (Some(c), Some(i), Some(ch)) => (c.clone(), i, *ch),
+                _ => {
+                    warn!("verify_hmac: no active pairing session");
+                    return false;
+                }
+            };
 
         // Check expiry before doing any crypto
-        if !self.is_custom && Instant::now().duration_since(issued_at) > Duration::from_secs(CODE_EXPIRY_SECS) {
+        if !self.is_custom
+            && Instant::now().duration_since(issued_at) > Duration::from_secs(CODE_EXPIRY_SECS)
+        {
             warn!("Pairing: HMAC challenge expired");
             self.active_challenge = None;
             return false;
@@ -110,7 +112,7 @@ impl PairingManager {
         self.active_challenge = None;
 
         let response = match B64.decode(response_b64) {
-            Ok(r)  => r,
+            Ok(r) => r,
             Err(_) => {
                 warn!("Pairing: invalid base64 in HMAC response");
                 return false;
@@ -119,7 +121,7 @@ impl PairingManager {
 
         let key = hmac::Key::new(hmac::HMAC_SHA256, code.as_bytes());
         match hmac::verify(&key, &challenge, &response) {
-            Ok(())  => {
+            Ok(()) => {
                 info!("Pairing: HMAC verification succeeded");
                 true
             }
@@ -132,15 +134,16 @@ impl PairingManager {
 
     /// Invalidate the current pairing code and challenge.
     pub fn invalidate(&mut self) {
-        self.current_code     = None;
-        self.issued_at        = None;
+        self.current_code = None;
+        self.issued_at = None;
         self.active_challenge = None;
-        self.is_custom        = false;
+        self.is_custom = false;
     }
 
     pub fn has_valid_code(&self) -> bool {
         if let (Some(_), Some(issued_at)) = (&self.current_code, self.issued_at) {
-            self.is_custom || Instant::now().duration_since(issued_at) <= Duration::from_secs(CODE_EXPIRY_SECS)
+            self.is_custom
+                || Instant::now().duration_since(issued_at) <= Duration::from_secs(CODE_EXPIRY_SECS)
         } else {
             false
         }

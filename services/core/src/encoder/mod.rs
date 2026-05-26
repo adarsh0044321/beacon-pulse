@@ -1,7 +1,7 @@
-pub mod yuv;
-pub mod software;
-pub mod hardware;
 pub mod gpu_device;
+pub mod hardware;
+pub mod software;
+pub mod yuv;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ impl Default for EncoderConfig {
             height: 1080,
             bitrate_bps: 20_000_000, // 20 Mbps — sharp on LAN; was 5 Mbps (blurry)
             fps: 60,
-            keyframe_interval: 60,   // IDR every 1s (was 2s) — faster recovery
+            keyframe_interval: 60, // IDR every 1s (was 2s) — faster recovery
             codec: VideoCodec::H264,
         }
     }
@@ -88,10 +88,11 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>> {
                 // Update metrics: 1=NVENC, 2=AMF, 3=QSV
                 let hw_id = match enc.vendor() {
                     hardware::HwVendor::Nvidia => 1,
-                    hardware::HwVendor::Amd   => 2,
-                    hardware::HwVendor::Intel  => 3,
+                    hardware::HwVendor::Amd => 2,
+                    hardware::HwVendor::Intel => 3,
                 };
-                crate::logging::metrics::METRICS.hw_encoder_active
+                crate::logging::metrics::METRICS
+                    .hw_encoder_active
                     .store(hw_id, std::sync::atomic::Ordering::Relaxed);
                 return Ok(Box::new(enc));
             }
@@ -102,7 +103,8 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>> {
     }
 
     // Software fallback
-    crate::logging::metrics::METRICS.hw_encoder_active
+    crate::logging::metrics::METRICS
+        .hw_encoder_active
         .store(0, std::sync::atomic::Ordering::Relaxed);
     Ok(Box::new(software::SoftwareEncoder::new(config)?))
 }

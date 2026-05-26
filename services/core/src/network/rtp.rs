@@ -24,14 +24,14 @@ pub const HEADER_SIZE: usize = 26;
 pub const MAX_PAYLOAD: usize = 1374;
 pub const FLAG_KEYFRAME: u8 = 0x01;
 pub const FLAG_FRAG_END: u8 = 0x02;
-pub const FLAG_PARITY:   u8 = 0x04; // FEC parity packet marker
+pub const FLAG_PARITY: u8 = 0x04; // FEC parity packet marker
 
 // ── RTCP-lite ──────────────────────────────────────────────────────────────
 /// Distinct magic so receivers can tell RTCP from RTP at a glance.
-pub const RTCP_MAGIC:      u32   = 0x4C524350; // "LRCP"
-pub const RTCP_SIZE:       usize = 16;
-pub const RTCP_TYPE_PROBE: u8    = 1; // host → client
-pub const RTCP_TYPE_ACK:   u8    = 2; // client → host
+pub const RTCP_MAGIC: u32 = 0x4C524350; // "LRCP"
+pub const RTCP_SIZE: usize = 16;
+pub const RTCP_TYPE_PROBE: u8 = 1; // host → client
+pub const RTCP_TYPE_ACK: u8 = 2; // client → host
 
 /// Wire layout: [magic:4][type:1][pad:3][timestamp_us:8]
 pub fn build_rtcp(packet_type: u8, timestamp_us: u64) -> [u8; RTCP_SIZE] {
@@ -44,9 +44,13 @@ pub fn build_rtcp(packet_type: u8, timestamp_us: u64) -> [u8; RTCP_SIZE] {
 
 /// Returns `(packet_type, timestamp_us)` or `None` if not an RTCP packet.
 pub fn parse_rtcp(data: &[u8]) -> Option<(u8, u64)> {
-    if data.len() < RTCP_SIZE { return None; }
+    if data.len() < RTCP_SIZE {
+        return None;
+    }
     let magic = u32::from_le_bytes(data[0..4].try_into().ok()?);
-    if magic != RTCP_MAGIC { return None; }
+    if magic != RTCP_MAGIC {
+        return None;
+    }
     let pkt_type = data[4];
     let ts = u64::from_le_bytes(data[8..16].try_into().ok()?);
     Some((pkt_type, ts))
@@ -65,9 +69,13 @@ pub struct RtpPacket {
 }
 
 impl RtpPacket {
-    pub fn is_keyframe(&self) -> bool { self.flags & FLAG_KEYFRAME != 0 }
+    pub fn is_keyframe(&self) -> bool {
+        self.flags & FLAG_KEYFRAME != 0
+    }
     #[allow(dead_code)]
-    pub fn is_last_fragment(&self) -> bool { self.flags & FLAG_FRAG_END != 0 }
+    pub fn is_last_fragment(&self) -> bool {
+        self.flags & FLAG_FRAG_END != 0
+    }
 
     /// Serialize to wire bytes
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -99,14 +107,14 @@ impl RtpPacket {
         if version != VERSION {
             return Err(anyhow!("Unsupported version: {}", version));
         }
-        let flags     = data[5];
-        let seq       = u16::from_le_bytes(data[6..8].try_into()?);
-        let ts        = u64::from_le_bytes(data[8..16].try_into()?);
-        let width     = u16::from_le_bytes(data[16..18].try_into()?);
-        let height    = u16::from_le_bytes(data[18..20].try_into()?);
-        let frag_idx  = u16::from_le_bytes(data[20..22].try_into()?);
-        let frag_tot  = u16::from_le_bytes(data[22..24].try_into()?);
-        let data_len  = u16::from_le_bytes(data[24..26].try_into()?) as usize;
+        let flags = data[5];
+        let seq = u16::from_le_bytes(data[6..8].try_into()?);
+        let ts = u64::from_le_bytes(data[8..16].try_into()?);
+        let width = u16::from_le_bytes(data[16..18].try_into()?);
+        let height = u16::from_le_bytes(data[18..20].try_into()?);
+        let frag_idx = u16::from_le_bytes(data[20..22].try_into()?);
+        let frag_tot = u16::from_le_bytes(data[22..24].try_into()?);
+        let data_len = u16::from_le_bytes(data[24..26].try_into()?) as usize;
 
         if data.len() < HEADER_SIZE + data_len {
             return Err(anyhow!("Truncated payload"));
@@ -139,8 +147,12 @@ pub fn packetize(
 
     for (i, chunk) in chunks.iter().enumerate() {
         let mut flags = 0u8;
-        if is_keyframe { flags |= FLAG_KEYFRAME; }
-        if i == chunks.len() - 1 { flags |= FLAG_FRAG_END; }
+        if is_keyframe {
+            flags |= FLAG_KEYFRAME;
+        }
+        if i == chunks.len() - 1 {
+            flags |= FLAG_FRAG_END;
+        }
 
         packets.push(RtpPacket {
             flags,
@@ -174,7 +186,7 @@ pub fn build_parity_packet(
     frags: &[Vec<u8>],
     frag_total: u16,
 ) -> RtpPacket {
-    let n       = frags.len();
+    let n = frags.len();
     let max_len = frags.iter().map(|p| p.len()).max().unwrap_or(0);
 
     let mut payload = Vec::with_capacity(1 + n * 2 + max_len);
@@ -184,7 +196,9 @@ pub fn build_parity_packet(
     }
     let mut xor = vec![0u8; max_len];
     for f in frags {
-        for (d, &s) in xor.iter_mut().zip(f.iter()) { *d ^= s; }
+        for (d, &s) in xor.iter_mut().zip(f.iter()) {
+            *d ^= s;
+        }
     }
     payload.extend_from_slice(&xor);
 
@@ -194,7 +208,7 @@ pub fn build_parity_packet(
         timestamp_us,
         width,
         height,
-        frag_idx:  frag_total,   // index = N (one past last data frag)
+        frag_idx: frag_total, // index = N (one past last data frag)
         frag_total,
         payload,
     };
@@ -203,12 +217,12 @@ pub fn build_parity_packet(
 }
 
 pub struct Reassembler {
-    frags:            std::collections::HashMap<(u64, u16), Vec<u8>>,
-    pending_total:    std::collections::HashMap<u64, u16>,
+    frags: std::collections::HashMap<(u64, u16), Vec<u8>>,
+    pending_total: std::collections::HashMap<u64, u16>,
     pending_keyframe: std::collections::HashMap<u64, bool>,
-    arrival_us:       std::collections::HashMap<u64, u64>,
+    arrival_us: std::collections::HashMap<u64, u64>,
     /// FEC: (lengths_of_each_covered_frag, xor_data)
-    parity:           std::collections::HashMap<u64, (Vec<u16>, Vec<u8>)>,
+    parity: std::collections::HashMap<u64, (Vec<u16>, Vec<u8>)>,
 }
 
 /// Fragments older than this are considered permanently lost and evicted.
@@ -217,11 +231,11 @@ const STALE_TTL_US: u64 = 2_000_000; // 2 seconds
 impl Reassembler {
     pub fn new() -> Self {
         Self {
-            frags:            std::collections::HashMap::new(),
-            pending_total:    std::collections::HashMap::new(),
+            frags: std::collections::HashMap::new(),
+            pending_total: std::collections::HashMap::new(),
             pending_keyframe: std::collections::HashMap::new(),
-            arrival_us:       std::collections::HashMap::new(),
-            parity:           std::collections::HashMap::new(),
+            arrival_us: std::collections::HashMap::new(),
+            parity: std::collections::HashMap::new(),
         }
     }
 
@@ -234,7 +248,9 @@ impl Reassembler {
         if pkt.flags & FLAG_PARITY != 0 {
             let total = pkt.frag_total;
             self.pending_total.insert(ts, total);
-            self.arrival_us.entry(ts).or_insert_with(crate::telemetry::now_us);
+            self.arrival_us
+                .entry(ts)
+                .or_insert_with(crate::telemetry::now_us);
             if let Some((lens, xor)) = Self::parse_parity_payload(&pkt.payload) {
                 self.parity.insert(ts, (lens, xor));
             }
@@ -244,20 +260,27 @@ impl Reassembler {
 
         // ── Normal data fragment ──────────────────────────────────────────
         self.pending_total.insert(ts, pkt.frag_total);
-        if pkt.is_keyframe() { self.pending_keyframe.insert(ts, true); }
-        self.arrival_us.entry(ts).or_insert_with(crate::telemetry::now_us);
+        if pkt.is_keyframe() {
+            self.pending_keyframe.insert(ts, true);
+        }
+        self.arrival_us
+            .entry(ts)
+            .or_insert_with(crate::telemetry::now_us);
         self.frags.insert((ts, pkt.frag_idx), pkt.payload);
 
         // Evict stale incomplete frames
         let now = crate::telemetry::now_us();
-        let stale: Vec<u64> = self.arrival_us
+        let stale: Vec<u64> = self
+            .arrival_us
             .iter()
             .filter(|(_, &arr)| now.saturating_sub(arr) > STALE_TTL_US)
             .map(|(&k, _)| k)
             .collect();
         for s in stale {
             let tot = self.pending_total.remove(&s).unwrap_or(0);
-            for i in 0..tot { self.frags.remove(&(s, i)); }
+            for i in 0..tot {
+                self.frags.remove(&(s, i));
+            }
             self.pending_keyframe.remove(&s);
             self.arrival_us.remove(&s);
             self.parity.remove(&s);
@@ -266,24 +289,32 @@ impl Reassembler {
 
         let total = *self.pending_total.get(&ts)?;
         let complete = (0..total).all(|i| self.frags.contains_key(&(ts, i)));
-        if complete { return self.assemble(ts); }
+        if complete {
+            return self.assemble(ts);
+        }
 
         // One frag missing + parity available → try XOR recovery
-        if self.parity.contains_key(&ts) { return self.try_recover(ts); }
+        if self.parity.contains_key(&ts) {
+            return self.try_recover(ts);
+        }
         None
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
 
     fn parse_parity_payload(data: &[u8]) -> Option<(Vec<u16>, Vec<u8>)> {
-        if data.is_empty() { return None; }
+        if data.is_empty() {
+            return None;
+        }
         let n = data[0] as usize;
-        if data.len() < 1 + n * 2 { return None; }
+        if data.len() < 1 + n * 2 {
+            return None;
+        }
         let mut lens = Vec::with_capacity(n);
         for i in 0..n {
-            lens.push(u16::from_le_bytes([data[1 + i*2], data[2 + i*2]]));
+            lens.push(u16::from_le_bytes([data[1 + i * 2], data[2 + i * 2]]));
         }
-        Some((lens, data[1 + n*2..].to_vec()))
+        Some((lens, data[1 + n * 2..].to_vec()))
     }
 
     fn try_recover(&mut self, ts: u64) -> Option<(u64, bool, Vec<u8>)> {
@@ -293,22 +324,34 @@ impl Reassembler {
         let missing: Vec<u16> = (0..total)
             .filter(|&i| !self.frags.contains_key(&(ts, i)))
             .collect();
-        if missing.len() != 1 { return None; }
+        if missing.len() != 1 {
+            return None;
+        }
         let m = missing[0] as usize;
-        if m >= lens.len() { return None; }
+        if m >= lens.len() {
+            return None;
+        }
 
         // XOR all present frags to get the missing one
         let mut recovered = xor.clone();
         for i in 0..total {
-            if i as usize == m { continue; }
+            if i as usize == m {
+                continue;
+            }
             if let Some(f) = self.frags.get(&(ts, i)) {
-                for (d, &s) in recovered.iter_mut().zip(f.iter()) { *d ^= s; }
+                for (d, &s) in recovered.iter_mut().zip(f.iter()) {
+                    *d ^= s;
+                }
             }
         }
         recovered.truncate(lens[m] as usize);
 
-        tracing::debug!(ts, missing_frag = m, recovered_len = recovered.len(),
-            "FEC: recovered missing fragment via XOR parity");
+        tracing::debug!(
+            ts,
+            missing_frag = m,
+            recovered_len = recovered.len(),
+            "FEC: recovered missing fragment via XOR parity"
+        );
         self.frags.insert((ts, missing[0]), recovered);
         self.assemble(ts)
     }
@@ -317,7 +360,9 @@ impl Reassembler {
         let total = self.pending_total.remove(&ts)?;
         let mut nal = Vec::new();
         for i in 0..total {
-            if let Some(f) = self.frags.remove(&(ts, i)) { nal.extend_from_slice(&f); }
+            if let Some(f) = self.frags.remove(&(ts, i)) {
+                nal.extend_from_slice(&f);
+            }
         }
         self.arrival_us.remove(&ts);
         self.parity.remove(&ts);
@@ -334,10 +379,14 @@ mod tests {
     /// Minimal deterministic LCG — avoids `rand` crate dependency in tests.
     struct Lcg(u64);
     impl Lcg {
-        fn new(seed: u64) -> Self { Self(seed) }
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
         fn next_f64(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005)
-                           .wrapping_add(1_442_695_040_888_963_407);
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             (self.0 >> 11) as f64 / (1u64 << 53) as f64
         }
         fn next_usize(&mut self, n: usize) -> usize {
@@ -350,7 +399,10 @@ mod tests {
     }
 
     fn packetize_with_parity(
-        nal: &[u8], seq: &mut u16, ts: u64, is_kf: bool,
+        nal: &[u8],
+        seq: &mut u16,
+        ts: u64,
+        is_kf: bool,
     ) -> (Vec<RtpPacket>, RtpPacket) {
         let pkts = packetize(nal, seq, ts, 1920, 1080, is_kf);
         let payloads: Vec<Vec<u8>> = pkts.iter().map(|p| p.payload.clone()).collect();
@@ -362,15 +414,17 @@ mod tests {
     // ── 1: Zero loss — all frames complete ────────────────────────────────────
     #[test]
     fn test_no_loss_all_frames_complete() {
-        let mut r   = Reassembler::new();
+        let mut r = Reassembler::new();
         let mut seq = 0u16;
         let mut done = 0u32;
         for frame_id in 0u64..200 {
-            let ts  = frame_id * 16_667;
+            let ts = frame_id * 16_667;
             let nal = make_frame(2800, frame_id as u8);
             let pkts = packetize(&nal, &mut seq, ts, 1920, 1080, false);
             for p in pkts {
-                if r.feed(p).is_some() { done += 1; }
+                if r.feed(p).is_some() {
+                    done += 1;
+                }
             }
         }
         assert_eq!(done, 200, "All 200 zero-loss frames must complete");
@@ -381,27 +435,38 @@ mod tests {
     fn test_fec_single_fragment_recovery() {
         let mut seq = 0u16;
         for frame_id in 0u64..50 {
-            let ts  = frame_id * 16_667;
+            let ts = frame_id * 16_667;
             let nal = make_frame(3500, frame_id as u8); // → 3 frags
             let (pkts, parity) = packetize_with_parity(&nal, &mut seq, ts, false);
-            if pkts.len() < 2 { continue; }
+            if pkts.len() < 2 {
+                continue;
+            }
 
             for drop_idx in 0..pkts.len() {
                 let mut r = Reassembler::new();
                 let mut recovered = false;
                 for (i, p) in pkts.iter().enumerate() {
-                    if i == drop_idx { continue; }
-                    if r.feed(p.clone()).is_some() { recovered = true; }
-                }
-                if !recovered {
-                    if let Some((_, _, got)) = r.feed(parity.clone()) {
-                        assert_eq!(got, nal,
-                            "FEC data mismatch frame={frame_id} drop={drop_idx}");
+                    if i == drop_idx {
+                        continue;
+                    }
+                    if r.feed(p.clone()).is_some() {
                         recovered = true;
                     }
                 }
-                assert!(recovered,
-                    "FEC FAILED frame={frame_id} drop={drop_idx} frags={}", pkts.len());
+                if !recovered {
+                    if let Some((_, _, got)) = r.feed(parity.clone()) {
+                        assert_eq!(
+                            got, nal,
+                            "FEC data mismatch frame={frame_id} drop={drop_idx}"
+                        );
+                        recovered = true;
+                    }
+                }
+                assert!(
+                    recovered,
+                    "FEC FAILED frame={frame_id} drop={drop_idx} frags={}",
+                    pkts.len()
+                );
             }
         }
     }
@@ -410,33 +475,37 @@ mod tests {
     #[test]
     fn test_double_loss_no_false_recovery() {
         let mut seq = 0u16;
-        let ts  = 99_999u64;
+        let ts = 99_999u64;
         let nal = make_frame(4200, 42); // → 4 frags
         let (pkts, parity) = packetize_with_parity(&nal, &mut seq, ts, false);
         assert!(pkts.len() >= 3, "Need >= 3 frags for this test");
         let mut r = Reassembler::new();
         for (i, p) in pkts.iter().enumerate() {
-            if i == 0 || i == 1 { continue; } // drop 2 frags
+            if i == 0 || i == 1 {
+                continue;
+            } // drop 2 frags
             let _ = r.feed(p.clone());
         }
-        assert!(r.feed(parity).is_none(),
-            "Must NOT recover when 2 fragments are missing");
+        assert!(
+            r.feed(parity).is_none(),
+            "Must NOT recover when 2 fragments are missing"
+        );
     }
 
     // ── 4: Stress — 1000 frames, 5% loss, FEC, GC stability ──────────────────
     #[test]
     fn test_stress_5pct_loss_fec_gc() {
         const FRAMES: u64 = 1_000;
-        const LOSS:   f64 = 0.05;
+        const LOSS: f64 = 0.05;
 
         let mut rng = Lcg::new(0xDEAD_BEEF_CAFE_1337);
-        let mut r   = Reassembler::new();
+        let mut r = Reassembler::new();
         let mut seq = 0u16;
         let (mut completed, mut lost, mut fec) = (0u64, 0u64, 0u64);
 
         for frame_id in 0..FRAMES {
-            let ts  = frame_id * 16_667;
-            let sz  = 1024 + rng.next_usize(4096);
+            let ts = frame_id * 16_667;
+            let sz = 1024 + rng.next_usize(4096);
             let nal = make_frame(sz, (frame_id & 0xFF) as u8);
             let (pkts, parity) = packetize_with_parity(&nal, &mut seq, ts, frame_id == 0);
 
@@ -445,12 +514,18 @@ mod tests {
 
             let mut result = None;
             for (i, p) in pkts.iter().enumerate() {
-                if drops[i] { continue; }
-                if let Some(r) = r.feed(p.clone()) { result = Some(r); }
+                if drops[i] {
+                    continue;
+                }
+                if let Some(r) = r.feed(p.clone()) {
+                    result = Some(r);
+                }
             }
             if result.is_none() {
                 if let Some(res) = r.feed(parity) {
-                    if n_dropped == 1 { fec += 1; }
+                    if n_dropped == 1 {
+                        fec += 1;
+                    }
                     result = Some(res);
                 }
             }
@@ -459,35 +534,47 @@ mod tests {
                 Some((got_ts, _, got_data)) => {
                     assert_eq!(got_ts, ts, "Timestamp mismatch frame {frame_id}");
                     if n_dropped <= 1 {
-                        assert_eq!(got_data, nal,
-                            "Data corruption frame {frame_id} (drops={n_dropped})");
+                        assert_eq!(
+                            got_data, nal,
+                            "Data corruption frame {frame_id} (drops={n_dropped})"
+                        );
                     }
                     completed += 1;
                 }
                 None => {
-                    assert!(n_dropped >= 2,
-                        "Frame {frame_id} NOT completed with only {n_dropped} drops!");
+                    assert!(
+                        n_dropped >= 2,
+                        "Frame {frame_id} NOT completed with only {n_dropped} drops!"
+                    );
                     lost += 1;
                 }
             }
         }
 
-        assert_eq!(completed + lost, FRAMES,
-            "completed + lost must equal FRAMES");
-        assert!(fec > 0,
-            "Expected >= 1 FEC recovery in {FRAMES} frames — got 0");
+        assert_eq!(
+            completed + lost,
+            FRAMES,
+            "completed + lost must equal FRAMES"
+        );
+        assert!(
+            fec > 0,
+            "Expected >= 1 FEC recovery in {FRAMES} frames — got 0"
+        );
 
-        println!("Stress: {FRAMES} frames | ok={completed} lost={lost} fec={fec} | \
-                  actual_loss={:.1}%", lost as f64 / FRAMES as f64 * 100.0);
+        println!(
+            "Stress: {FRAMES} frames | ok={completed} lost={lost} fec={fec} | \
+                  actual_loss={:.1}%",
+            lost as f64 / FRAMES as f64 * 100.0
+        );
     }
 
     // ── 5: Out-of-order delivery ───────────────────────────────────────────────
     #[test]
     fn test_out_of_order_fragments() {
-        let mut r   = Reassembler::new();
+        let mut r = Reassembler::new();
         let mut seq = 0u16;
         let mut rng = Lcg::new(0xCAFE_BABE_1234_5678);
-        let ts  = 1_000_000u64;
+        let ts = 1_000_000u64;
         let nal = make_frame(3000, 77);
         let (mut pkts, _) = packetize_with_parity(&nal, &mut seq, ts, true);
 
@@ -497,7 +584,11 @@ mod tests {
         }
 
         let mut result = None;
-        for p in pkts { if let Some(v) = r.feed(p) { result = Some(v); } }
+        for p in pkts {
+            if let Some(v) = r.feed(p) {
+                result = Some(v);
+            }
+        }
 
         let (_, is_kf, got) = result.expect("Out-of-order frame must complete");
         assert!(is_kf, "Keyframe flag must survive reordering");

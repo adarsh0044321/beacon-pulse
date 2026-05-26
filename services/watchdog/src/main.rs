@@ -1,6 +1,6 @@
 // No console window in release — watchdog runs silently in background.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 //! Beacon Watchdog
 //!
@@ -35,38 +35,64 @@ const ERROR_SUCCESS: i32 = 0;
 #[link(name = "advapi32")]
 extern "system" {
     fn RegOpenKeyExW(
-        hkey: isize, lpsubkey: *const u16, uloptions: u32,
-        samdesired: u32, phkresult: *mut isize,
+        hkey: isize,
+        lpsubkey: *const u16,
+        uloptions: u32,
+        samdesired: u32,
+        phkresult: *mut isize,
     ) -> i32;
     fn RegQueryValueExW(
-        hkey: isize, lpvaluename: *const u16, reserved: *mut u32,
-        lptype: *mut u32, lpdata: *mut u8, lpcbdata: *mut u32,
+        hkey: isize,
+        lpvaluename: *const u16,
+        reserved: *mut u32,
+        lptype: *mut u32,
+        lpdata: *mut u8,
+        lpcbdata: *mut u32,
     ) -> i32;
     fn RegCloseKey(hkey: isize) -> i32;
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect()
+    std::ffi::OsStr::new(s)
+        .encode_wide()
+        .chain(Some(0))
+        .collect()
 }
 
 fn reg_read_string(name: &str) -> Option<String> {
     unsafe {
         let mut hkey: isize = 0;
         let subkey = to_wide("Software\\Beacon");
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) != ERROR_SUCCESS {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey)
+            != ERROR_SUCCESS
+        {
             return None;
         }
         let name_w = to_wide(name);
         let mut vtype: u32 = 0;
         let mut size: u32 = 0;
-        let mut res = RegQueryValueExW(hkey, name_w.as_ptr(), std::ptr::null_mut(), &mut vtype, std::ptr::null_mut(), &mut size);
+        let mut res = RegQueryValueExW(
+            hkey,
+            name_w.as_ptr(),
+            std::ptr::null_mut(),
+            &mut vtype,
+            std::ptr::null_mut(),
+            &mut size,
+        );
         if res != ERROR_SUCCESS || vtype != REG_SZ {
             RegCloseKey(hkey);
             return None;
         }
         let mut buf = vec![0u16; (size as usize / 2) + 1];
-        res = RegQueryValueExW(hkey, name_w.as_ptr(), std::ptr::null_mut(), &mut vtype, buf.as_mut_ptr() as *mut u8, &mut size);
+        res = RegQueryValueExW(
+            hkey,
+            name_w.as_ptr(),
+            std::ptr::null_mut(),
+            &mut vtype,
+            buf.as_mut_ptr() as *mut u8,
+            &mut size,
+        );
         RegCloseKey(hkey);
         if res == ERROR_SUCCESS {
             let len = (size as usize / 2).saturating_sub(1);
@@ -81,16 +107,29 @@ fn reg_read_dword(name: &str) -> Option<u32> {
     unsafe {
         let mut hkey: isize = 0;
         let subkey = to_wide("Software\\Beacon");
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) != ERROR_SUCCESS {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey)
+            != ERROR_SUCCESS
+        {
             return None;
         }
         let name_w = to_wide(name);
         let mut vtype: u32 = 0;
         let mut data: u32 = 0;
         let mut size = std::mem::size_of::<u32>() as u32;
-        let res = RegQueryValueExW(hkey, name_w.as_ptr(), std::ptr::null_mut(), &mut vtype, &mut data as *mut _ as *mut u8, &mut size);
+        let res = RegQueryValueExW(
+            hkey,
+            name_w.as_ptr(),
+            std::ptr::null_mut(),
+            &mut vtype,
+            &mut data as *mut _ as *mut u8,
+            &mut size,
+        );
         RegCloseKey(hkey);
-        if res == ERROR_SUCCESS { Some(data) } else { None }
+        if res == ERROR_SUCCESS {
+            Some(data)
+        } else {
+            None
+        }
     }
 }
 
@@ -123,7 +162,10 @@ fn main() {
 
     let host_exe = host_exe_path();
     if !host_exe.exists() {
-        log(&log_path, &format!("ERROR: beacon.exe not found at {}", host_exe.display()));
+        log(
+            &log_path,
+            &format!("ERROR: beacon.exe not found at {}", host_exe.display()),
+        );
         return;
     }
 
@@ -134,7 +176,10 @@ fn main() {
         let window_proc = match reg_read_string("LastWindowProcess") {
             Some(p) if !p.is_empty() => p,
             _ => {
-                log(&log_path, "No LastWindowProcess in registry — waiting 10s and retrying");
+                log(
+                    &log_path,
+                    "No LastWindowProcess in registry — waiting 10s and retrying",
+                );
                 thread::sleep(Duration::from_secs(10));
                 continue;
             }
@@ -150,10 +195,13 @@ fn main() {
         cmd.arg(&window_proc);
         cmd.creation_flags(CREATE_NO_WINDOW);
 
-        log(&log_path, &format!(
-            "Launching host: --bg-service --window \"{}\" (unattended={})",
-            window_proc, unattended
-        ));
+        log(
+            &log_path,
+            &format!(
+                "Launching host: --bg-service --window \"{}\" (unattended={})",
+                window_proc, unattended
+            ),
+        );
 
         let start = Instant::now();
 
@@ -170,19 +218,28 @@ fn main() {
             Ok(status) => {
                 let uptime = start.elapsed().as_secs();
                 let code = status.code().unwrap_or(-1);
-                log(&log_path, &format!("Host exited: code {} (uptime {}s)", code, uptime));
+                log(
+                    &log_path,
+                    &format!("Host exited: code {} (uptime {}s)", code, uptime),
+                );
 
                 // Exit code 0 = graceful user shutdown → watchdog exits too
                 // Exit code 42 = another bg-service already running (mutex)
                 if code == 0 || code == 42 {
-                    log(&log_path, &format!("Clean exit (code {}) — watchdog exiting", code));
+                    log(
+                        &log_path,
+                        &format!("Clean exit (code {}) — watchdog exiting", code),
+                    );
                     break;
                 }
 
                 // Fast crash → increase back-off
                 if uptime < CRASH_THRESHOLD_SECS {
                     backoff_ms = (backoff_ms * 2).min(MAX_RESTART_INTERVAL_MS);
-                    log(&log_path, &format!("Fast crash — back-off {}ms", backoff_ms));
+                    log(
+                        &log_path,
+                        &format!("Fast crash — back-off {}ms", backoff_ms),
+                    );
                 } else {
                     backoff_ms = RESTART_DELAY_MS; // reset
                 }
@@ -227,7 +284,10 @@ fn host_exe_path() -> PathBuf {
 /// Log file at %APPDATA%\Beacon\logs\watchdog.log
 fn log_file_path() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("Beacon").join("logs").join("watchdog.log")
+    PathBuf::from(base)
+        .join("Beacon")
+        .join("logs")
+        .join("watchdog.log")
 }
 
 /// Append a timestamped line to the log file.

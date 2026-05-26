@@ -3,20 +3,18 @@
 
 use anyhow::Result;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
-use tracing::info;
 use once_cell::sync::Lazy;
+use tracing::info;
 
 use super::MDNS_SERVICE_TYPE;
 
-static GLOBAL_DAEMON: Lazy<Option<ServiceDaemon>> = Lazy::new(|| {
-    ServiceDaemon::new().ok()
-});
+static GLOBAL_DAEMON: Lazy<Option<ServiceDaemon>> = Lazy::new(|| ServiceDaemon::new().ok());
 
 // ── Advertiser ────────────────────────────────────────────────────────────────
 
 pub struct MdnsAdvertiser {
     service_name: String,
-    port:         u16,
+    port: u16,
 }
 
 impl MdnsAdvertiser {
@@ -45,7 +43,7 @@ impl MdnsAdvertiser {
             MDNS_SERVICE_TYPE,
             &self.service_name,
             &format!("{}.local.", hostname),
-            "",        // IP: mdns-sd resolves local interface addresses automatically
+            "", // IP: mdns-sd resolves local interface addresses automatically
             self.port,
             Some(props),
         )
@@ -90,8 +88,7 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
             .browse(MDNS_SERVICE_TYPE)
             .map_err(|e| anyhow::anyhow!("browse: {}", e))?;
 
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs(TIMEOUT_SECS);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(TIMEOUT_SECS);
 
         let mut hosts: Vec<DiscoveredHost> = Vec::new();
 
@@ -115,7 +112,7 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
                         // Deduplicate by (address, port).
                         if !hosts.iter().any(|h| h.address == addr && h.port == port) {
                             hosts.push(DiscoveredHost {
-                                name:    info.get_hostname().to_string(),
+                                name: info.get_hostname().to_string(),
                                 address: addr,
                                 port,
                                 version: info
@@ -141,9 +138,9 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
     .await
     {
         Ok(Ok(Ok(hosts))) => Ok(hosts),
-        Ok(Ok(Err(e)))    => Err(e),
-        Ok(Err(e))        => Err(anyhow::anyhow!("browse task panicked: {}", e)),
-        Err(_)            => Ok(Vec::new()), // outer timeout — non-fatal
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(e)) => Err(anyhow::anyhow!("browse task panicked: {}", e)),
+        Err(_) => Ok(Vec::new()), // outer timeout — non-fatal
     }
 }
 
@@ -151,9 +148,9 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveredHost {
-    pub name:    String,
+    pub name: String,
     pub address: String,
-    pub port:    u16,
+    pub port: u16,
     /// Protocol version from TXT record. `None` if host is an older build.
     pub version: Option<String>,
 }

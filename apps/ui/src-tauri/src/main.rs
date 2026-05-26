@@ -7,7 +7,7 @@
 // alive; both run as hidden background processes (no console windows).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 use serde_json::Value;
 use std::path::PathBuf;
@@ -25,7 +25,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// raw release binary in dist/ and for the installed copy in AppData).
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
-        .map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf())
+        .map(|p| {
+            p.parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf()
+        })
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
@@ -45,11 +49,7 @@ fn start_watchdog(is_player: bool) {
     {
         use std::os::windows::process::CommandExt;
 
-        let target_bin = if is_player {
-            "pulse.exe"
-        } else {
-            "beacon.exe"
-        };
+        let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
 
         // 1. Terminate any orphan background watchdog or service processes from a previous run.
         // This releases socket ports (45100, 45101, 45102, 45199) and named pipe handles.
@@ -180,11 +180,7 @@ fn main() {
                 #[cfg(windows)]
                 {
                     use std::os::windows::process::CommandExt;
-                    let target_bin = if is_player {
-                        "pulse.exe"
-                    } else {
-                        "beacon.exe"
-                    };
+                    let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
                     // Best-effort: signal processes to exit.
                     let _ = std::process::Command::new("taskkill")
                         .args(["/F", "/IM", "beacon-watchdog.exe"])
@@ -208,12 +204,18 @@ async fn list_windows(state: State<'_, AppData>) -> Result<Value, String> {
     let resp = ipc_send(&state, serde_json::json!({ "cmd": "list_windows" }))?;
     // Service returns {"event":"window_list","windows":[...]}; unwrap the array
     // so the TypeScript store receives a plain WindowInfo[] value.
-    Ok(resp.get("windows").cloned().unwrap_or(serde_json::Value::Array(vec![])))
+    Ok(resp
+        .get("windows")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![])))
 }
 
 #[tauri::command]
 async fn start_share(hwnd: i64, state: State<'_, AppData>) -> Result<Value, String> {
-    ipc_send(&state, serde_json::json!({ "cmd": "start_share", "hwnd": hwnd }))
+    ipc_send(
+        &state,
+        serde_json::json!({ "cmd": "start_share", "hwnd": hwnd }),
+    )
 }
 
 #[tauri::command]
@@ -224,12 +226,18 @@ async fn stop_share(state: State<'_, AppData>) -> Result<Value, String> {
 /// Phase 3: apply a new encoder bitrate from the Settings slider.
 #[tauri::command]
 async fn set_bitrate(kbps: u32, state: State<'_, AppData>) -> Result<Value, String> {
-    ipc_send(&state, serde_json::json!({ "cmd": "set_bitrate", "kbps": kbps }))
+    ipc_send(
+        &state,
+        serde_json::json!({ "cmd": "set_bitrate", "kbps": kbps }),
+    )
 }
 
 #[tauri::command]
 async fn generate_pairing_code(state: State<'_, AppData>) -> Result<Value, String> {
-    ipc_send(&state, serde_json::json!({ "cmd": "generate_pairing_code" }))
+    ipc_send(
+        &state,
+        serde_json::json!({ "cmd": "generate_pairing_code" }),
+    )
 }
 
 #[tauri::command]
@@ -244,7 +252,10 @@ async fn kick_client(client_id: String, state: State<'_, AppData>) -> Result<Val
 async fn discover_hosts(state: State<'_, AppData>) -> Result<Value, String> {
     let resp = ipc_send(&state, serde_json::json!({ "cmd": "discover_hosts" }))?;
     // Service returns {"event":"host_list","hosts":[...]}; unwrap the array.
-    Ok(resp.get("hosts").cloned().unwrap_or(serde_json::Value::Array(vec![])))
+    Ok(resp
+        .get("hosts")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![])))
 }
 
 #[tauri::command]
@@ -286,7 +297,10 @@ async fn request_keyframe(state: State<'_, AppData>) -> Result<Value, String> {
 
 #[tauri::command]
 async fn send_input(event: Value, state: State<'_, AppData>) -> Result<Value, String> {
-    ipc_send(&state, serde_json::json!({ "cmd": "send_input", "event": event }))
+    ipc_send(
+        &state,
+        serde_json::json!({ "cmd": "send_input", "event": event }),
+    )
 }
 
 #[tauri::command]

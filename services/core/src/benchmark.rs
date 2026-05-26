@@ -10,15 +10,15 @@
 //! │ [BENCH] Backend: WGC | Frame: 1920×1080 | Stale: 0                 │
 //! └──────────────────────────────────────────────────────────────────────┘
 
-use std::time::{Duration, Instant};
 use anyhow::Result;
-use tracing::{info, warn};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::unbounded_channel;
+use tracing::{info, warn};
 
-use crate::capture::window_list;
 use crate::capture::capture_manager::{CaptureManager, PersistentCaptureConfig};
+use crate::capture::window_list;
 use crate::encoder::{create_encoder, EncoderConfig};
-use crate::telemetry::{FrameMetadata, StatsAccumulator, now_us, BackendId};
+use crate::telemetry::{now_us, BackendId, FrameMetadata, StatsAccumulator};
 
 /// Run the benchmark. Duration defaults to 10 seconds.
 pub fn run(duration_secs: u64) -> Result<()> {
@@ -33,11 +33,12 @@ pub fn run(duration_secs: u64) -> Result<()> {
     }
 
     // Choose the largest window for a realistic workload
-    let target = windows.iter()
-        .max_by_key(|w| w.width * w.height)
-        .unwrap();
+    let target = windows.iter().max_by_key(|w| w.width * w.height).unwrap();
 
-    println!("Target window: '{}' ({})", target.title, target.process_name);
+    println!(
+        "Target window: '{}' ({})",
+        target.title, target.process_name
+    );
     println!("Resolution:    {}×{}", target.width, target.height);
     println!("App kind:      {:?}", target.app_kind);
     println!("Backend:       WGC → DDA (fallback)\n");
@@ -66,7 +67,10 @@ pub fn run(duration_secs: u64) -> Result<()> {
     let bench_start = Instant::now();
     let mut last_print = Instant::now();
 
-    println!("[BENCH] Running for {}s — press Ctrl+C to stop early\n", duration_secs);
+    println!(
+        "[BENCH] Running for {}s — press Ctrl+C to stop early\n",
+        duration_secs
+    );
 
     while bench_start.elapsed() < Duration::from_secs(duration_secs) {
         // Capture
@@ -115,7 +119,9 @@ pub fn run(duration_secs: u64) -> Result<()> {
                 meta.packet_send_ts = now_us(); // simulate send
                 stats.record(&meta, packet.data.len());
             }
-            Ok(None) => { dropped += 1; }
+            Ok(None) => {
+                dropped += 1;
+            }
             Err(e) => {
                 warn!("[BENCH] Encode error: {}", e);
                 dropped += 1;
@@ -131,7 +137,8 @@ pub fn run(duration_secs: u64) -> Result<()> {
             );
             println!(
                 "[BENCH] pipeline={:6}µs  dropped={}  bitrate={:.2}Mbps  backend={:?}",
-                s.avg_pipeline_us, s.dropped_frames,
+                s.avg_pipeline_us,
+                s.dropped_frames,
                 s.bitrate_bps as f64 / 1_000_000.0,
                 s.backend
             );

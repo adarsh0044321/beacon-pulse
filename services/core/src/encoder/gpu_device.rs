@@ -54,7 +54,9 @@ impl SharedGpuDevice {
     /// Retained for future `ResetDevice` calls on device-lost events.
     #[cfg(windows)]
     #[allow(dead_code)]
-    pub fn mf_token(&self) -> u32 { self.inner.token }
+    pub fn mf_token(&self) -> u32 {
+        self.inner.token
+    }
 }
 
 // SAFETY: D3D11 devices are inherently free-threaded (not created with
@@ -67,12 +69,12 @@ unsafe impl Sync for SharedGpuDevice {}
 
 #[cfg(windows)]
 struct GpuDeviceInner {
-    device:  windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
     context: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
-    mgr:     windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager,
+    mgr: windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager,
     /// Reset token — needed for `IMFDXGIDeviceManager::ResetDevice` after device-lost.
     #[allow(dead_code)]
-    token:   u32,
+    token: u32,
 }
 
 #[cfg(windows)]
@@ -80,34 +82,41 @@ impl GpuDeviceInner {
     fn create() -> Result<Self> {
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
         use windows::Win32::Graphics::Direct3D11::{
-            D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
-            ID3D11Device, ID3D11DeviceContext,
+            D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            D3D11_SDK_VERSION,
         };
         use windows::Win32::Media::MediaFoundation::{
-            IMFDXGIDeviceManager, MFCreateDXGIDeviceManager,
-            MFStartup, MFSTARTUP_NOSOCKET, MF_VERSION,
+            IMFDXGIDeviceManager, MFCreateDXGIDeviceManager, MFStartup, MFSTARTUP_NOSOCKET,
+            MF_VERSION,
         };
 
-        unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).ok(); }
+        unsafe {
+            MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET).ok();
+        }
 
         let mut d3d: Option<ID3D11Device> = None;
         let mut ctx: Option<ID3D11DeviceContext> = None;
         unsafe {
             D3D11CreateDevice(
-                None, D3D_DRIVER_TYPE_HARDWARE, None,
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                None,
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None, D3D11_SDK_VERSION,
-                Some(&mut d3d), None, Some(&mut ctx),
-            ).context("SharedGpuDevice: D3D11CreateDevice")?;
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut d3d),
+                None,
+                Some(&mut ctx),
+            )
+            .context("SharedGpuDevice: D3D11CreateDevice")?;
         }
-        let device  = d3d.unwrap();
+        let device = d3d.unwrap();
         let context = ctx.unwrap();
 
         let mut token: u32 = 0;
         let mut mgr: Option<IMFDXGIDeviceManager> = None;
         unsafe {
-            MFCreateDXGIDeviceManager(&mut token, &mut mgr)
-                .context("MFCreateDXGIDeviceManager")?;
+            MFCreateDXGIDeviceManager(&mut token, &mut mgr).context("MFCreateDXGIDeviceManager")?;
         }
         let mgr = mgr.unwrap();
         unsafe {
@@ -115,6 +124,11 @@ impl GpuDeviceInner {
                 .context("IMFDXGIDeviceManager::ResetDevice")?;
         }
 
-        Ok(Self { device, context, mgr, token })
+        Ok(Self {
+            device,
+            context,
+            mgr,
+            token,
+        })
     }
 }

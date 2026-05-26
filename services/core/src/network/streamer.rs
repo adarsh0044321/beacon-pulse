@@ -16,9 +16,9 @@
 //!   - Client RwLock snapshotted before every `.await`.
 //!   - Bounded channel + try_send in encoder prevents memory runaway.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -26,13 +26,11 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use super::rtp::{
+    self, build_parity_packet, build_rtcp, parse_rtcp, RTCP_TYPE_ACK, RTCP_TYPE_PROBE,
+};
 use crate::encoder::EncodedPacket;
 use crate::logging::metrics::METRICS;
-use super::rtp::{
-    self, build_rtcp, parse_rtcp,
-    build_parity_packet,
-    RTCP_TYPE_PROBE, RTCP_TYPE_ACK,
-};
 
 pub const STREAM_QUEUE_CAP: usize = 32;
 
@@ -44,46 +42,45 @@ pub struct StreamClient {
 }
 
 pub struct UdpStreamer {
-    packet_rx:    mpsc::Receiver<EncodedPacket>,
-    clients:      Arc<RwLock<HashMap<String, StreamClient>>>,
-    socket:       UdpSocket,
-    seq:          u16,
+    packet_rx: mpsc::Receiver<EncodedPacket>,
+    clients: Arc<RwLock<HashMap<String, StreamClient>>>,
+    socket: UdpSocket,
+    seq: u16,
 }
 
 impl UdpStreamer {
     pub fn new(
         bind_port: u16,
         packet_rx: mpsc::Receiver<EncodedPacket>,
-        clients:   Arc<RwLock<HashMap<String, StreamClient>>>,
+        clients: Arc<RwLock<HashMap<String, StreamClient>>>,
     ) -> Result<Self> {
         let bind_addr = format!("0.0.0.0:{}", bind_port);
-        let std_sock  = std::net::UdpSocket::bind(&bind_addr)
+        let std_sock = std::net::UdpSocket::bind(&bind_addr)
             .with_context(|| format!("UDP stream bind failed on {}", bind_addr))?;
-        std_sock.set_nonblocking(true)
+        std_sock
+            .set_nonblocking(true)
             .context("Failed to set UDP socket non-blocking")?;
-        let socket = UdpSocket::from_std(std_sock)
-            .context("tokio UdpSocket conversion failed")?;
+        let socket = UdpSocket::from_std(std_sock).context("tokio UdpSocket conversion failed")?;
 
         info!(port = bind_port, "UDP stream socket bound (async)");
-        Ok(Self { packet_rx, clients, socket, seq: 0 })
+        Ok(Self {
+            packet_rx,
+            clients,
+            socket,
+            seq: 0,
+        })
     }
 
     // ── Client management (static helpers) ────────────────────────────────
 
-    pub fn add_client(
-        clients: &Arc<RwLock<HashMap<String, StreamClient>>>,
-        client: StreamClient,
-    ) {
+    pub fn add_client(clients: &Arc<RwLock<HashMap<String, StreamClient>>>, client: StreamClient) {
         let addr = client.addr;
-        let id   = client.session_id.clone();
+        let id = client.session_id.clone();
         clients.write().unwrap().insert(id.clone(), client);
         info!(session_id = %id, client_addr = %addr, "Stream client registered");
     }
 
-    pub fn remove_client(
-        clients: &Arc<RwLock<HashMap<String, StreamClient>>>,
-        session_id: &str,
-    ) {
+    pub fn remove_client(clients: &Arc<RwLock<HashMap<String, StreamClient>>>, session_id: &str) {
         if clients.write().unwrap().remove(session_id).is_some() {
             info!(session_id = %session_id, "Stream client removed");
         }
@@ -126,12 +123,11 @@ impl UdpStreamer {
     // ── RTCP RTT probing ──────────────────────────────────────────────────
 
     async fn send_rtcp_probes(&mut self) {
-        let ts    = crate::telemetry::now_us();
+        let ts = crate::telemetry::now_us();
         let probe = build_rtcp(RTCP_TYPE_PROBE, ts);
         // Snapshot clients before await
-        let clients: Vec<StreamClient> = {
-            self.clients.read().unwrap().values().cloned().collect()
-        };
+        let clients: Vec<StreamClient> =
+            { self.clients.read().unwrap().values().cloned().collect() };
         for client in &clients {
             if let Err(e) = self.socket.send_to(&probe, client.addr).await {
                 warn!(client = %client.addr, error = %e, "RTCP probe send failed");
@@ -146,7 +142,9 @@ impl UdpStreamer {
         while let Ok((n, _src)) = self.socket.try_recv_from(&mut buf) {
             if let Some((RTCP_TYPE_ACK, echo_ts)) = parse_rtcp(&buf[..n]) {
                 let rtt_us = crate::telemetry::now_us().saturating_sub(echo_ts);
-                METRICS.rtt_us.store(rtt_us, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .rtt_us
+                    .store(rtt_us, std::sync::atomic::Ordering::Relaxed);
                 debug!(rtt_us, "RTCP RTT measured");
             }
         }
@@ -160,17 +158,18 @@ impl UdpStreamer {
             &packet.data,
             &mut self.seq,
             packet.timestamp_us,
-            packet.width  as u16,
+            packet.width as u16,
             packet.height as u16,
             packet.is_keyframe,
         );
         let frag_total = rtp_packets.len() as u16;
 
         // 2. Snapshot clients before first await
-        let client_list: Vec<StreamClient> = {
-            self.clients.read().unwrap().values().cloned().collect()
-        };
-        if client_list.is_empty() { return; }
+        let client_list: Vec<StreamClient> =
+            { self.clients.read().unwrap().values().cloned().collect() };
+        if client_list.is_empty() {
+            return;
+        }
 
         // 3. Collect raw payloads for FEC parity (before we move RtpPacket into bytes)
         let frag_payloads: Vec<Vec<u8>> = rtp_packets.iter().map(|p| p.payload.clone()).collect();
@@ -182,7 +181,7 @@ impl UdpStreamer {
         let parity_pkt = build_parity_packet(
             &mut self.seq,
             packet.timestamp_us,
-            packet.width  as u16,
+            packet.width as u16,
             packet.height as u16,
             &frag_payloads,
             frag_total,
@@ -190,20 +189,26 @@ impl UdpStreamer {
         let parity_wire = parity_pkt.to_bytes();
 
         // 6. Broadcast data fragments + parity to all clients
-        let total_bytes: usize = wire_frames.iter().map(|w| w.len()).sum::<usize>()
-            + parity_wire.len();
+        let total_bytes: usize =
+            wire_frames.iter().map(|w| w.len()).sum::<usize>() + parity_wire.len();
 
         for client in &client_list {
             // Data fragments
             for wire in &wire_frames {
                 match self.socket.send_to(wire, client.addr).await {
                     Ok(sent) => {
-                        METRICS.bytes_sent  .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
-                        METRICS.packets_sent.fetch_add(1,            std::sync::atomic::Ordering::Relaxed);
+                        METRICS
+                            .bytes_sent
+                            .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
+                        METRICS
+                            .packets_sent
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                     Err(e) => {
                         warn!(session_id = %client.session_id, error = %e, "UDP send failed");
-                        METRICS.send_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        METRICS
+                            .send_errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
@@ -215,9 +220,9 @@ impl UdpStreamer {
 
         debug!(
             is_keyframe = packet.is_keyframe,
-            frags       = frag_total,
-            bytes       = total_bytes,
-            seq         = self.seq,
+            frags = frag_total,
+            bytes = total_bytes,
+            seq = self.seq,
             "Packet + FEC parity sent to {} clients",
             client_list.len(),
         );

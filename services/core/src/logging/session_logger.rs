@@ -19,11 +19,13 @@ impl SessionId {
     pub fn new() -> Self {
         // Format: sess_XXXX (last 4 chars of UUID)
         let id = Uuid::new_v4().to_string();
-        let short = &id[id.len()-8..];
+        let short = &id[id.len() - 8..];
         Self(format!("sess_{}", short))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl std::fmt::Display for SessionId {

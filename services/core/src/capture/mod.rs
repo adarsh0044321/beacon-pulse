@@ -1,8 +1,8 @@
-pub mod window_list;
-pub mod wgc;
-pub mod dda;
 pub mod capture_manager;
 pub mod compatibility;
+pub mod dda;
+pub mod wgc;
+pub mod window_list;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -19,9 +19,9 @@ pub struct GpuTextureInner {
     pub texture: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
     /// Dimensions stored for validation / debugging; the encoder reads from its own config.
     #[allow(dead_code)]
-    pub width:   u32,
+    pub width: u32,
     #[allow(dead_code)]
-    pub height:  u32,
+    pub height: u32,
 }
 
 #[cfg(windows)]
@@ -30,7 +30,9 @@ unsafe impl Send for GpuTexture {}
 unsafe impl Sync for GpuTexture {}
 #[cfg(windows)]
 impl Clone for GpuTexture {
-    fn clone(&self) -> Self { GpuTexture(self.0.clone()) }
+    fn clone(&self) -> Self {
+        GpuTexture(self.0.clone())
+    }
 }
 
 /// Represents a capturable application window
@@ -53,7 +55,7 @@ pub struct WindowInfo {
 pub enum AppKind {
     Win32,
     UWP,
-    Chromium,   // Chrome, Edge, Electron, etc.
+    Chromium, // Chrome, Edge, Electron, etc.
     DirectX,
     OpenGL,
     Vulkan,
@@ -108,12 +110,34 @@ pub trait WindowCapture: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CaptureEvent {
-    BackendSwitched { from: CaptureBackend, to: CaptureBackend, reason: String },
-    WindowMinimized { hwnd: isize },
-    WindowRestored { hwnd: isize },
-    WindowMoved { hwnd: isize, monitor: u32 },
-    RenderSuspended { hwnd: isize, app_kind: AppKind },
-    RenderResumed { hwnd: isize },
-    CaptureLost { hwnd: isize, reason: String },
-    CaptureRecovered { hwnd: isize, backend: CaptureBackend },
+    BackendSwitched {
+        from: CaptureBackend,
+        to: CaptureBackend,
+        reason: String,
+    },
+    WindowMinimized {
+        hwnd: isize,
+    },
+    WindowRestored {
+        hwnd: isize,
+    },
+    WindowMoved {
+        hwnd: isize,
+        monitor: u32,
+    },
+    RenderSuspended {
+        hwnd: isize,
+        app_kind: AppKind,
+    },
+    RenderResumed {
+        hwnd: isize,
+    },
+    CaptureLost {
+        hwnd: isize,
+        reason: String,
+    },
+    CaptureRecovered {
+        hwnd: isize,
+        backend: CaptureBackend,
+    },
 }

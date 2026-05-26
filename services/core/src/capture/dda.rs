@@ -12,7 +12,7 @@
 //! The PrintWindow path is a universal fallback that works for minimised Win32
 //! windows and windows that block DXGI duplication (e.g. DRM surfaces).
 
-use super::{CapturedFrame, CaptureBackend, WindowCapture};
+use super::{CaptureBackend, CapturedFrame, WindowCapture};
 use anyhow::{anyhow, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
@@ -29,11 +29,11 @@ enum DdaMode {
 }
 
 pub struct DdaCapture {
-    hwnd:    isize,
-    width:   u32,
-    height:  u32,
+    hwnd: isize,
+    width: u32,
+    height: u32,
     running: bool,
-    mode:    DdaMode,
+    mode: DdaMode,
 
     #[cfg(windows)]
     dxgi: Option<DxgiState>,
@@ -45,12 +45,12 @@ pub struct DdaCapture {
 struct DxgiState {
     /// Kept alive to maintain the D3D11 device lifetime — do not remove.
     #[allow(dead_code)]
-    device:         windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    context:        windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
-    duplication:    windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication,
-    staging:        windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-    width:          u32,
-    height:         u32,
+    device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    context: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+    duplication: windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication,
+    staging: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+    width: u32,
+    height: u32,
 }
 
 // ── DdaCapture impl ───────────────────────────────────────────────────────────
@@ -58,11 +58,11 @@ struct DxgiState {
 impl DdaCapture {
     pub fn new() -> Self {
         Self {
-            hwnd:    0,
-            width:   0,
-            height:  0,
+            hwnd: 0,
+            width: 0,
+            height: 0,
             running: false,
-            mode:    DdaMode::PrintWindow, // start conservative; upgrade in start()
+            mode: DdaMode::PrintWindow, // start conservative; upgrade in start()
             #[cfg(windows)]
             dxgi: None,
         }
@@ -72,20 +72,19 @@ impl DdaCapture {
     /// Returns Ok(Some(DxgiState)) on success, Ok(None) if DDA is unavailable.
     #[cfg(windows)]
     fn try_init_dxgi(hwnd: isize, w: u32, h: u32) -> Result<Option<DxgiState>> {
+        use windows::core::Interface;
+        use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
         use windows::Win32::Graphics::Direct3D11::{
-            D3D11CreateDevice, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-            D3D11_CPU_ACCESS_READ, D3D11_BIND_FLAG,
-        };
-        use windows::Win32::Graphics::Dxgi::{
-            IDXGIDevice, IDXGIAdapter, IDXGIOutput, IDXGIOutput1,
-            DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+            D3D11CreateDevice, D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG,
+            D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
         };
         use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Dxgi::{
+            IDXGIAdapter, IDXGIDevice, IDXGIOutput, IDXGIOutput1,
+            DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+        };
         use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
-        use windows::core::Interface;
 
         unsafe {
             // Find which monitor the window is on.
@@ -107,8 +106,8 @@ impl DdaCapture {
                 Some(&mut feature_level),
                 Some(&mut context),
             )?;
-            let device   = device.ok_or_else(|| anyhow!("D3D11CreateDevice returned None"))?;
-            let context  = context.ok_or_else(|| anyhow!("D3D11 context None"))?;
+            let device = device.ok_or_else(|| anyhow!("D3D11CreateDevice returned None"))?;
+            let context = context.ok_or_else(|| anyhow!("D3D11 context None"))?;
 
             // Walk adapters → outputs → attempt AcquireDuplication.
             let dxgi_device: IDXGIDevice = device.cast()?;
@@ -128,25 +127,35 @@ impl DdaCapture {
 
             // Create a staging texture for CPU readback.
             let desc = D3D11_TEXTURE2D_DESC {
-                Width:          w,
-                Height:         h,
-                MipLevels:      1,
-                ArraySize:      1,
-                Format:         DXGI_FORMAT_B8G8R8A8_UNORM,
-                SampleDesc:     windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
-                    Count: 1, Quality: 0,
+                Width: w,
+                Height: h,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
                 },
-                Usage:          D3D11_USAGE_STAGING,
-                BindFlags:      D3D11_BIND_FLAG(0).0 as u32,
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: D3D11_BIND_FLAG(0).0 as u32,
                 CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                MiscFlags:      windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0 as u32,
+                MiscFlags: windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0
+                    as u32,
             };
             let mut staging = None;
             device.CreateTexture2D(&desc, None, Some(&mut staging))?;
-            let staging = staging.ok_or_else(|| anyhow!("staging texture creation returned None"))?;
+            let staging =
+                staging.ok_or_else(|| anyhow!("staging texture creation returned None"))?;
 
             debug!(w, h, "DXGI OutputDuplication initialised");
-            Ok(Some(DxgiState { device, context, duplication, staging, width: w, height: h }))
+            Ok(Some(DxgiState {
+                device,
+                context,
+                duplication,
+                staging,
+                width: w,
+                height: h,
+            }))
         }
     }
 
@@ -155,29 +164,27 @@ impl DdaCapture {
     /// Returns Err on ACCESS_LOST so the caller can tear down and fall back.
     #[cfg(windows)]
     fn dxgi_next_frame(dxgi: &DxgiState) -> Result<Option<Vec<u8>>> {
-        use windows::Win32::Graphics::Dxgi::{
-            DXGI_OUTDUPL_FRAME_INFO,
-            DXGI_ERROR_WAIT_TIMEOUT,
-            DXGI_ERROR_ACCESS_LOST,
-        };
-        use windows::Win32::Graphics::Direct3D11::{
-            D3D11_MAP_READ,
-            D3D11_BOX,
-        };
-        use windows::Win32::Graphics::Dxgi::IDXGIResource;
         use windows::core::Interface;
+        use windows::Win32::Graphics::Direct3D11::{D3D11_BOX, D3D11_MAP_READ};
+        use windows::Win32::Graphics::Dxgi::IDXGIResource;
+        use windows::Win32::Graphics::Dxgi::{
+            DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+        };
 
         unsafe {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
 
-            match dxgi.duplication.AcquireNextFrame(0, &mut frame_info, &mut resource) {
+            match dxgi
+                .duplication
+                .AcquireNextFrame(0, &mut frame_info, &mut resource)
+            {
                 Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
-                Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST  => {
+                Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
                     return Err(anyhow!("DXGI_ERROR_ACCESS_LOST"));
                 }
                 Err(e) => return Err(e.into()),
-                Ok(_)  => {}
+                Ok(_) => {}
             }
 
             // Scope: copy from desktop texture → staging, then release the frame.
@@ -188,18 +195,29 @@ impl DdaCapture {
 
                 // Copy only the region matching our staging texture dimensions.
                 let src_box = D3D11_BOX {
-                    left: 0, top: 0, front: 0,
-                    right: dxgi.width, bottom: dxgi.height, back: 1,
+                    left: 0,
+                    top: 0,
+                    front: 0,
+                    right: dxgi.width,
+                    bottom: dxgi.height,
+                    back: 1,
                 };
                 dxgi.context.CopySubresourceRegion(
-                    &dxgi.staging, 0, 0, 0, 0,
-                    &src_tex, 0,
+                    &dxgi.staging,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &src_tex,
+                    0,
                     Some(&src_box),
                 );
 
                 // Map staging texture for CPU read.
-                let mut mapped = windows::Win32::Graphics::Direct3D11::D3D11_MAPPED_SUBRESOURCE::default();
-                dxgi.context.Map(&dxgi.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+                let mut mapped =
+                    windows::Win32::Graphics::Direct3D11::D3D11_MAPPED_SUBRESOURCE::default();
+                dxgi.context
+                    .Map(&dxgi.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
 
                 let row_pitch = mapped.RowPitch as usize;
                 let h = dxgi.height as usize;
@@ -238,10 +256,10 @@ impl WindowCapture for DdaCapture {
             if GetClientRect(HWND(hwnd as *mut _), &mut rect).is_err() {
                 return Err(anyhow!("GetClientRect failed for hwnd {}", hwnd));
             }
-            self.width  = (rect.right  - rect.left).max(1) as u32;
-            self.height = (rect.bottom - rect.top ).max(1) as u32;
+            self.width = (rect.right - rect.left).max(1) as u32;
+            self.height = (rect.bottom - rect.top).max(1) as u32;
         }
-        self.hwnd    = hwnd;
+        self.hwnd = hwnd;
         self.running = true;
 
         // Try to upgrade to DXGI mode.
@@ -309,24 +327,28 @@ impl WindowCapture for DdaCapture {
 
     fn stop(&mut self) {
         self.running = false;
-        self.hwnd    = 0;
+        self.hwnd = 0;
         #[cfg(windows)]
-        { self.dxgi = None; }
+        {
+            self.dxgi = None;
+        }
         debug!("DdaCapture stopped");
     }
 
     fn resize_hint(&mut self, width: u32, height: u32) {
-        self.width  = width;
+        self.width = width;
         self.height = height;
         // Recreate staging texture on next start().
         #[cfg(windows)]
-        { self.dxgi = None; }
+        {
+            self.dxgi = None;
+        }
         self.mode = DdaMode::PrintWindow;
     }
 
     fn backend(&self) -> CaptureBackend {
         match self.mode {
-            DdaMode::Dxgi        => CaptureBackend::DDA,
+            DdaMode::Dxgi => CaptureBackend::DDA,
             DdaMode::PrintWindow => CaptureBackend::PrintWindow,
         }
     }
@@ -342,13 +364,13 @@ impl DdaCapture {
             .as_micros() as u64;
         CapturedFrame {
             data,
-            width:        self.width,
-            height:       self.height,
+            width: self.width,
+            height: self.height,
             timestamp_us: ts,
             source,
-            is_stale:     false,
+            is_stale: false,
             #[cfg(windows)]
-            gpu_texture:  None,
+            gpu_texture: None,
         }
     }
 
@@ -356,16 +378,15 @@ impl DdaCapture {
     fn printwindow_frame(&mut self) -> Result<Option<CapturedFrame>> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-            SelectObject, GetDC, ReleaseDC, GetDIBits,
-            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB,
+            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
+            ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
         };
         use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
         use windows::Win32::UI::WindowsAndMessaging::PW_RENDERFULLCONTENT;
 
         unsafe {
             let hwnd = HWND(self.hwnd as *mut _);
-            let w = self.width  as i32;
+            let w = self.width as i32;
             let h = self.height as i32;
 
             let hdc_window = GetDC(hwnd);
@@ -374,7 +395,7 @@ impl DdaCapture {
             }
 
             let hdc_mem = CreateCompatibleDC(hdc_window);
-            let hbm     = CreateCompatibleBitmap(hdc_window, w, h);
+            let hbm = CreateCompatibleBitmap(hdc_window, w, h);
             let old_obj = SelectObject(hdc_mem, hbm);
 
             // PrintWindow captures occluded and minimised content.
@@ -382,11 +403,11 @@ impl DdaCapture {
 
             let mut bmi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
-                    biSize:        std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth:       w,
-                    biHeight:      -h,  // top-down
-                    biPlanes:      1,
-                    biBitCount:    32,
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    biHeight: -h, // top-down
+                    biPlanes: 1,
+                    biBitCount: 32,
                     biCompression: BI_RGB.0,
                     ..Default::default()
                 },
@@ -395,7 +416,10 @@ impl DdaCapture {
             let stride = (w * 4) as usize;
             let mut pixels = vec![0u8; stride * h as usize];
             GetDIBits(
-                hdc_mem, hbm, 0, h as u32,
+                hdc_mem,
+                hbm,
+                0,
+                h as u32,
                 Some(pixels.as_mut_ptr() as *mut _),
                 &mut bmi,
                 DIB_RGB_COLORS,

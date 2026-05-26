@@ -87,12 +87,13 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
         .with_filter(EnvFilter::new("lanshare_service::capture=trace"));
 
     // Network-specific trace file
-    let network_layer = fmt::layer()
-        .json()
-        .with_writer(network_writer)
-        .with_filter(EnvFilter::new(
-            "lanshare_service::network=trace,lanshare_service::pipeline=trace",
-        ));
+    let network_layer =
+        fmt::layer()
+            .json()
+            .with_writer(network_writer)
+            .with_filter(EnvFilter::new(
+                "lanshare_service::network=trace,lanshare_service::pipeline=trace",
+            ));
 
     // Metrics/telemetry file
     let metrics_layer = fmt::layer()
@@ -104,8 +105,7 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
     // stack shape identical in debug and release.  In release builds the
     // EnvFilter is set to "off" which suppresses all output at zero cost.
     let console_filter = if cfg!(debug_assertions) {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(default_filter))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
     } else {
         EnvFilter::new("off")
     };
@@ -144,8 +144,7 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
 
 /// Delete log files older than `max_days` to cap disk usage.
 fn cleanup_old_logs(dir: &PathBuf, max_days: u64) {
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(max_days * 86400);
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(max_days * 86400);
 
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {

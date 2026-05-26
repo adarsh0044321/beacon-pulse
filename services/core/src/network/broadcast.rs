@@ -15,7 +15,7 @@ use std::{
     net::{IpAddr, UdpSocket},
     time::{Duration, Instant},
 };
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 use super::discovery::DiscoveredHost;
 
@@ -35,9 +35,9 @@ const BROWSE_DURATION: Duration = Duration::from_millis(4_000);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AnnouncePacket {
-    magic:   u32,
-    name:    String,
-    port:    u16,
+    magic: u32,
+    name: String,
+    port: u16,
     version: String,
 }
 
@@ -48,34 +48,41 @@ struct AnnouncePacket {
 /// broadcast addresses on all local interfaces.
 pub fn start_broadcast_advertiser(
     service_name: String,
-    stream_port:  u16,
+    stream_port: u16,
     mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
         let socket = match UdpSocket::bind("0.0.0.0:0") {
             Ok(s) => s,
-            Err(e) => { warn!("Broadcast socket bind failed: {}", e); return; }
+            Err(e) => {
+                warn!("Broadcast socket bind failed: {}", e);
+                return;
+            }
         };
         if let Err(e) = socket.set_broadcast(true) {
-            warn!("set_broadcast failed: {}", e); return;
+            warn!("set_broadcast failed: {}", e);
+            return;
         }
-        socket.set_write_timeout(Some(Duration::from_millis(500))).ok();
+        socket
+            .set_write_timeout(Some(Duration::from_millis(500)))
+            .ok();
 
         let packet = AnnouncePacket {
-            magic:   MAGIC,
-            name:    service_name,
-            port:    stream_port,
+            magic: MAGIC,
+            name: service_name,
+            port: stream_port,
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
         let data = match serde_json::to_vec(&packet) {
             Ok(d) => d,
-            Err(e) => { warn!("Broadcast serialize failed: {}", e); return; }
+            Err(e) => {
+                warn!("Broadcast serialize failed: {}", e);
+                return;
+            }
         };
 
         // Collect all broadcast destinations
-        let mut destinations: Vec<String> = vec![
-            format!("255.255.255.255:{}", BROADCAST_PORT),
-        ];
+        let mut destinations: Vec<String> = vec![format!("255.255.255.255:{}", BROADCAST_PORT)];
 
         // Add subnet-directed broadcast for each interface
         for bcast in get_broadcast_addresses() {
@@ -133,22 +140,32 @@ pub async fn browse_via_broadcast() -> Vec<DiscoveredHost> {
             match socket.recv_from(&mut buf) {
                 Ok((n, src)) => {
                     if let Ok(pkt) = serde_json::from_slice::<AnnouncePacket>(&buf[..n]) {
-                        if pkt.magic != MAGIC { continue; }
+                        if pkt.magic != MAGIC {
+                            continue;
+                        }
 
                         let addr = src.ip().to_string();
 
                         // Skip our own broadcasts
-                        if local_ips.contains(&addr) { continue; }
-
-                        // Deduplicate by (addr, port).
-                        if hosts.iter().any(|h| h.address == addr && h.port == pkt.port) {
+                        if local_ips.contains(&addr) {
                             continue;
                         }
-                        info!("Broadcast: found host '{}' at {}:{}", pkt.name, addr, pkt.port);
+
+                        // Deduplicate by (addr, port).
+                        if hosts
+                            .iter()
+                            .any(|h| h.address == addr && h.port == pkt.port)
+                        {
+                            continue;
+                        }
+                        info!(
+                            "Broadcast: found host '{}' at {}:{}",
+                            pkt.name, addr, pkt.port
+                        );
                         hosts.push(DiscoveredHost {
-                            name:    pkt.name,
+                            name: pkt.name,
                             address: addr,
-                            port:    pkt.port,
+                            port: pkt.port,
                             version: Some(pkt.version),
                         });
                     }
@@ -177,11 +194,13 @@ fn bind_broadcast_listener() -> Option<UdpSocket> {
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
-    ).ok()?;
+    )
+    .ok()?;
 
     sock.set_reuse_address(true).ok()?;
     sock.set_broadcast(true).ok()?;
-    sock.set_read_timeout(Some(Duration::from_millis(200))).ok()?;
+    sock.set_read_timeout(Some(Duration::from_millis(200)))
+        .ok()?;
 
     if sock.bind(&addr.into()).is_err() {
         warn!("Broadcast browse: bind 0.0.0.0:{} failed", BROADCAST_PORT);
@@ -200,9 +219,7 @@ fn get_broadcast_addresses() -> Vec<String> {
     let mut addrs = Vec::new();
 
     // Method 1: Parse ipconfig for all IPv4 addresses
-    if let Ok(output) = std::process::Command::new("ipconfig")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("ipconfig").output() {
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
             let trimmed = line.trim();
@@ -251,9 +268,7 @@ fn get_local_ips() -> Vec<String> {
     let mut ips = vec!["127.0.0.1".to_string()];
 
     // Parse ipconfig for all our IPs
-    if let Ok(output) = std::process::Command::new("ipconfig")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("ipconfig").output() {
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
             let trimmed = line.trim();
@@ -286,4 +301,3 @@ fn get_local_ips() -> Vec<String> {
 
     ips
 }
-

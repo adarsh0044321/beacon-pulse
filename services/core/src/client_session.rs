@@ -8,12 +8,12 @@
 //! Architecture:
 //!   TCP handshake → UDP socket → RTP reassemble → ReceivedFrame → IPC event → WebCodecs
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use ring::hmac;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
@@ -38,9 +38,17 @@ pub enum ClientEvent {
         width: u16,
         height: u16,
     },
-    Connected { host_addr: String, recv_port: u16 },
-    Disconnected { reason: String },
-    RecvStats { fps: f32, packet_loss_pct: f32 },
+    Connected {
+        host_addr: String,
+        recv_port: u16,
+    },
+    Disconnected {
+        reason: String,
+    },
+    RecvStats {
+        fps: f32,
+        packet_loss_pct: f32,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +67,9 @@ impl ClientSessionHandle {
     }
 
     pub fn send_input(&self, msg: ControlMessage) -> Result<()> {
-        self.input_tx.send(msg).map_err(|_| anyhow!("Client session control channel closed"))
+        self.input_tx
+            .send(msg)
+            .map_err(|_| anyhow!("Client session control channel closed"))
     }
 }
 
@@ -74,7 +84,8 @@ impl Drop for ClientSessionHandle {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn compute_hmac_response(pairing_code: &str, challenge_b64: &str) -> Result<String> {
-    let challenge = B64.decode(challenge_b64)
+    let challenge = B64
+        .decode(challenge_b64)
         .map_err(|_| anyhow!("Invalid base64 challenge from host"))?;
     let key = hmac::Key::new(hmac::HMAC_SHA256, pairing_code.as_bytes());
     let sig = hmac::sign(&key, &challenge);
@@ -99,16 +110,21 @@ pub async fn start(
     pairing_code: Option<String>,
     event_tx: mpsc::UnboundedSender<ClientEvent>,
 ) -> Result<ClientSessionHandle> {
-
     // ── Step 1: Bind UDP recv socket first ───────────────────────────────────
     let (mut receiver, frame_rx) = match UdpReceiver::new(recv_port) {
         Ok(r) => r,
         Err(e) => {
             if recv_port == 45102 {
-                info!("Failed to bind to default UDP port 45102: {}. Trying a random free port...", e);
+                info!(
+                    "Failed to bind to default UDP port 45102: {}. Trying a random free port...",
+                    e
+                );
                 UdpReceiver::new(0).context("Failed to bind UDP receiver to any port")?
             } else {
-                return Err(e).context(format!("Failed to bind to requested UDP port {}", recv_port));
+                return Err(e).context(format!(
+                    "Failed to bind to requested UDP port {}",
+                    recv_port
+                ));
             }
         }
     };
@@ -119,7 +135,8 @@ pub async fn start(
     let control_addr = host_addr;
     info!(control = %control_addr, "TCP connecting to host control port");
 
-    let stream = TcpStream::connect(control_addr).await
+    let stream = TcpStream::connect(control_addr)
+        .await
         .with_context(|| format!("TCP connect to {} failed", control_addr))?;
     let (reader, mut writer) = stream.into_split();
     let mut lines = TokioBufReader::new(reader).lines();
@@ -141,10 +158,12 @@ pub async fn start(
     info!(client_id = %client_id, udp_port = actual_udp_port, "JoinRequest sent");
 
     // ── Step 4: Handle handshake response ────────────────────────────────────
-    let line = lines.next_line().await?
+    let line = lines
+        .next_line()
+        .await?
         .ok_or_else(|| anyhow!("Host closed connection during handshake"))?;
-    let msg: ControlMessage = serde_json::from_str(&line)
-        .map_err(|e| anyhow!("Bad handshake message: {e}"))?;
+    let msg: ControlMessage =
+        serde_json::from_str(&line).map_err(|e| anyhow!("Bad handshake message: {e}"))?;
 
     match msg {
         ControlMessage::PairingRequired { challenge } => {
@@ -156,7 +175,9 @@ pub async fn start(
             writer.write_all(reply_json.as_bytes()).await?;
 
             // Wait for final accept/reject
-            let line2 = lines.next_line().await?
+            let line2 = lines
+                .next_line()
+                .await?
                 .ok_or_else(|| anyhow!("Host closed after HMAC"))?;
             let msg2: ControlMessage = serde_json::from_str(&line2)?;
             match msg2 {
@@ -201,7 +222,14 @@ pub async fn start(
     let running_for_fwd = Arc::clone(&running);
     let fwd_event_tx = event_tx.clone();
     tokio::spawn(async move {
-        forward_frames(frame_rx, fwd_event_tx, host_addr, actual_udp_port, running_for_fwd).await;
+        forward_frames(
+            frame_rx,
+            fwd_event_tx,
+            host_addr,
+            actual_udp_port,
+            running_for_fwd,
+        )
+        .await;
     });
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ControlMessage>();
@@ -285,7 +313,9 @@ async fn forward_frames(
         let frame = match tokio::time::timeout(
             std::time::Duration::from_millis(500),
             frame_rx.recv(),
-        ).await {
+        )
+        .await
+        {
             Ok(Some(f)) => f,
             Ok(None) => {
                 let _ = event_tx.send(ClientEvent::Disconnected {
@@ -314,7 +344,10 @@ async fn forward_frames(
 
         if last_stats.elapsed() >= stats_interval {
             let fps = frames as f32 / last_stats.elapsed().as_secs_f32();
-            let _ = event_tx.send(ClientEvent::RecvStats { fps, packet_loss_pct: 0.0 });
+            let _ = event_tx.send(ClientEvent::RecvStats {
+                fps,
+                packet_loss_pct: 0.0,
+            });
             frames = 0;
             last_stats = std::time::Instant::now();
         }

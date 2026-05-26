@@ -6,9 +6,9 @@
 
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::time::interval;
 use tracing::info;
 
@@ -17,35 +17,35 @@ pub struct PipelineMetrics {
     // Capture
     pub frames_captured: AtomicU64,
     pub frames_stale: AtomicU64,
-    pub frames_dropped_cap: AtomicU64,   // dropped at capture→encoder ring buffer
+    pub frames_dropped_cap: AtomicU64, // dropped at capture→encoder ring buffer
     pub backend_switches: AtomicU64,
 
     // Encoder
     pub frames_encoded: AtomicU64,
-    pub frames_dropped_enc: AtomicU64,   // encoder skipped/errored
+    pub frames_dropped_enc: AtomicU64, // encoder skipped/errored
     pub keyframes: AtomicU64,
-    pub encode_us_sum: AtomicU64,        // for rolling average
+    pub encode_us_sum: AtomicU64, // for rolling average
     pub encode_us_count: AtomicU64,
 
     // Network
     pub bytes_sent: AtomicU64,
     pub packets_sent: AtomicU64,
-    pub packets_lost: AtomicU64,         // incremented by receiver NACK/gap detection
-    pub rtt_us: AtomicU64,              // latest RTT in microseconds
+    pub packets_lost: AtomicU64, // incremented by receiver NACK/gap detection
+    pub rtt_us: AtomicU64,       // latest RTT in microseconds
 
     // Timing
-    pub pipeline_us_sum: AtomicU64,      // capture → sent latency sum
+    pub pipeline_us_sum: AtomicU64, // capture → sent latency sum
     pub pipeline_us_count: AtomicU64,
 
     // Health indicators
-    pub last_frame_ts: AtomicU64,        // for freeze detection
+    pub last_frame_ts: AtomicU64, // for freeze detection
     pub render_suspended_count: AtomicU64,
-    pub hw_encoder_active: AtomicU32,   // 0 = software, 1 = NVENC, 2 = AMF, 3 = QSV
+    pub hw_encoder_active: AtomicU32, // 0 = software, 1 = NVENC, 2 = AMF, 3 = QSV
 
     // GPU zero-copy path telemetry (Phase 4c/4d)
-    pub gpu_frames_encoded: AtomicU64,  // frames submitted via DXGI surface (zero-copy)
-    pub gpu_encode_errors:  AtomicU64,  // GPU encode attempts that fell back to CPU
-    pub gpu_path_active:    AtomicU32,  // 1 when SharedGpuDevice + hw_enc are both live
+    pub gpu_frames_encoded: AtomicU64, // frames submitted via DXGI surface (zero-copy)
+    pub gpu_encode_errors: AtomicU64,  // GPU encode attempts that fell back to CPU
+    pub gpu_path_active: AtomicU32,    // 1 when SharedGpuDevice + hw_enc are both live
 
     // Network — receive side (client)
     pub bytes_received: AtomicU64,
@@ -61,8 +61,16 @@ pub struct PipelineMetrics {
 
 impl PipelineMetrics {
     pub const fn new() -> Self {
-        macro_rules! a64 { () => { AtomicU64::new(0) }; }
-        macro_rules! a32 { () => { AtomicU32::new(0) }; }
+        macro_rules! a64 {
+            () => {
+                AtomicU64::new(0)
+            };
+        }
+        macro_rules! a32 {
+            () => {
+                AtomicU32::new(0)
+            };
+        }
         Self {
             frames_captured: a64!(),
             frames_stale: a64!(),
@@ -83,8 +91,8 @@ impl PipelineMetrics {
             render_suspended_count: a64!(),
             hw_encoder_active: a32!(),
             gpu_frames_encoded: a64!(),
-            gpu_encode_errors:  a64!(),
-            gpu_path_active:    a32!(),
+            gpu_encode_errors: a64!(),
+            gpu_path_active: a32!(),
             active_hwnd: a64!(),
             frame_width: a32!(),
             frame_height: a32!(),
@@ -96,56 +104,105 @@ impl PipelineMetrics {
     }
 
     // --- Capture helpers ---
-    #[inline] pub fn inc_captured(&self) { self.frames_captured.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_stale(&self) { self.frames_stale.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_dropped_cap(&self) { self.frames_dropped_cap.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_backend_switch(&self) { self.backend_switches.fetch_add(1, Ordering::Relaxed); }
+    #[inline]
+    pub fn inc_captured(&self) {
+        self.frames_captured.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_stale(&self) {
+        self.frames_stale.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_dropped_cap(&self) {
+        self.frames_dropped_cap.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_backend_switch(&self) {
+        self.backend_switches.fetch_add(1, Ordering::Relaxed);
+    }
 
     // --- Encoder helpers ---
-    #[inline] pub fn inc_encoded(&self) { self.frames_encoded.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_dropped_enc(&self) { self.frames_dropped_enc.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_keyframe(&self) { self.keyframes.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn record_encode_us(&self, us: u64) {
+    #[inline]
+    pub fn inc_encoded(&self) {
+        self.frames_encoded.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_dropped_enc(&self) {
+        self.frames_dropped_enc.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_keyframe(&self) {
+        self.keyframes.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn record_encode_us(&self, us: u64) {
         self.encode_us_sum.fetch_add(us, Ordering::Relaxed);
         self.encode_us_count.fetch_add(1, Ordering::Relaxed);
     }
 
     // --- Network helpers ---
-    #[inline] pub fn add_bytes_sent(&self, n: u64) { self.bytes_sent.fetch_add(n, Ordering::Relaxed); }
-    #[inline] pub fn inc_packets_sent(&self) { self.packets_sent.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn inc_packets_lost(&self) { self.packets_lost.fetch_add(1, Ordering::Relaxed); }
-    #[inline] pub fn set_rtt_us(&self, us: u64) { self.rtt_us.store(us, Ordering::Relaxed); }
+    #[inline]
+    pub fn add_bytes_sent(&self, n: u64) {
+        self.bytes_sent.fetch_add(n, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_packets_sent(&self) {
+        self.packets_sent.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_packets_lost(&self) {
+        self.packets_lost.fetch_add(1, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn set_rtt_us(&self, us: u64) {
+        self.rtt_us.store(us, Ordering::Relaxed);
+    }
 
     // --- Pipeline latency ---
-    #[inline] pub fn record_pipeline_us(&self, us: u64) {
+    #[inline]
+    pub fn record_pipeline_us(&self, us: u64) {
         self.pipeline_us_sum.fetch_add(us, Ordering::Relaxed);
         self.pipeline_us_count.fetch_add(1, Ordering::Relaxed);
     }
 
     // --- Frame timestamps ---
-    #[inline] pub fn touch_frame(&self, ts: u64) { self.last_frame_ts.store(ts, Ordering::Relaxed); }
-    #[inline] pub fn inc_render_suspended(&self) { self.render_suspended_count.fetch_add(1, Ordering::Relaxed); }
+    #[inline]
+    pub fn touch_frame(&self, ts: u64) {
+        self.last_frame_ts.store(ts, Ordering::Relaxed);
+    }
+    #[inline]
+    pub fn inc_render_suspended(&self) {
+        self.render_suspended_count.fetch_add(1, Ordering::Relaxed);
+    }
 
     // --- GPU zero-copy path helpers ---
     /// Frames encoded via the DXGI surface path (zero CPU copy).
-    #[inline] pub fn inc_gpu_encoded(&self) { self.gpu_frames_encoded.fetch_add(1, Ordering::Relaxed); }
+    #[inline]
+    pub fn inc_gpu_encoded(&self) {
+        self.gpu_frames_encoded.fetch_add(1, Ordering::Relaxed);
+    }
     /// GPU encode attempt fell back to CPU (DXGI buffer rejected or error).
-    #[inline] pub fn inc_gpu_errors(&self)  { self.gpu_encode_errors.fetch_add(1, Ordering::Relaxed); }
+    #[inline]
+    pub fn inc_gpu_errors(&self) {
+        self.gpu_encode_errors.fetch_add(1, Ordering::Relaxed);
+    }
     /// Update whether the GPU zero-copy path (SharedGpuDevice + hw_enc) is live.
-    #[inline] pub fn set_gpu_path_active(&self, active: bool) {
-        self.gpu_path_active.store(u32::from(active), Ordering::Relaxed);
+    #[inline]
+    pub fn set_gpu_path_active(&self, active: bool) {
+        self.gpu_path_active
+            .store(u32::from(active), Ordering::Relaxed);
     }
 
     // --- Snapshot (read and reset rolling counters) ---
     pub fn snapshot(&self) -> MetricsSnapshot {
         let enc_count = self.encode_us_count.swap(0, Ordering::Relaxed);
-        let enc_sum   = self.encode_us_sum.swap(0, Ordering::Relaxed);
+        let enc_sum = self.encode_us_sum.swap(0, Ordering::Relaxed);
         let pipe_count = self.pipeline_us_count.swap(0, Ordering::Relaxed);
-        let pipe_sum   = self.pipeline_us_sum.swap(0, Ordering::Relaxed);
+        let pipe_sum = self.pipeline_us_sum.swap(0, Ordering::Relaxed);
 
         let bytes = self.bytes_sent.swap(0, Ordering::Relaxed);
-        let pkts  = self.packets_sent.swap(0, Ordering::Relaxed);
-        let lost  = self.packets_lost.swap(0, Ordering::Relaxed);
+        let pkts = self.packets_sent.swap(0, Ordering::Relaxed);
+        let lost = self.packets_lost.swap(0, Ordering::Relaxed);
 
         MetricsSnapshot {
             frames_captured: self.frames_captured.load(Ordering::Relaxed),
@@ -202,28 +259,44 @@ impl MetricsSnapshot {
     }
     pub fn packet_loss_pct(&self) -> f64 {
         let total = self.packets_in_window + self.packet_loss_in_window;
-        if total == 0 { 0.0 } else {
+        if total == 0 {
+            0.0
+        } else {
             self.packet_loss_in_window as f64 / total as f64 * 100.0
         }
     }
-    pub fn rtt_ms(&self) -> f64 { self.rtt_us as f64 / 1000.0 }
-    pub fn avg_encode_ms(&self) -> f64 { self.avg_encode_us as f64 / 1000.0 }
-    pub fn avg_pipeline_ms(&self) -> f64 { self.avg_pipeline_us as f64 / 1000.0 }
+    pub fn rtt_ms(&self) -> f64 {
+        self.rtt_us as f64 / 1000.0
+    }
+    pub fn avg_encode_ms(&self) -> f64 {
+        self.avg_encode_us as f64 / 1000.0
+    }
+    pub fn avg_pipeline_ms(&self) -> f64 {
+        self.avg_pipeline_us as f64 / 1000.0
+    }
 
     /// True if this snapshot contains warning-level conditions
     pub fn has_warnings(&self) -> Vec<PerformanceWarning> {
         let mut warnings = Vec::new();
         if self.packet_loss_pct() > 5.0 {
-            warnings.push(PerformanceWarning::PacketLoss { pct: self.packet_loss_pct() });
+            warnings.push(PerformanceWarning::PacketLoss {
+                pct: self.packet_loss_pct(),
+            });
         }
         if self.rtt_ms() > 100.0 {
-            warnings.push(PerformanceWarning::HighLatency { rtt_ms: self.rtt_ms() });
+            warnings.push(PerformanceWarning::HighLatency {
+                rtt_ms: self.rtt_ms(),
+            });
         }
         if self.avg_encode_ms() > 20.0 {
-            warnings.push(PerformanceWarning::SlowEncoder { ms: self.avg_encode_ms() });
+            warnings.push(PerformanceWarning::SlowEncoder {
+                ms: self.avg_encode_ms(),
+            });
         }
         if self.frames_dropped_cap > 10 {
-            warnings.push(PerformanceWarning::FrameDrops { count: self.frames_dropped_cap });
+            warnings.push(PerformanceWarning::FrameDrops {
+                count: self.frames_dropped_cap,
+            });
         }
         warnings
     }

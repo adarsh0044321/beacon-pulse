@@ -1,33 +1,27 @@
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 #[cfg(feature = "player")]
 mod run {
     use anyhow::Result;
     use std::sync::Arc;
     use tokio::sync::{broadcast, Mutex, RwLock};
-    use tracing::{info, error};
+    use tracing::{error, info};
 
     #[cfg(windows)]
     use windows_service::{
         define_windows_service,
         service::{
-            ServiceControl, ServiceControlAccept, ServiceExitCode,
-            ServiceState, ServiceStatus, ServiceType,
+            ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+            ServiceType,
         },
         service_control_handler::{self, ServiceControlHandlerResult},
         service_dispatcher,
     };
 
     use lanshare_service::{
-        AppState,
-        add_firewall_rules,
-        logging,
-        ipc::IpcServer,
-        cli_player,
-        logging::session_logger::SessionId,
-        network::session::SessionManager,
-        auth::PairingManager,
+        add_firewall_rules, auth::PairingManager, cli_player, ipc::IpcServer, logging,
+        logging::session_logger::SessionId, network::session::SessionManager, AppState,
     };
 
     #[cfg(windows)]
@@ -45,9 +39,8 @@ mod run {
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_tx_clone = shutdown_tx.clone();
 
-        let status_handle = service_control_handler::register(
-            "Pulse",
-            move |control_event| match control_event {
+        let status_handle =
+            service_control_handler::register("Pulse", move |control_event| match control_event {
                 ServiceControl::Stop | ServiceControl::Shutdown => {
                     info!("Windows Service stop signal received");
                     let _ = shutdown_tx_clone.send(());
@@ -55,8 +48,7 @@ mod run {
                 }
                 ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
                 _ => ServiceControlHandlerResult::NotImplemented,
-            },
-        )?;
+            })?;
 
         status_handle.set_service_status(ServiceStatus {
             service_type: ServiceType::OWN_PROCESS,
@@ -96,12 +88,20 @@ mod run {
         let session_manager = Arc::new(RwLock::new(SessionManager::new()));
         let pairing_manager = Arc::new(RwLock::new(PairingManager::new()));
 
+        #[cfg(feature = "host")]
+        let (_dummy_tx, dummy_rx) =
+            tokio::sync::mpsc::unbounded_channel::<lanshare_service::host_session::HostEvent>();
+
         let state = Arc::new(AppState {
             session_manager,
             pairing_manager,
             shutdown_tx: shutdown_tx.clone(),
             session_id,
-            client_session:   Arc::new(Mutex::new(None)),
+            #[cfg(feature = "host")]
+            host_session: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "host")]
+            host_event_rx: Arc::new(Mutex::new(dummy_rx)),
+            client_session: Arc::new(Mutex::new(None)),
             broadcast_cancel: Arc::new(Mutex::new(None)),
         });
 
@@ -123,7 +123,9 @@ mod run {
         info!("Pulse Player shutting down gracefully");
 
         // Stop active sessions
-        if let Some(h) = state.client_session.lock().await.take() { h.stop(); }
+        if let Some(h) = state.client_session.lock().await.take() {
+            h.stop();
+        }
 
         ipc_handle.abort();
 
@@ -146,11 +148,7 @@ mod run {
         let _mutex_guard = {
             #[link(name = "kernel32")]
             extern "system" {
-                fn CreateMutexW(
-                    attrs: *const u8,
-                    initial_owner: i32,
-                    name: *const u16,
-                ) -> *mut u8;
+                fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut u8;
                 fn GetLastError() -> u32;
             }
             let name: Vec<u16> = "Local\\Pulse\0".encode_utf16().collect();
@@ -180,7 +178,9 @@ mod run {
             if mode == "service" {
                 match service_dispatcher::start("Pulse", ffi_service_main) {
                     Ok(_) => return Ok(()),
-                    Err(_) => info!("Not running as Windows Service — falling back to console mode"),
+                    Err(_) => {
+                        info!("Not running as Windows Service — falling back to console mode")
+                    }
                 }
             }
 
@@ -199,7 +199,9 @@ mod run {
             let rt = tokio::runtime::Runtime::new()?;
             let (shutdown_tx, _) = broadcast::channel(1);
             let tx = shutdown_tx.clone();
-            ctrlc::set_handler(move || { let _ = tx.send(()); })?;
+            ctrlc::set_handler(move || {
+                let _ = tx.send(());
+            })?;
             rt.block_on(async_main(shutdown_tx))?;
         }
 

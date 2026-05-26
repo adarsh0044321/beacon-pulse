@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
@@ -48,7 +48,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
         match args[i].as_str() {
             "--host" | "-h" => {
                 if i + 1 < args.len() {
-                    player_args.host = Some(args[i + 1].parse().context("Invalid host IP address")?);
+                    player_args.host =
+                        Some(args[i + 1].parse().context("Invalid host IP address")?);
                     i += 2;
                 } else {
                     return Err(anyhow!("Missing value for --host"));
@@ -64,7 +65,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--recv-port" | "-rp" => {
                 if i + 1 < args.len() {
-                    player_args.recv_port = Some(args[i + 1].parse().context("Invalid receive port number")?);
+                    player_args.recv_port =
+                        Some(args[i + 1].parse().context("Invalid receive port number")?);
                     i += 2;
                 } else {
                     return Err(anyhow!("Missing value for --recv-port"));
@@ -358,12 +360,7 @@ fn run_window_loop(
     Ok(())
 }
 
-unsafe extern "system" fn wndproc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == WM_NCCREATE {
         let createstruct = lparam.0 as *const CREATESTRUCTW;
         if !createstruct.is_null() {
@@ -412,14 +409,34 @@ unsafe extern "system" fn wndproc(
                 // Clear/fill the background letterbox bars with black
                 let hbr = CreateSolidBrush(COLORREF(0));
                 if rx > 0 {
-                    let rect_left = RECT { left: 0, top: 0, right: rx, bottom: ch };
+                    let rect_left = RECT {
+                        left: 0,
+                        top: 0,
+                        right: rx,
+                        bottom: ch,
+                    };
                     FillRect(hdc, &rect_left, hbr);
-                    let rect_right = RECT { left: rx + rw, top: 0, right: cw, bottom: ch };
+                    let rect_right = RECT {
+                        left: rx + rw,
+                        top: 0,
+                        right: cw,
+                        bottom: ch,
+                    };
                     FillRect(hdc, &rect_right, hbr);
                 } else if ry > 0 {
-                    let rect_top = RECT { left: 0, top: 0, right: cw, bottom: ry };
+                    let rect_top = RECT {
+                        left: 0,
+                        top: 0,
+                        right: cw,
+                        bottom: ry,
+                    };
                     FillRect(hdc, &rect_top, hbr);
-                    let rect_bottom = RECT { left: 0, top: ry + rh, right: cw, bottom: ch };
+                    let rect_bottom = RECT {
+                        left: 0,
+                        top: ry + rh,
+                        right: cw,
+                        bottom: ch,
+                    };
                     FillRect(hdc, &rect_bottom, hbr);
                 }
                 let _ = DeleteObject(hbr);
@@ -435,8 +452,14 @@ unsafe extern "system" fn wndproc(
 
                 StretchDIBits(
                     hdc,
-                    rx, ry, rw, rh,
-                    0, 0, s.width as i32, s.height as i32,
+                    rx,
+                    ry,
+                    rw,
+                    rh,
+                    0,
+                    0,
+                    s.width as i32,
+                    s.height as i32,
                     Some(s.bgra_buf.as_ptr() as *const std::ffi::c_void),
                     &bmi,
                     DIB_RGB_COLORS,
@@ -491,7 +514,8 @@ unsafe extern "system" fn wndproc(
             }
             LRESULT(0)
         }
-        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN | WM_MBUTTONUP => {
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
+        | WM_MBUTTONUP => {
             let pressed = msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN;
             let button = match msg {
                 WM_LBUTTONDOWN | WM_LBUTTONUP => 0,

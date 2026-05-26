@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 use super::Permissions;
 

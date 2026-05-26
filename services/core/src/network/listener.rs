@@ -1,12 +1,12 @@
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing::{info, warn, error};
+use tokio::net::TcpListener;
+use tracing::{error, info, warn};
 
-use crate::AppState;
 use super::ControlMessage;
+use crate::AppState;
 
 /// Listens for incoming client TCP connections on control_port.
 /// Each accepted connection runs its own task with the full auth + session lifecycle.
@@ -49,7 +49,12 @@ async fn handle_client(
         let msg: ControlMessage = serde_json::from_str(&line)?;
         match msg {
             // ─── Handshake ───────────────────────────────────────────────────
-            ControlMessage::JoinRequest { client_id, display_name, version, udp_port } => {
+            ControlMessage::JoinRequest {
+                client_id,
+                display_name,
+                version,
+                udp_port,
+            } => {
                 info!(
                     client_id = %client_id,
                     display_name = %display_name,
@@ -68,15 +73,19 @@ async fn handle_client(
 
                 if let Some(challenge) = challenge_opt {
                     // Send challenge
-                    let json = serde_json::to_string(
-                        &ControlMessage::PairingRequired { challenge }
-                    )? + "\n";
+                    let json =
+                        serde_json::to_string(&ControlMessage::PairingRequired { challenge })?
+                            + "\n";
                     writer.write_all(json.as_bytes()).await?;
 
                     // Receive HMAC response
-                    let Some(resp_line) = lines.next_line().await? else { break };
+                    let Some(resp_line) = lines.next_line().await? else {
+                        break;
+                    };
                     let resp_msg: ControlMessage = serde_json::from_str(&resp_line)?;
-                    let ControlMessage::PairingCode { hmac } = resp_msg else { break };
+                    let ControlMessage::PairingCode { hmac } = resp_msg else {
+                        break;
+                    };
 
                     // Verify HMAC
                     let verified = state.pairing_manager.write().await.verify_hmac(&hmac);
@@ -139,7 +148,11 @@ async fn handle_client(
             }
 
             // ─── Adaptive bitrate feedback ────────────────────────────────────
-            ControlMessage::BitrateReport { recv_kbps, packet_loss_percent, rtt_ms } => {
+            ControlMessage::BitrateReport {
+                recv_kbps,
+                packet_loss_percent,
+                rtt_ms,
+            } => {
                 info!(
                     recv_kbps,
                     packet_loss_percent,
@@ -150,7 +163,10 @@ async fn handle_client(
                 crate::logging::metrics::METRICS.set_rtt_us(rtt_ms as u64 * 1_000);
 
                 if packet_loss_percent > 5.0 {
-                    warn!(packet_loss_percent, "High packet loss — requesting keyframe recovery");
+                    warn!(
+                        packet_loss_percent,
+                        "High packet loss — requesting keyframe recovery"
+                    );
                     let hs = state.host_session.lock().await;
                     if let Some(ref handle) = *hs {
                         handle.request_keyframe();
@@ -160,7 +176,8 @@ async fn handle_client(
 
             // ─── Input forwarding ─────────────────────────────────────────────
             ControlMessage::InputEvent { event } => {
-                let control_enabled = crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
+                let control_enabled =
+                    crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
                 if control_enabled {
                     crate::input::dispatch_input(event).ok();
                 }
@@ -188,7 +205,9 @@ async fn handle_client(
 
 /// Remove `session_id` from the active host streamer (if any).
 async fn deregister_client(state: &AppState, session_id: &str) {
-    if session_id.is_empty() { return; }
+    if session_id.is_empty() {
+        return;
+    }
     let hs = state.host_session.lock().await;
     if let Some(ref handle) = *hs {
         handle.remove_client(session_id);

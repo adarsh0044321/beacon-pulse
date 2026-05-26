@@ -20,13 +20,13 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::capture::capture_manager::{CaptureManager, PersistentCaptureConfig};
-use crate::capture::{WindowInfo, AppKind};
 use crate::capture::window_list::list_visible_windows;
-use crate::encoder::{create_encoder, EncoderConfig, EncodedPacket, VideoEncoder};
-#[cfg(windows)]
-use crate::encoder::hardware::MfHardwareEncoder;
+use crate::capture::{AppKind, WindowInfo};
 #[cfg(windows)]
 use crate::encoder::gpu_device::SharedGpuDevice;
+#[cfg(windows)]
+use crate::encoder::hardware::MfHardwareEncoder;
+use crate::encoder::{create_encoder, EncodedPacket, EncoderConfig, VideoEncoder};
 use crate::logging::metrics::METRICS;
 use crate::network::streamer::{StreamClient, UdpStreamer};
 
@@ -45,10 +45,17 @@ pub struct HostSessionHandle {
 #[allow(dead_code)]
 enum SessionCmd {
     Stop,
-    AddClient { session_id: String, addr: SocketAddr },
-    RemoveClient { session_id: String },
+    AddClient {
+        session_id: String,
+        addr: SocketAddr,
+    },
+    RemoveClient {
+        session_id: String,
+    },
     RequestKeyframe,
-    SetBitrate { bps: u32 },
+    SetBitrate {
+        bps: u32,
+    },
 }
 
 impl HostSessionHandle {
@@ -58,9 +65,15 @@ impl HostSessionHandle {
     pub fn add_client(&self, session_id: String, display_name: String, addr: SocketAddr) {
         UdpStreamer::add_client(
             &self.clients,
-            StreamClient { session_id: session_id.clone(), addr },
+            StreamClient {
+                session_id: session_id.clone(),
+                addr,
+            },
         );
-        let _ = self.cmd_tx.send(SessionCmd::AddClient { session_id: session_id.clone(), addr });
+        let _ = self.cmd_tx.send(SessionCmd::AddClient {
+            session_id: session_id.clone(),
+            addr,
+        });
         let _ = self.event_tx.send(HostEvent::ClientConnected {
             client_id: session_id,
             display_name,
@@ -101,10 +114,10 @@ pub fn start(
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SessionCmd>();
     // Bounded: encoder drops frames via try_send() if the streamer falls behind,
     // preventing unbounded queue growth under network pressure.
-    let (enc_tx, enc_rx) = mpsc::channel::<EncodedPacket>(crate::network::streamer::STREAM_QUEUE_CAP);
+    let (enc_tx, enc_rx) =
+        mpsc::channel::<EncodedPacket>(crate::network::streamer::STREAM_QUEUE_CAP);
 
-    let clients: Arc<RwLock<HashMap<String, StreamClient>>> =
-        Arc::new(RwLock::new(HashMap::new()));
+    let clients: Arc<RwLock<HashMap<String, StreamClient>>> = Arc::new(RwLock::new(HashMap::new()));
 
     // Spawn the UDP streamer task
     let streamer = UdpStreamer::new(stream_port, enc_rx, Arc::clone(&clients))
@@ -121,7 +134,12 @@ pub fn start(
         Arc::clone(&clients),
     ));
 
-    let handle = HostSessionHandle { cmd_tx, clients, event_tx, stream_port };
+    let handle = HostSessionHandle {
+        cmd_tx,
+        clients,
+        event_tx,
+        stream_port,
+    };
     info!(hwnd = hwnd, port = stream_port, "Host session started");
     Ok(handle)
 }
@@ -132,14 +150,38 @@ pub fn start(
 
 #[derive(Debug)]
 pub enum HostEvent {
-    StreamStarted { hwnd: isize, width: u32, height: u32, port: u16 },
-    StreamStopped { reason: String },
-    CaptureLost { hwnd: isize },
-    BackendSwitched { from: String, to: String },
+    StreamStarted {
+        hwnd: isize,
+        width: u32,
+        height: u32,
+        port: u16,
+    },
+    StreamStopped {
+        reason: String,
+    },
+    CaptureLost {
+        hwnd: isize,
+    },
+    BackendSwitched {
+        from: String,
+        to: String,
+    },
     /// `client_count` is the number of UDP clients receiving the stream right now.
-    Stats { fps: f32, encode_ms: f32, bitrate_kbps: u32, client_count: u32, gpu_path_active: bool },
-    ClientConnected { client_id: String, display_name: String, addr: String },
-    ClientDisconnected { client_id: String },
+    Stats {
+        fps: f32,
+        encode_ms: f32,
+        bitrate_kbps: u32,
+        client_count: u32,
+        gpu_path_active: bool,
+    },
+    ClientConnected {
+        client_id: String,
+        display_name: String,
+        addr: String,
+    },
+    ClientDisconnected {
+        client_id: String,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +191,7 @@ pub enum HostEvent {
 async fn capture_encode_loop(
     hwnd: isize,
     stream_port: u16,
-    enc_tx: mpsc::Sender<EncodedPacket>,          // bounded — pairs with STREAM_QUEUE_CAP
+    enc_tx: mpsc::Sender<EncodedPacket>, // bounded — pairs with STREAM_QUEUE_CAP
     event_tx: mpsc::UnboundedSender<HostEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<SessionCmd>,
     cap_clients: Arc<RwLock<HashMap<String, StreamClient>>>,
@@ -168,26 +210,29 @@ async fn capture_encode_loop(
     let target = match target {
         Some(t) => t,
         None => {
-                // Build a minimal WindowInfo if enumeration failed
-                WindowInfo {
-                    hwnd,
-                    title: format!("hwnd:{}", hwnd),
-                    process_name: String::new(),
-                    process_id: 0,
-                    width: 1920,
-                    height: 1080,
-                    is_minimized: false,
-                    app_kind: AppKind::Unknown,
-                    suspends_render_when_minimized: false,
-                }
+            // Build a minimal WindowInfo if enumeration failed
+            WindowInfo {
+                hwnd,
+                title: format!("hwnd:{}", hwnd),
+                process_name: String::new(),
+                process_id: 0,
+                width: 1920,
+                height: 1080,
+                is_minimized: false,
+                app_kind: AppKind::Unknown,
+                suspends_render_when_minimized: false,
             }
+        }
     };
     // Create encoder configuration — allow override from env (set by CLI --quality flag)
     let enc_cfg = {
         let mut cfg = EncoderConfig::default();
         if let Ok(bps_str) = std::env::var("BEACON_BITRATE_BPS") {
             if let Ok(bps) = bps_str.parse::<u32>() {
-                info!(bitrate_mbps = bps / 1_000_000, "Encoder bitrate overridden via BEACON_BITRATE_BPS");
+                info!(
+                    bitrate_mbps = bps / 1_000_000,
+                    "Encoder bitrate overridden via BEACON_BITRATE_BPS"
+                );
                 cfg.bitrate_bps = bps;
             }
         }
@@ -241,7 +286,9 @@ async fn capture_encode_loop(
                     None
                 }
                 Err(_panic) => {
-                    error!("SharedGpuDevice::new panicked; falling back to CPU path (driver issue?)");
+                    error!(
+                        "SharedGpuDevice::new panicked; falling back to CPU path (driver issue?)"
+                    );
                     // GPU device panicked — disable the hardware encoder too since
                     // it can't function without a device.
                     hw_enc = None;
@@ -355,8 +402,12 @@ async fn capture_encode_loop(
                 height: raw.height,
                 port: stream_port,
             });
-            METRICS.frame_width.store(raw.width, std::sync::atomic::Ordering::Relaxed);
-            METRICS.frame_height.store(raw.height, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .frame_width
+                .store(raw.width, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .frame_height
+                .store(raw.height, std::sync::atomic::Ordering::Relaxed);
         }
 
         if force_keyframe {
@@ -377,17 +428,30 @@ async fn capture_encode_loop(
             // Try zero-copy GPU path when the frame carries a D3D11 NV12 texture
             if let (Some(ref gpu_tex), Some(ref mut hw)) = (&raw.gpu_texture, &mut hw_enc) {
                 match hw.push_frame_from_texture(&gpu_tex.0.texture, raw.timestamp_us) {
-                    Ok(r)  => { METRICS.inc_gpu_encoded(); r }
+                    Ok(r) => {
+                        METRICS.inc_gpu_encoded();
+                        r
+                    }
                     Err(e) => {
                         // GPU path failed (e.g. D3D manager not set yet) — use CPU if possible
                         warn!(error = %e, "GPU-texture encode failed; trying CPU fallback");
                         METRICS.inc_gpu_errors();
                         if raw.data.is_empty() {
-                            METRICS.inc_dropped_enc(); continue;
+                            METRICS.inc_dropped_enc();
+                            continue;
                         }
-                        match encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
-                            Ok(r)  => r,
-                            Err(e) => { warn!(error=%e, "Encode error"); METRICS.inc_dropped_enc(); continue; }
+                        match encoder.encode_bgra(
+                            &raw.data,
+                            raw.width,
+                            raw.height,
+                            raw.timestamp_us,
+                        ) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                warn!(error=%e, "Encode error");
+                                METRICS.inc_dropped_enc();
+                                continue;
+                            }
                         }
                     }
                 }
@@ -398,26 +462,40 @@ async fn capture_encode_loop(
                 continue;
             } else {
                 match encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
-                    Ok(r)  => r,
-                    Err(e) => { warn!(error=%e, "Encode error"); METRICS.inc_dropped_enc(); continue; }
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(error=%e, "Encode error");
+                        METRICS.inc_dropped_enc();
+                        continue;
+                    }
                 }
             }
         };
         #[cfg(not(windows))]
-        let encoded_opt = match encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
-            Ok(r)  => r,
-            Err(e) => { warn!(error=%e, "Encode error"); METRICS.inc_dropped_enc(); continue; }
-        };
+        let encoded_opt =
+            match encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!(error=%e, "Encode error");
+                    METRICS.inc_dropped_enc();
+                    continue;
+                }
+            };
         let encoded = match encoded_opt {
             Some(p) => p,
-            None    => { METRICS.inc_dropped_enc(); continue; }
+            None => {
+                METRICS.inc_dropped_enc();
+                continue;
+            }
         };
 
         let encode_us = enc_start.elapsed().as_micros() as u64;
         encode_us_sum += encode_us;
         METRICS.record_encode_us(encode_us);
         METRICS.inc_encoded();
-        if encoded.is_keyframe { METRICS.inc_keyframe(); }
+        if encoded.is_keyframe {
+            METRICS.inc_keyframe();
+        }
 
         // Send to streamer — non-blocking try_send() so the capture loop never stalls.
         // If the bounded queue is full (slow network), drop this frame rather than block.
@@ -441,12 +519,15 @@ async fn capture_encode_loop(
             let fps = frames_since_stats as f32 / elapsed_secs;
             let avg_enc_ms = if frames_since_stats > 0 {
                 encode_us_sum as f32 / frames_since_stats as f32 / 1000.0
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             // Fix: previous code did `* 8 / 1024 * 2` which integer-truncated to 0
             // for small byte deltas before multiplying.  Correct form:
             //   bytes_delta  →  bits (×8)  →  per-sec (÷elapsed_secs)  →  kbps (÷1024)
-            let bytes_delta = METRICS.bytes_sent
+            let bytes_delta = METRICS
+                .bytes_sent
                 .load(std::sync::atomic::Ordering::Relaxed)
                 .saturating_sub(prev_bytes_sent);
             let br_kbps = (bytes_delta as f64 * 8.0 / elapsed_secs as f64 / 1024.0) as u32;
@@ -458,12 +539,17 @@ async fn capture_encode_loop(
                 encode_ms: avg_enc_ms,
                 bitrate_kbps: br_kbps,
                 client_count,
-                gpu_path_active: METRICS.gpu_path_active.load(std::sync::atomic::Ordering::Relaxed) != 0,
+                gpu_path_active: METRICS
+                    .gpu_path_active
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    != 0,
             });
 
             frames_since_stats = 0;
             encode_us_sum = 0;
-            prev_bytes_sent = METRICS.bytes_sent.load(std::sync::atomic::Ordering::Relaxed);
+            prev_bytes_sent = METRICS
+                .bytes_sent
+                .load(std::sync::atomic::Ordering::Relaxed);
             last_stats = Instant::now();
         }
     }

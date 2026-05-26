@@ -57,7 +57,11 @@ pub enum BackendId {
 
 impl FrameMetadata {
     pub fn new(frame_id: u64) -> Self {
-        Self { frame_id, capture_ts: now_us(), ..Default::default() }
+        Self {
+            frame_id,
+            capture_ts: now_us(),
+            ..Default::default()
+        }
     }
 
     /// Encode latency in microseconds
@@ -73,7 +77,9 @@ impl FrameMetadata {
     /// Client-perceived latency (capture → received)
     #[allow(dead_code)]
     pub fn e2e_latency_us(&self) -> Option<u64> {
-        if self.client_recv_ts == 0 { return None; }
+        if self.client_recv_ts == 0 {
+            return None;
+        }
         Some(self.client_recv_ts.saturating_sub(self.capture_ts))
     }
 }
@@ -131,7 +137,9 @@ impl StatsAccumulator {
         self.encode_latencies.push(meta.encode_latency_us());
         self.pipeline_latencies.push(meta.pipeline_latency_us());
         self.capture_times.push(meta.capture_ts);
-        if meta.encode_end_ts > 0 { self.encode_times.push(meta.encode_end_ts); }
+        if meta.encode_end_ts > 0 {
+            self.encode_times.push(meta.encode_end_ts);
+        }
         self.bytes_sent += bytes as u64;
         self.backend = meta.backend;
     }
@@ -143,10 +151,16 @@ impl StatsAccumulator {
 
         let mut enc = self.encode_latencies.clone();
         enc.sort_unstable();
-        let avg_enc = if enc.is_empty() { 0 } else { enc.iter().sum::<u64>() / enc.len() as u64 };
+        let avg_enc = if enc.is_empty() {
+            0
+        } else {
+            enc.iter().sum::<u64>() / enc.len() as u64
+        };
         let p99_enc = enc.get(enc.len() * 99 / 100).copied().unwrap_or(0);
 
-        let avg_pipe = if self.pipeline_latencies.is_empty() { 0 } else {
+        let avg_pipe = if self.pipeline_latencies.is_empty() {
+            0
+        } else {
             self.pipeline_latencies.iter().sum::<u64>() / self.pipeline_latencies.len() as u64
         };
 

@@ -17,7 +17,11 @@ pub struct UdpStreamer {
 
 impl UdpStreamer {
     pub fn new() -> Self {
-        Self { socket: None, peers: vec![], seq: 0 }
+        Self {
+            socket: None,
+            peers: vec![],
+            seq: 0,
+        }
     }
 
     pub async fn bind(&mut self, port: u16) -> Result<()> {

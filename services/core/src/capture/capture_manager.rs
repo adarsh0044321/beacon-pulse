@@ -16,17 +16,16 @@
 //! Emits CaptureEvent notifications so the IPC layer can inform the UI.
 
 use super::{
-    compatibility::preferred_backend,
-    wgc::WgcCapture, dda::DdaCapture,
-    AppKind, CaptureBackend, CapturedFrame, CaptureEvent, WindowCapture, WindowInfo,
+    compatibility::preferred_backend, dda::DdaCapture, wgc::WgcCapture, AppKind, CaptureBackend,
+    CaptureEvent, CapturedFrame, WindowCapture, WindowInfo,
 };
+#[cfg(windows)]
+use crate::encoder::gpu_device::SharedGpuDeviceArc;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn, error};
-#[cfg(windows)]
-use crate::encoder::gpu_device::SharedGpuDeviceArc;
+use tracing::{debug, error, info, warn};
 
 /// How long without a new frame before we consider the app "stalled"
 #[allow(dead_code)]
@@ -114,7 +113,9 @@ impl CaptureManager {
 
         info!(
             "Starting capture of '{}' ({}) with {:?} backend",
-            info.title, info.process_name, backend.backend()
+            info.title,
+            info.process_name,
+            backend.backend()
         );
 
         self.active = Some(ActiveCapture {
@@ -166,19 +167,31 @@ impl CaptureManager {
                         gpu_texture: frame.gpu_texture.clone(),
                     });
                 }
-                return self.active.as_ref().and_then(|c| c.last_frame.as_ref()).map(|f| CapturedFrame {
-                    data: f.data.clone(), width: f.width, height: f.height,
-                    timestamp_us: f.timestamp_us, source: f.source, is_stale: false,
-                    #[cfg(windows)]
-                    gpu_texture: f.gpu_texture.clone(),
-                });
+                return self
+                    .active
+                    .as_ref()
+                    .and_then(|c| c.last_frame.as_ref())
+                    .map(|f| CapturedFrame {
+                        data: f.data.clone(),
+                        width: f.width,
+                        height: f.height,
+                        timestamp_us: f.timestamp_us,
+                        source: f.source,
+                        is_stale: false,
+                        #[cfg(windows)]
+                        gpu_texture: f.gpu_texture.clone(),
+                    });
             }
             Ok(None) => { /* no frame this tick */ }
             Err(_e) => {
                 if let Some(cap) = &mut self.active {
                     cap.consecutive_failures += 1;
                 }
-                let failures = self.active.as_ref().map(|c| c.consecutive_failures).unwrap_or(0);
+                let failures = self
+                    .active
+                    .as_ref()
+                    .map(|c| c.consecutive_failures)
+                    .unwrap_or(0);
                 if failures >= 3 {
                     self.attempt_backend_recovery();
                     return self.serve_stale_frame();
@@ -191,7 +204,8 @@ impl CaptureManager {
             let cap = self.active.as_ref()?;
             let stall = cap.last_frame_time.elapsed();
             (
-                stall > Duration::from_millis(self.config.stale_frame_notify_ms) && !cap.stale_notified,
+                stall > Duration::from_millis(self.config.stale_frame_notify_ms)
+                    && !cap.stale_notified,
                 cap.info.suspends_render_when_minimized,
                 cap.hwnd,
                 cap.info.app_kind.clone(),
@@ -199,14 +213,23 @@ impl CaptureManager {
         };
 
         if stall_too_long && suspends {
-            if let Some(cap) = &mut self.active { cap.stale_notified = true; }
-            self.emit(CaptureEvent::RenderSuspended { hwnd, app_kind: kind });
+            if let Some(cap) = &mut self.active {
+                cap.stale_notified = true;
+            }
+            self.emit(CaptureEvent::RenderSuspended {
+                hwnd,
+                app_kind: kind,
+            });
             if self.config.prevent_render_suspend {
                 Self::poke_window_render(hwnd);
             }
         }
 
-        if self.config.preserve_last_frame { self.serve_stale_frame() } else { None }
+        if self.config.preserve_last_frame {
+            self.serve_stale_frame()
+        } else {
+            None
+        }
     }
 
     /// Serve the last captured frame stamped as stale
@@ -214,7 +237,9 @@ impl CaptureManager {
         let cap = self.active.as_ref()?;
         let f = cap.last_frame.as_ref()?;
         let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
         Some(CapturedFrame {
             data: f.data.clone(),
             width: f.width,
@@ -237,19 +262,27 @@ impl CaptureManager {
             };
 
             unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{IsIconic, GetWindowRect};
                 use windows::Win32::Foundation::{HWND, RECT};
+                use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic};
 
                 let hwnd = HWND(hwnd_val as *mut _);
                 let minimized = IsIconic(hwnd).as_bool();
-                let was_minimized = self.active.as_ref().map(|c| c.info.is_minimized).unwrap_or(false);
+                let was_minimized = self
+                    .active
+                    .as_ref()
+                    .map(|c| c.info.is_minimized)
+                    .unwrap_or(false);
 
                 if minimized && !was_minimized {
-                    if let Some(cap) = &mut self.active { cap.info.is_minimized = true; }
+                    if let Some(cap) = &mut self.active {
+                        cap.info.is_minimized = true;
+                    }
                     self.emit(CaptureEvent::WindowMinimized { hwnd: hwnd_val });
                     self.switch_backend_for_minimized();
                 } else if !minimized && was_minimized {
-                    if let Some(cap) = &mut self.active { cap.info.is_minimized = false; }
+                    if let Some(cap) = &mut self.active {
+                        cap.info.is_minimized = false;
+                    }
                     self.emit(CaptureEvent::WindowRestored { hwnd: hwnd_val });
                     self.switch_to_best_backend();
                 }
@@ -258,8 +291,11 @@ impl CaptureManager {
                 if GetWindowRect(hwnd, &mut rect).is_ok() {
                     let w = (rect.right - rect.left).max(0) as u32;
                     let h = (rect.bottom - rect.top).max(0) as u32;
-                    let (old_w, old_h) = self.active.as_ref()
-                        .map(|c| (c.info.width, c.info.height)).unwrap_or((0, 0));
+                    let (old_w, old_h) = self
+                        .active
+                        .as_ref()
+                        .map(|c| (c.info.width, c.info.height))
+                        .unwrap_or((0, 0));
                     if w != old_w || h != old_h {
                         if let Some(cap) = &mut self.active {
                             cap.info.width = w;
@@ -327,7 +363,10 @@ impl CaptureManager {
                 cap.backend.stop();
                 cap.backend = new_backend;
                 cap.consecutive_failures = 0;
-                info!("Switched capture backend: {:?} → {:?} ({})", current, target, reason);
+                info!(
+                    "Switched capture backend: {:?} → {:?} ({})",
+                    current, target, reason
+                );
                 self.emit(CaptureEvent::BackendSwitched {
                     from: current,
                     to: target,
@@ -349,7 +388,10 @@ impl CaptureManager {
             CaptureBackend::DXShared,
             CaptureBackend::PrintWindow,
         ];
-        let start_idx = fallback_chain.iter().position(|b| *b == failed).unwrap_or(0);
+        let start_idx = fallback_chain
+            .iter()
+            .position(|b| *b == failed)
+            .unwrap_or(0);
         for backend in &fallback_chain[start_idx + 1..] {
             let cap = match &mut self.active {
                 Some(c) => c,
@@ -363,7 +405,10 @@ impl CaptureManager {
             if nb.start(hwnd).is_ok() {
                 cap.backend.stop();
                 cap.backend = nb;
-                self.emit(CaptureEvent::CaptureRecovered { hwnd, backend: *backend });
+                self.emit(CaptureEvent::CaptureRecovered {
+                    hwnd,
+                    backend: *backend,
+                });
                 info!("Recovered capture with {:?} backend", backend);
                 return;
             }
@@ -413,7 +458,10 @@ impl CaptureManager {
             };
             match capture.start(info.hwnd) {
                 Ok(_) => {
-                    info!("Using {:?} backend for '{}' ({:?})", backend, info.title, info.app_kind);
+                    info!(
+                        "Using {:?} backend for '{}' ({:?})",
+                        backend, info.title, info.app_kind
+                    );
                     return Ok(capture);
                 }
                 Err(e) => {
@@ -421,7 +469,10 @@ impl CaptureManager {
                 }
             }
         }
-        Err(anyhow!("No capture backend could start for hwnd {}", info.hwnd))
+        Err(anyhow!(
+            "No capture backend could start for hwnd {}",
+            info.hwnd
+        ))
     }
 
     /// Attempt to keep window rendering active when minimized.
@@ -430,10 +481,8 @@ impl CaptureManager {
     fn poke_window_render(hwnd: isize) {
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{
-                PostMessageW, WM_PAINT,
-            };
             use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_PAINT};
             let _ = PostMessageW(HWND(hwnd as *mut _), WM_PAINT, None, None);
         }
     }
@@ -460,6 +509,8 @@ impl CaptureManager {
     /// Returns true if the active window's app is known to suspend rendering when minimized
     #[allow(dead_code)]
     pub fn renders_when_minimized(&self) -> bool {
-        self.active.as_ref().is_some_and(|c| !c.info.suspends_render_when_minimized)
+        self.active
+            .as_ref()
+            .is_some_and(|c| !c.info.suspends_render_when_minimized)
     }
 }

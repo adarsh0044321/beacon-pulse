@@ -16,8 +16,8 @@
 
 #![allow(dead_code)]
 
-use std::time::{Duration, Instant};
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 use crate::capture::CapturedFrame;
@@ -60,7 +60,12 @@ impl Pipeline {
     pub fn new() -> Self {
         let (raw_tx, raw_rx) = bounded(CAPTURE_QUEUE_CAP);
         let (enc_tx, enc_rx) = bounded(ENCODE_QUEUE_CAP);
-        Self { raw_tx, raw_rx, enc_tx, enc_rx }
+        Self {
+            raw_tx,
+            raw_rx,
+            enc_tx,
+            enc_rx,
+        }
     }
 }
 
@@ -121,7 +126,10 @@ pub async fn encoder_thread(
                 let bytes = packet.data.len();
                 stats_acc.record(&raw.meta, bytes);
 
-                let ef = EncodedFrame { packet, meta: raw.meta };
+                let ef = EncodedFrame {
+                    packet,
+                    meta: raw.meta,
+                };
                 if let Err(_e) = enc_tx.try_send(ef) {
                     warn!("Encode queue full: dropping encoded frame");
                     stats_acc.dropped += 1;

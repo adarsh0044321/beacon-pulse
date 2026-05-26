@@ -77,7 +77,9 @@ pub fn read_dword(name: &str) -> Option<u32> {
     unsafe {
         let mut hkey: isize = 0;
         let subkey_w = to_wide(SUBKEY);
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey) != ERROR_SUCCESS {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey)
+            != ERROR_SUCCESS
+        {
             return None;
         }
         let name_w = to_wide(name);
@@ -117,7 +119,8 @@ pub fn write_dword(name: &str, val: u32) -> bool {
             std::ptr::null(),
             &mut hkey,
             &mut disp,
-        ) != ERROR_SUCCESS {
+        ) != ERROR_SUCCESS
+        {
             return false;
         }
         let name_w = to_wide(name);
@@ -139,7 +142,9 @@ pub fn read_string(name: &str) -> Option<String> {
     unsafe {
         let mut hkey: isize = 0;
         let subkey_w = to_wide(SUBKEY);
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey) != ERROR_SUCCESS {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey)
+            != ERROR_SUCCESS
+        {
             return None;
         }
         let name_w = to_wide(name);
@@ -192,7 +197,8 @@ pub fn write_string(name: &str, val: &str) -> bool {
             std::ptr::null(),
             &mut hkey,
             &mut disp,
-        ) != ERROR_SUCCESS {
+        ) != ERROR_SUCCESS
+        {
             return false;
         }
         let name_w = to_wide(name);
@@ -221,7 +227,8 @@ pub fn write_startup(exe_path: &str, args: &str) -> bool {
             0,
             KEY_WRITE,
             &mut hkey,
-        ) != ERROR_SUCCESS {
+        ) != ERROR_SUCCESS
+        {
             return false;
         }
         let name_w = to_wide("BeaconHost");
@@ -251,7 +258,8 @@ pub fn delete_startup() -> bool {
             0,
             KEY_WRITE,
             &mut hkey,
-        ) != ERROR_SUCCESS {
+        ) != ERROR_SUCCESS
+        {
             return false;
         }
         let name_w = to_wide("BeaconHost");
@@ -267,14 +275,26 @@ pub fn delete_startup() -> bool {
 
 // Fallbacks for non-Windows targets
 #[cfg(not(windows))]
-pub fn read_dword(_name: &str) -> Option<u32> { None }
+pub fn read_dword(_name: &str) -> Option<u32> {
+    None
+}
 #[cfg(not(windows))]
-pub fn write_dword(_name: &str, _val: u32) -> bool { false }
+pub fn write_dword(_name: &str, _val: u32) -> bool {
+    false
+}
 #[cfg(not(windows))]
-pub fn read_string(_name: &str) -> Option<String> { None }
+pub fn read_string(_name: &str) -> Option<String> {
+    None
+}
 #[cfg(not(windows))]
-pub fn write_string(_name: &str, _val: &str) -> bool { false }
+pub fn write_string(_name: &str, _val: &str) -> bool {
+    false
+}
 #[cfg(not(windows))]
-pub fn write_startup(_exe_path: &str, _args: &str) -> bool { false }
+pub fn write_startup(_exe_path: &str, _args: &str) -> bool {
+    false
+}
 #[cfg(not(windows))]
-pub fn delete_startup() -> bool { false }
+pub fn delete_startup() -> bool {
+    false
+}

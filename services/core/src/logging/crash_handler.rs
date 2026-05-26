@@ -8,9 +8,9 @@
 
 #![allow(dead_code)]
 
-use std::path::Path;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::error;
 
@@ -32,7 +32,6 @@ impl SystemSnapshot {
     pub fn capture() -> Self {
         #[cfg(windows)]
         let (memory_mb, cpu_usage_pct) = {
-            
             // PROCESS_MEMORY_COUNTERS via sysinfo
             let memory_mb = get_process_memory_mb().unwrap_or(0);
             (memory_mb, 0.0_f32)
@@ -61,7 +60,8 @@ pub fn install(log_dir: &Path) {
 
         let thread = std::thread::current();
         let thread_name = thread.name().unwrap_or("<unnamed>");
-        let location = info.location()
+        let location = info
+            .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "unknown".to_string());
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
@@ -90,7 +90,11 @@ pub fn install(log_dir: &Path) {
 
         // Write crash report (synchronous — we are panicking, no async)
         let crash_log_path = crash_log.clone();
-        if let Ok(mut f) = OpenOptions::new().append(true).create(true).open(&crash_log_path) {
+        if let Ok(mut f) = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&crash_log_path)
+        {
             let _ = writeln!(f, "{}", report);
             let _ = f.flush();
         }
@@ -99,7 +103,10 @@ pub fn install(log_dir: &Path) {
         let _ = std::fs::write(&restart_flag, b"crash");
 
         // Also emit to stderr for terminal visibility
-        eprintln!("\n[CRASH] {}\n  at {}\n  thread: {}\n", payload, location, thread_name);
+        eprintln!(
+            "\n[CRASH] {}\n  at {}\n  thread: {}\n",
+            payload, location, thread_name
+        );
     }));
 
     tracing::info!(crash_log = %crash_log_for_info.display(), "Crash handler installed");
@@ -126,12 +133,17 @@ fn get_windows_version() -> String {
         // Read from registry — works on all Windows 10/11 versions
         use std::process::Command;
         let out = Command::new("reg")
-            .args(["query", "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-                   "/v", "CurrentBuildNumber"])
+            .args([
+                "query",
+                "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                "/v",
+                "CurrentBuildNumber",
+            ])
             .output();
         if let Ok(o) = out {
             let s = String::from_utf8_lossy(&o.stdout);
-            if let Some(build) = s.lines()
+            if let Some(build) = s
+                .lines()
                 .find(|l| l.contains("CurrentBuildNumber"))
                 .and_then(|l| l.split_whitespace().last())
             {
@@ -147,8 +159,7 @@ fn num_threads() -> usize {
     // Use Windows Toolhelp32 snapshot to count threads in the current process.
     // This avoids adding the sysinfo crate for a single diagnostic call.
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Thread32First, Thread32Next,
-        THREADENTRY32, TH32CS_SNAPTHREAD,
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
     use windows::Win32::System::Threading::GetCurrentProcessId;
 
@@ -169,7 +180,9 @@ fn num_threads() -> usize {
                     count += 1;
                 }
                 entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-                if Thread32Next(snap, &mut entry).is_err() { break; }
+                if Thread32Next(snap, &mut entry).is_err() {
+                    break;
+                }
             }
         }
         let _ = windows::Win32::Foundation::CloseHandle(snap);
@@ -178,7 +191,9 @@ fn num_threads() -> usize {
 }
 
 #[cfg(not(windows))]
-fn num_threads() -> usize { 0 }
+fn num_threads() -> usize {
+    0
+}
 
 #[cfg(windows)]
 fn get_process_memory_mb() -> Option<u64> {
