@@ -22,6 +22,7 @@ logs/
 
 # Binaries and Installers
 *.exe
+!apps/ui/src-tauri/resources/*.exe
 *.msi
 *.dll
 *.pdb
