@@ -153,7 +153,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
       setCaptureStatus(s => ({
         ...s,
         appKind: win.app_kind ?? 'Unknown',
-        warning: `${win.process_name} may pause rendering when minimized. LANShare will serve the last frame until rendering resumes.`,
+        warning: `${win.process_name} may pause rendering when minimized. Beacon will serve the last frame until rendering resumes.`,
       }));
     }
     await startShare(selectedHwnd);

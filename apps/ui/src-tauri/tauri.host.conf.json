@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LANShareHost",
+  "productName": "Beacon",
   "version": "1.0.0",
-  "identifier": "com.lanshare.host",
+  "identifier": "com.beacon.host",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -16,7 +16,7 @@
     },
     "windows": [
       {
-        "title": "LANShare Host",
+        "title": "Beacon Host",
         "width": 960,
         "height": 660,
         "minWidth": 760,
@@ -32,8 +32,8 @@
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
     "resources": {
-      "resources/lanshare-host.exe": "lanshare-host.exe",
-      "resources/lanshare-watchdog.exe": "lanshare-watchdog.exe"
+      "resources/beacon.exe": "beacon.exe",
+      "resources/beacon-watchdog.exe": "beacon-watchdog.exe"
     },
     "windows": {
       "webviewInstallMode": {

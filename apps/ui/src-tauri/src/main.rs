@@ -33,7 +33,7 @@ fn is_player_mode() -> bool {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(filename) = exe_path.file_name() {
             let filename_str = filename.to_string_lossy().to_lowercase();
-            return filename_str.contains("player") || filename_str.contains("lanshareplayer");
+            return filename_str.contains("player") || filename_str.contains("pulse");
         }
     }
     false
@@ -46,16 +46,16 @@ fn start_watchdog(is_player: bool) {
         use std::os::windows::process::CommandExt;
 
         let target_bin = if is_player {
-            "lanshare-player.exe"
+            "pulse.exe"
         } else {
-            "lanshare-host.exe"
+            "beacon.exe"
         };
 
         // 1. Terminate any orphan background watchdog or service processes from a previous run.
         // This releases socket ports (45100, 45101, 45102, 45199) and named pipe handles.
         // We use status() to wait for taskkill to finish cleanly.
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "lanshare-watchdog.exe"])
+            .args(["/F", "/IM", "beacon-watchdog.exe"])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
@@ -68,7 +68,7 @@ fn start_watchdog(is_player: bool) {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         // 2. Spawn the fresh watchdog from the current executable directory.
-        let watchdog = exe_dir().join("lanshare-watchdog.exe");
+        let watchdog = exe_dir().join("beacon-watchdog.exe");
         if watchdog.exists() {
             let parent_pid = std::process::id();
             let _ = std::process::Command::new(&watchdog)
@@ -91,9 +91,9 @@ pub struct AppData {
 fn main() {
     let is_player = is_player_mode();
     let pipe_path = if is_player {
-        r"\\.\pipe\LANSharePlayer".to_string()
+        r"\\.\pipe\Pulse".to_string()
     } else {
-        r"\\.\pipe\LANShareHost".to_string()
+        r"\\.\pipe\Beacon".to_string()
     };
 
     // Create the IPC client once; share it between the setup closure and AppData.
@@ -181,13 +181,13 @@ fn main() {
                 {
                     use std::os::windows::process::CommandExt;
                     let target_bin = if is_player {
-                        "lanshare-player.exe"
+                        "pulse.exe"
                     } else {
-                        "lanshare-host.exe"
+                        "beacon.exe"
                     };
                     // Best-effort: signal processes to exit.
                     let _ = std::process::Command::new("taskkill")
-                        .args(["/F", "/IM", "lanshare-watchdog.exe"])
+                        .args(["/F", "/IM", "beacon-watchdog.exe"])
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
                     let _ = std::process::Command::new("taskkill")
@@ -312,9 +312,10 @@ async fn load_settings(_state: State<'_, AppData>) -> Result<Value, String> {
 }
 
 fn settings_path() -> PathBuf {
+    let app_name = if is_player_mode() { "Pulse" } else { "Beacon" };
     dirs_next::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("LANShare")
+        .join(app_name)
         .join("settings.json")
 }
 

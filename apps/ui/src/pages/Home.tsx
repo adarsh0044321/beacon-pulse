@@ -13,7 +13,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
         {/* Logo */}
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '3rem', marginBottom: '8px' }}>🖥️</div>
-          <h1>LANShare Window</h1>
+          <h1>Beacon & Pulse</h1>
           <p style={{ marginTop: '6px', fontSize: '0.875rem' }}>
             Share any window instantly over your local network
           </p>

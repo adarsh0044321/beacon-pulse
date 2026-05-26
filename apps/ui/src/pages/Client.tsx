@@ -479,7 +479,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
               <WifiOff size={32} style={{ opacity: 0.3 }} />
               <p>No hosts found on this network</p>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Make sure the host has LANShare running
+                Make sure the host has Beacon running
               </span>
             </div>
           ) : (
