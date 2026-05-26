@@ -8,7 +8,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-v2-blue.svg)](https://tauri.app)
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://github.com/your-username/lanshare/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/lanshare/actions)
+[![Build Status](https://github.com/adarsh0044321/beacon-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/adarsh0044321/beacon-pulse/actions)
 
 [Features](#features) • [Architecture](#architecture) • [Installation](#installation) • [Usage](#usage) • [Building](#building) • [Contributing](#contributing)
 
@@ -65,7 +65,7 @@ For more detailed architectural insights, please read our [Architecture Guide](d
 
 ## 🚀 Installation
 
-*Pre-compiled binaries for Windows are available in the [Releases](https://github.com/your-username/lanshare/releases) section.*
+*Pre-compiled binaries for Windows are available in the [Releases](https://github.com/adarsh0044321/beacon-pulse/releases) section.*
 
 1. **Host Setup (Beacon):**
    - Download and run the `beacon-installer.exe`.
@@ -100,7 +100,7 @@ We prioritize security in local environments. If you discover a vulnerability, p
 
 Contributions, issues, and feature requests are welcome! 
 
-1. Check the [open issues](https://github.com/your-username/lanshare/issues).
+1. Check the [open issues](https://github.com/adarsh0044321/beacon-pulse/issues).
 2. Read our [Contributing Guidelines](docs/CONTRIBUTING.md).
 3. Fork the project, create a feature branch, and submit a Pull Request.
 

@@ -2,8 +2,8 @@ param(
     [string]$Path = "target/debug"
 )
 
-$hostExe = Join-Path $Path "lanshare-host.exe"
-$playerExe = Join-Path $Path "lanshare-player.exe"
+$hostExe = Join-Path $Path "beacon.exe"
+$playerExe = Join-Path $Path "pulse.exe"
 
 $success = $true
 
