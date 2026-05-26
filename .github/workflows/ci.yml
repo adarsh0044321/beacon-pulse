@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. nightly or v1.0.1)'
+        required: true
+        default: 'nightly'
 
 env:
   CARGO_TERM_COLOR: always
@@ -83,3 +88,5 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: release-windows.zip
+        tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+
