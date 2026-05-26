@@ -1,0 +1,238 @@
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+
+export interface WindowInfo {
+  hwnd: number;
+  title: string;
+  process_name: string;
+  process_id: number;
+  width: number;
+  height: number;
+  is_minimized: boolean;
+  app_kind: 'Win32' | 'UWP' | 'Chromium' | 'DirectX' | 'OpenGL' | 'Vulkan' | 'RDP' | 'Unknown';
+  suspends_render_when_minimized: boolean;
+}
+
+export interface ConnectedClient {
+  client_id: string;
+  display_name: string;
+  addr: string;
+  permissions: {
+    input_control: boolean;
+    clipboard: boolean;
+    audio: boolean;
+  };
+  stats: {
+    fps: number;
+    latency_ms: number;
+    bitrate_kbps: number;
+  };
+}
+
+export interface DiscoveredHost {
+  name: string;
+  address: string;
+  port: number;
+  /** Protocol version from mDNS TXT record. Undefined for older hosts. */
+  version?: string;
+  lastSeen?: number;
+}
+
+export interface Stats {
+  fps: number;
+  encode_ms: number;
+  latency_ms: number;
+  bitrate_kbps: number;
+  client_count: number;
+  /** Phase 5: true when the zero-copy GPU texture path is live for the current session. */
+  gpu_path_active: boolean;
+}
+
+/// Phase 3: encoder status pushed by service on session start
+export interface EncoderInfo {
+  encoder_name: string;  // e.g. "NVENC", "AMF", "QuickSync", "OpenH264"
+  vendor: string;        // e.g. "NVIDIA", "AMD", "Intel", "Software"
+  hw_accelerated: boolean;
+}
+
+interface SessionState {
+  // Sharing state
+  isSharing: boolean;
+  activeHwnd: number | null;
+  pairingCode: string | null;
+  pairingExpiresIn: number;
+  connectedClients: ConnectedClient[];
+  stats: Stats;
+
+  // Host window picker
+  availableWindows: WindowInfo[];
+  windowsLoading: boolean;
+
+  // Client connection
+  discoveredHosts: DiscoveredHost[];
+  hostsLoading: boolean;
+  connectedHost: DiscoveredHost | null;
+
+  // Actions
+  fetchWindows: () => Promise<void>;
+  startShare: (hwnd: number) => Promise<void>;
+  stopShare: () => Promise<void>;
+  generatePairingCode: () => Promise<void>;
+  kickClient: (clientId: string) => Promise<void>;
+  discoverHosts: () => Promise<void>;
+  connectToHost: (host: DiscoveredHost, code: string) => Promise<void>;
+  disconnectFromHost: () => void;
+  updateStats: (stats: Stats) => void;
+  setShareActive: (active: boolean, hwnd?: number) => void;
+  addConnectedClient: (client: ConnectedClient) => void;
+  removeConnectedClient: (clientId: string) => void;
+  /// Phase 3
+  encoderInfo: EncoderInfo | null;
+  setEncoderInfo: (info: EncoderInfo) => void;
+  setBitrate: (kbps: number) => void;
+}
+
+export const useSessionStore = create<SessionState>((set, get) => ({
+  isSharing: false,
+  activeHwnd: null,
+  pairingCode: null,
+  pairingExpiresIn: 120,
+  connectedClients: [],
+  stats: { fps: 0, encode_ms: 0, latency_ms: 0, bitrate_kbps: 0, client_count: 0, gpu_path_active: false },
+
+  availableWindows: [],
+  windowsLoading: false,
+
+  discoveredHosts: [],
+  hostsLoading: false,
+  connectedHost: null,
+
+  encoderInfo: null,
+
+  fetchWindows: async () => {
+    set({ windowsLoading: true });
+    try {
+      const windows = await invoke<WindowInfo[]>('list_windows');
+      set({ availableWindows: windows, windowsLoading: false });
+    } catch (e) {
+      console.error('Failed to list windows:', e);
+      set({ windowsLoading: false });
+    }
+  },
+
+  startShare: async (hwnd: number) => {
+    try {
+      await invoke('start_share', { hwnd });
+      set({ isSharing: true, activeHwnd: hwnd });
+    } catch (e) {
+      console.error('Failed to start share:', e);
+    }
+  },
+
+  stopShare: async () => {
+    try {
+      await invoke('stop_share');
+      set({ isSharing: false, activeHwnd: null, connectedClients: [] });
+    } catch (e) {
+      console.error('Failed to stop share:', e);
+    }
+  },
+
+  generatePairingCode: async () => {
+    try {
+      const result = await invoke<{ code: string; expires_in: number }>('generate_pairing_code');
+      set({ pairingCode: result.code, pairingExpiresIn: result.expires_in });
+    } catch (e) {
+      console.error('Failed to generate code:', e);
+    }
+  },
+
+  kickClient: async (clientId: string) => {
+    try {
+      await invoke('kick_client', { clientId });
+      set(state => ({
+        connectedClients: state.connectedClients.filter(c => c.client_id !== clientId)
+      }));
+    } catch (e) {
+      console.error('Failed to kick client:', e);
+    }
+  },
+
+  discoverHosts: async () => {
+    set({ hostsLoading: true });
+    try {
+      const hosts = await invoke<DiscoveredHost[]>('discover_hosts');
+      const now = Date.now();
+      const existing = get().discoveredHosts;
+      
+      // Map of key (address:port) to host
+      const hostMap = new Map<string, DiscoveredHost>();
+      
+      // 1. Populate map with existing hosts
+      existing.forEach(h => {
+        const key = `${h.address}:${h.port}`;
+        hostMap.set(key, h);
+      });
+      
+      // 2. Add or update with newly discovered hosts
+      hosts.forEach(h => {
+        const key = `${h.address}:${h.port}`;
+        hostMap.set(key, {
+          ...h,
+          lastSeen: now
+        });
+      });
+      
+      // 3. Filter out hosts that haven't been seen for more than 30 seconds
+      const mergedHosts = Array.from(hostMap.values()).filter(h => {
+        const lastSeen = h.lastSeen ?? now;
+        return now - lastSeen < 30000; // 30 seconds lease
+      });
+      
+      set({ discoveredHosts: mergedHosts, hostsLoading: false });
+    } catch (e) {
+      console.error('Failed to discover hosts:', e);
+      set({ hostsLoading: false });
+    }
+  },
+
+  connectToHost: async (host: DiscoveredHost, code: string) => {
+    try {
+      await invoke('connect_to_host', { address: host.address, port: host.port, code });
+      set({ connectedHost: host });
+    } catch (e) {
+      console.error('Failed to connect:', e);
+    }
+  },
+
+  disconnectFromHost: () => {
+    invoke('disconnect_from_host').catch(console.error);
+    set({ connectedHost: null });
+  },
+
+  updateStats: (stats: Stats) => set({ stats }),
+
+  // Pure state mutation — called by IPC push events (share_started / share_stopped)
+  // so we don't invoke() the Tauri command again (which would create a feedback loop).
+  setShareActive: (active: boolean, hwnd?: number) =>
+    set(active
+      ? { isSharing: true,  activeHwnd: hwnd ?? null }
+      : { isSharing: false, activeHwnd: null, connectedClients: [] }),
+
+  addConnectedClient: (client: ConnectedClient) => set((state) => {
+    if (state.connectedClients.some(c => c.client_id === client.client_id)) {
+      return state;
+    }
+    return { connectedClients: [...state.connectedClients, client] };
+  }),
+
+  removeConnectedClient: (clientId: string) => set((state) => ({
+    connectedClients: state.connectedClients.filter(c => c.client_id !== clientId)
+  })),
+
+  // Phase 3
+  setEncoderInfo: (info: EncoderInfo) => set({ encoderInfo: info }),
+  setBitrate: (kbps: number) => {
+    invoke('set_bitrate', { kbps }).catch(console.error);
+  },
+}));
