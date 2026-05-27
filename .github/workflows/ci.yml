@@ -55,7 +55,7 @@ jobs:
     - name: Build UI (Tauri)
       working-directory: apps/ui
       run: |
-        npm ci
+        npm ci --legacy-peer-deps
         npm run build
 
   release:
