@@ -392,6 +392,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let cw = client_rect.right - client_rect.left;
             let ch = client_rect.bottom - client_rect.top;
 
+            // Double-buffer: paint to offscreen DC then BitBlt to screen
+            let mem_dc = CreateCompatibleDC(hdc);
+            let mem_bmp = CreateCompatibleBitmap(hdc, cw, ch);
+            let old_bmp = SelectObject(mem_dc, mem_bmp);
+
             let s = state.lock();
             if s.width > 0 && s.height > 0 && !s.bgra_buf.is_empty() {
                 // Aspect-ratio calculation for letterbox
@@ -415,14 +420,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         right: rx,
                         bottom: ch,
                     };
-                    FillRect(hdc, &rect_left, hbr);
+                    FillRect(mem_dc, &rect_left, hbr);
                     let rect_right = RECT {
                         left: rx + rw,
                         top: 0,
                         right: cw,
                         bottom: ch,
                     };
-                    FillRect(hdc, &rect_right, hbr);
+                    FillRect(mem_dc, &rect_right, hbr);
                 } else if ry > 0 {
                     let rect_top = RECT {
                         left: 0,
@@ -430,18 +435,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         right: cw,
                         bottom: ry,
                     };
-                    FillRect(hdc, &rect_top, hbr);
+                    FillRect(mem_dc, &rect_top, hbr);
                     let rect_bottom = RECT {
                         left: 0,
                         top: ry + rh,
                         right: cw,
                         bottom: ch,
                     };
-                    FillRect(hdc, &rect_bottom, hbr);
+                    FillRect(mem_dc, &rect_bottom, hbr);
                 }
                 let _ = DeleteObject(hbr);
 
-                // Paint frame
+                // HALFTONE stretch mode — bilinear interpolation for smooth scaling
+                // instead of default nearest-neighbor (BLACKONWHITE)
+                SetStretchBltMode(mem_dc, HALFTONE);
+                SetBrushOrgEx(mem_dc, 0, 0, None);
+
+                // Paint frame to offscreen buffer
                 let mut bmi = BITMAPINFO::default();
                 bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
                 bmi.bmiHeader.biWidth = s.width as i32;
@@ -451,7 +461,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 bmi.bmiHeader.biCompression = BI_RGB.0;
 
                 StretchDIBits(
-                    hdc,
+                    mem_dc,
                     rx,
                     ry,
                     rw,
@@ -468,9 +478,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             } else {
                 // Clear window to dark grey while waiting
                 let hbr = CreateSolidBrush(COLORREF(0x1F1F1F));
-                FillRect(hdc, &client_rect, hbr);
+                FillRect(mem_dc, &client_rect, hbr);
                 let _ = DeleteObject(hbr);
             }
+
+            // Blit offscreen buffer to screen — flicker-free
+            BitBlt(hdc, 0, 0, cw, ch, mem_dc, 0, 0, SRCCOPY);
+
+            // Cleanup offscreen DC
+            SelectObject(mem_dc, old_bmp);
+            let _ = DeleteObject(mem_bmp);
+            DeleteDC(mem_dc);
 
             let _ = EndPaint(hwnd, &ps);
             LRESULT(0)

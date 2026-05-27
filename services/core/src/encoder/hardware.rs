@@ -146,12 +146,18 @@ mod codec_api {
     /// Number of B-frames (0 = low latency)
     pub const CODECAPI_AVEncMPVDefaultBPictureCount: GUID =
         GUID::from_u128(0x8d390aac_dc5c_4200_b57f_814d04babab2);
-    /// Encoding quality vs speed: 1 = real-time
+    /// Encoding quality vs speed: 100 = max quality
     pub const CODECAPI_AVEncCommonQuality: GUID =
         GUID::from_u128(0xfcbfbe16_2b64_4b4a_9b13_ce5a07f7c359);
     /// Low-latency mode hint (BOOL)
     pub const CODECAPI_AVLowLatencyMode: GUID =
         GUID::from_u128(0x9c27891a_ed7a_40e1_88e8_b22727a024ee);
+    /// Max number of reference frames for inter-frame prediction
+    pub const CODECAPI_AVEncVideoMaxNumRefFrame: GUID =
+        GUID::from_u128(0x964829ed_94f9_43b4_b74d_ef40944b69a0);
+    /// Peak (max) bitrate in bits/sec — used with VBR rate control
+    pub const CODECAPI_AVEncCommonMaxBitRate: GUID =
+        GUID::from_u128(0x9651eae4_39b9_4ebf_8508_01993dc96d51);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,7 +204,7 @@ impl MfHardwareEncoder {
                 vendor = ?best.vendor, name = %best.name,
                 width = config.width, height = config.height,
                 fps = config.fps, bitrate_kbps = config.bitrate_bps / 1000,
-                "MF hardware encoder initialised (low-latency CBR mode)"
+                "MF hardware encoder initialised (Quality VBR High Profile mode)"
             );
 
             // Update hw_encoder_active metric
@@ -267,16 +273,32 @@ impl MfHardwareEncoder {
         };
 
         unsafe {
-            // CBR rate control (mode = 0)
-            let _ = codec_api.SetValue(
+            // Quality VBR rate control (mode = 3) — allows encoder to overshoot
+            // on complex frames (text/UI) for better perceived sharpness.
+            // Falls back to CBR if the driver rejects VBR.
+            let vbr_result = codec_api.SetValue(
                 &codec_api::CODECAPI_AVEncCommonRateControlMode,
-                &VARIANT::from(0u32),
+                &VARIANT::from(3u32),
             );
+            if vbr_result.is_err() {
+                warn!("Quality VBR not supported — falling back to CBR");
+                let _ = codec_api.SetValue(
+                    &codec_api::CODECAPI_AVEncCommonRateControlMode,
+                    &VARIANT::from(0u32),
+                );
+            }
 
-            // Mean bitrate
+            // Mean (target) bitrate
             let _ = codec_api.SetValue(
                 &codec_api::CODECAPI_AVEncCommonMeanBitRate,
                 &VARIANT::from(config.bitrate_bps),
+            );
+
+            // Peak bitrate = 1.5× target — headroom for complex frames
+            let peak_bps = (config.bitrate_bps as u64 * 3 / 2).min(u32::MAX as u64) as u32;
+            let _ = codec_api.SetValue(
+                &codec_api::CODECAPI_AVEncCommonMaxBitRate,
+                &VARIANT::from(peak_bps),
             );
 
             // Zero B-frames for lowest latency
@@ -285,16 +307,23 @@ impl MfHardwareEncoder {
                 &VARIANT::from(0u32),
             );
 
-            // Encoding quality vs speed preset: 80 (high quality)
+            // Max quality preset (100 = encoder spends maximum effort)
             let _ = codec_api.SetValue(
                 &codec_api::CODECAPI_AVEncCommonQuality,
-                &VARIANT::from(80u32),
+                &VARIANT::from(100u32),
+            );
+
+            // 4 reference frames — much better inter-frame prediction for
+            // screen content where large areas remain static between frames.
+            let _ = codec_api.SetValue(
+                &codec_api::CODECAPI_AVEncVideoMaxNumRefFrame,
+                &VARIANT::from(4u32),
             );
 
             // Low-latency mode
             let _ = codec_api.SetValue(&codec_api::CODECAPI_AVLowLatencyMode, &VARIANT::from(true));
         }
-        debug!("ICodecAPI: CBR low-latency mode configured");
+        debug!("ICodecAPI: Quality VBR low-latency mode configured (High Profile)");
     }
 
     // ── Phase 3: Dynamic bitrate via ICodecAPI ──────────────────────────────
@@ -372,8 +401,10 @@ impl MfHardwareEncoder {
             out_mt.SetUINT64(&MF_MT_FRAME_RATE, pack_u64(config.fps, 1))?;
             out_mt.SetUINT32(&MF_MT_AVG_BITRATE, config.bitrate_bps)?;
             out_mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            // Set Constrained Baseline profile (66) for OpenH264/CLI compatibility
-            out_mt.SetUINT32(&MF_MT_MPEG2_PROFILE, 66)?;
+            // High Profile (100) — enables CABAC entropy coding (10-15% better
+            // compression), 8×8 DCT transform, and better quality at same bitrate.
+            // OpenH264 decoder supports High Profile — no compatibility issue.
+            out_mt.SetUINT32(&MF_MT_MPEG2_PROFILE, 100)?;
             transform
                 .SetOutputType(0, &out_mt, 0)
                 .context("SetOutputType")?;

@@ -33,24 +33,53 @@ pub fn bgra_to_yuv420p(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Ve
     let mut u_plane = vec![0u8; uv_w * uv_h];
     let mut v_plane = vec![0u8; uv_w * uv_h];
 
-    for row in 0..height {
+    for row in (0..height).step_by(2) {
         let row_base = row * width;
-        for col in 0..width {
-            let src = (row_base + col) * 4;
-            let b = bgra[src] as i32;
-            let g = bgra[src + 1] as i32;
-            let r = bgra[src + 2] as i32;
-
-            let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            y_plane[row_base + col] = y.clamp(16, 235) as u8;
-
-            if row % 2 == 0 && col % 2 == 0 {
-                let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-                let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-                let uv_idx = (row / 2) * uv_w + (col / 2);
-                u_plane[uv_idx] = u.clamp(16, 240) as u8;
-                v_plane[uv_idx] = v.clamp(16, 240) as u8;
+        let row2_base = if row + 1 < height { (row + 1) * width } else { row_base };
+        for col in (0..width).step_by(2) {
+            // Luma for all pixels in 2×2 block
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let r = row + dy;
+                    let c = col + dx;
+                    if r < height && c < width {
+                        let src = (r * width + c) * 4;
+                        let b = bgra[src] as i32;
+                        let g = bgra[src + 1] as i32;
+                        let ri = bgra[src + 2] as i32;
+                        let y = ((66 * ri + 129 * g + 25 * b + 128) >> 8) + 16;
+                        y_plane[r * width + c] = y.clamp(16, 235) as u8;
+                    }
+                }
             }
+
+            // Chroma: average all 4 pixels in the 2×2 block
+            let mut sum_r = 0i32;
+            let mut sum_g = 0i32;
+            let mut sum_b = 0i32;
+            let mut count = 0i32;
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let r = row + dy;
+                    let c = col + dx;
+                    if r < height && c < width {
+                        let src = (r * width + c) * 4;
+                        sum_b += bgra[src] as i32;
+                        sum_g += bgra[src + 1] as i32;
+                        sum_r += bgra[src + 2] as i32;
+                        count += 1;
+                    }
+                }
+            }
+            let avg_r = sum_r / count;
+            let avg_g = sum_g / count;
+            let avg_b = sum_b / count;
+
+            let u = ((-38 * avg_r - 74 * avg_g + 112 * avg_b + 128) >> 8) + 128;
+            let v = ((112 * avg_r - 94 * avg_g - 18 * avg_b + 128) >> 8) + 128;
+            let uv_idx = (row / 2) * uv_w + (col / 2);
+            u_plane[uv_idx] = u.clamp(16, 240) as u8;
+            v_plane[uv_idx] = v.clamp(16, 240) as u8;
         }
     }
 
@@ -123,53 +152,61 @@ pub fn bgra_to_nv12(bgra: &[u8], width: u32, height: u32) -> Vec<u8> {
     }
 
     // ── Pass 2: Chroma (NV12 interleaved UV) ────────────────────────────────
-    // Sample top-left pixel of each 2×2 block.
+    // Average all 4 pixels in each 2×2 block for accurate chroma.
+    // This prevents color fringing on text edges and sharp color transitions.
     for row in (0..h).step_by(2) {
-        let src_row = &bgra[row * w * 4..(row + 1) * w * 4];
+        let src_top = &bgra[row * w * 4..(row + 1) * w * 4];
+        let has_bottom = row + 1 < h;
+        let src_bot_start = if has_bottom { (row + 1) * w * 4 } else { row * w * 4 };
+        let src_bot_end = if has_bottom { (row + 2) * w * 4 } else { (row + 1) * w * 4 };
+        let src_bot = &bgra[src_bot_start..src_bot_end];
         let uv_row = (row / 2) * w; // byte offset into uv_plane
+
         let mut col = 0usize;
+        while col < w {
+            let has_right = col + 1 < w;
 
-        while col + 1 < w {
-            // Two chroma samples per inner iteration
-            let s0 = col * 4;
-            let s1 = s0 + 8; // col+2
+            // Accumulate R, G, B from all pixels in the 2×2 block
+            let s_tl = col * 4;
+            let b0 = src_top[s_tl] as i32;
+            let g0 = src_top[s_tl + 1] as i32;
+            let r0 = src_top[s_tl + 2] as i32;
+            let (mut sum_r, mut sum_g, mut sum_b) = (r0, g0, b0);
+            let mut count = 1i32;
 
-            let b0 = src_row[s0] as i32;
-            let g0 = src_row[s0 + 1] as i32;
-            let r0 = src_row[s0 + 2] as i32;
-
-            let u0 = (((-38 * r0 - 74 * g0 + 112 * b0 + 128) >> 8) + 128).clamp(16, 240) as u8;
-            let v0 = (((112 * r0 - 94 * g0 - 18 * b0 + 128) >> 8) + 128).clamp(16, 240) as u8;
-
-            let uv_off = uv_row + col;
-            uv_plane[uv_off] = u0;
-            uv_plane[uv_off + 1] = v0;
-
-            // Second sample (col+2) — stays in the same row's cache line
-            if col + 2 < w && s1 + 3 < src_row.len() {
-                let b1 = src_row[s1] as i32;
-                let g1 = src_row[s1 + 1] as i32;
-                let r1 = src_row[s1 + 2] as i32;
-                let u1 = (((-38 * r1 - 74 * g1 + 112 * b1 + 128) >> 8) + 128).clamp(16, 240) as u8;
-                let v1 = (((112 * r1 - 94 * g1 - 18 * b1 + 128) >> 8) + 128).clamp(16, 240) as u8;
-                uv_plane[uv_off + 2] = u1;
-                uv_plane[uv_off + 3] = v1;
-                col += 4;
-            } else {
-                col += 2;
+            if has_right {
+                let s_tr = s_tl + 4;
+                sum_b += src_top[s_tr] as i32;
+                sum_g += src_top[s_tr + 1] as i32;
+                sum_r += src_top[s_tr + 2] as i32;
+                count += 1;
             }
-        }
-        // Trailing sample
-        if col < w {
-            let s = col * 4;
-            let b = src_row[s] as i32;
-            let g = src_row[s + 1] as i32;
-            let r = src_row[s + 2] as i32;
-            let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(16, 240) as u8;
-            let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(16, 240) as u8;
+            if has_bottom {
+                sum_b += src_bot[s_tl] as i32;
+                sum_g += src_bot[s_tl + 1] as i32;
+                sum_r += src_bot[s_tl + 2] as i32;
+                count += 1;
+                if has_right {
+                    let s_br = s_tl + 4;
+                    sum_b += src_bot[s_br] as i32;
+                    sum_g += src_bot[s_br + 1] as i32;
+                    sum_r += src_bot[s_br + 2] as i32;
+                    count += 1;
+                }
+            }
+
+            let avg_r = sum_r / count;
+            let avg_g = sum_g / count;
+            let avg_b = sum_b / count;
+
+            let u = ((-38 * avg_r - 74 * avg_g + 112 * avg_b + 128) >> 8) + 128;
+            let v = ((112 * avg_r - 94 * avg_g - 18 * avg_b + 128) >> 8) + 128;
+
             let uv_off = uv_row + col;
-            uv_plane[uv_off] = u;
-            uv_plane[uv_off + 1] = v;
+            uv_plane[uv_off] = u.clamp(16, 240) as u8;
+            uv_plane[uv_off + 1] = v.clamp(16, 240) as u8;
+
+            col += 2;
         }
     }
 

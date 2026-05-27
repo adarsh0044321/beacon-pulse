@@ -18,6 +18,7 @@ name = "pulse"
 path = "src/bin/player.rs"
 
 [features]
+default = ["host", "player"]
 host = []
 player = []
 
