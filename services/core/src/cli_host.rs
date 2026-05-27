@@ -548,9 +548,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 std::io::stdin().read_line(&mut audio_input)?;
                 let trimmed_audio = audio_input.trim().to_lowercase();
                 let custom_audio = if trimmed_audio.is_empty() {
-                     None
+                    None
                 } else {
-                     Some(trimmed_audio == "y" || trimmed_audio == "yes")
+                    Some(trimmed_audio == "y" || trimmed_audio == "yes")
                 };
 
                 print!("  [+] Synchronize clipboard? (y/n) [default: y]: ");
@@ -559,9 +559,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 std::io::stdin().read_line(&mut cb_input)?;
                 let trimmed_cb = cb_input.trim().to_lowercase();
                 let custom_clipboard = if trimmed_cb.is_empty() {
-                     None
+                    None
                 } else {
-                     Some(trimmed_cb != "n" && trimmed_cb != "no")
+                    Some(trimmed_cb != "n" && trimmed_cb != "no")
                 };
 
                 let mut final_args = host_args.clone();
@@ -777,11 +777,17 @@ fn start_sharing_service(
     }
 
     if let Some(audio) = host_args.audio {
-        println!("  Audio Sharing: {}", if audio { "ENABLED" } else { "DISABLED" });
+        println!(
+            "  Audio Sharing: {}",
+            if audio { "ENABLED" } else { "DISABLED" }
+        );
     }
 
     if let Some(cb) = host_args.clipboard {
-        println!("  Clipboard Sync: {}", if cb { "ENABLED" } else { "DISABLED" });
+        println!(
+            "  Clipboard Sync: {}",
+            if cb { "ENABLED" } else { "DISABLED" }
+        );
     }
 
     // Initialize tracing (logs go to stderr/files)

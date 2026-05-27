@@ -247,10 +247,7 @@ async fn capture_encode_loop(
         }
         if let Ok(fps_str) = std::env::var("BEACON_FPS") {
             if let Ok(fps) = fps_str.parse::<u32>() {
-                info!(
-                    target_fps = fps,
-                    "Encoder FPS overridden via BEACON_FPS"
-                );
+                info!(target_fps = fps, "Encoder FPS overridden via BEACON_FPS");
                 cfg.fps = fps;
                 cfg.keyframe_interval = fps;
             }

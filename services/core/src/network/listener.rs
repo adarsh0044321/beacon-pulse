@@ -119,7 +119,8 @@ async fn handle_client(
                     }
                 };
                 let permissions = {
-                    let input_control = crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
+                    let input_control =
+                        crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
                     let audio = std::env::var("BEACON_SHARE_AUDIO")
                         .map(|v| v.to_lowercase() == "true")
                         .unwrap_or(false);
