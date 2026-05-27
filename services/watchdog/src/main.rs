@@ -150,21 +150,25 @@ fn main() {
         h
     };
 
+    let args: Vec<String> = std::env::args().collect();
+    let target_bin = args.get(2).cloned().unwrap_or_else(|| "beacon.exe".to_string());
+    let is_player = target_bin.contains("player") || target_bin.contains("pulse");
+
     let log_path = log_file_path();
     let _ = std::fs::create_dir_all(log_path.parent().unwrap());
-    log(&log_path, "Watchdog starting");
+    log(&log_path, &format!("Watchdog starting for target: {}", target_bin));
 
-    // Kill any stale beacon.exe bg-service instances before we start
-    kill_stale_hosts(&log_path);
+    // Kill any stale target_bin bg-service instances before we start
+    kill_stale_hosts(&log_path, &target_bin);
 
     // Small boot delay to let Windows settle
     thread::sleep(Duration::from_secs(5));
 
-    let host_exe = host_exe_path();
+    let host_exe = host_exe_path(&target_bin);
     if !host_exe.exists() {
         log(
             &log_path,
-            &format!("ERROR: beacon.exe not found at {}", host_exe.display()),
+            &format!("ERROR: {} not found at {}", target_bin, host_exe.display()),
         );
         return;
     }
@@ -172,43 +176,51 @@ fn main() {
     let mut backoff_ms = RESTART_DELAY_MS;
 
     loop {
-        // Read last shared window from registry
-        let window_proc = match reg_read_string("LastWindowProcess") {
-            Some(p) if !p.is_empty() => p,
-            _ => {
-                log(
-                    &log_path,
-                    "No LastWindowProcess in registry — waiting 10s and retrying",
-                );
-                thread::sleep(Duration::from_secs(10));
-                continue;
-            }
-        };
-
-        let unattended = reg_read_dword("Unattended").unwrap_or(0) == 1;
-
-        // Build command: lanshare-host.exe host --bg-service --window <process>
         let mut cmd = Command::new(&host_exe);
-        cmd.arg("host");
-        cmd.arg("--bg-service");
-        cmd.arg("--window");
-        cmd.arg(&window_proc);
         cmd.creation_flags(CREATE_NO_WINDOW);
 
-        log(
-            &log_path,
-            &format!(
-                "Launching host: --bg-service --window \"{}\" (unattended={})",
-                window_proc, unattended
-            ),
-        );
+        if is_player {
+            cmd.arg("service");
+            log(
+                &log_path,
+                &format!("Launching player service: {}", target_bin),
+            );
+        } else {
+            // Read last shared window from registry for Host
+            let window_proc = match reg_read_string("LastWindowProcess") {
+                Some(p) if !p.is_empty() => p,
+                _ => {
+                    log(
+                        &log_path,
+                        "No LastWindowProcess in registry — waiting 10s and retrying",
+                    );
+                    thread::sleep(Duration::from_secs(10));
+                    continue;
+                }
+            };
+
+            let unattended = reg_read_dword("Unattended").unwrap_or(0) == 1;
+
+            cmd.arg("host");
+            cmd.arg("--bg-service");
+            cmd.arg("--window");
+            cmd.arg(&window_proc);
+
+            log(
+                &log_path,
+                &format!(
+                    "Launching host: --bg-service --window \"{}\" (unattended={})",
+                    window_proc, unattended
+                ),
+            );
+        }
 
         let start = Instant::now();
 
         let mut child: Child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                log(&log_path, &format!("Failed to spawn host: {}", e));
+                log(&log_path, &format!("Failed to spawn target: {}", e));
                 thread::sleep(Duration::from_millis(backoff_ms));
                 continue;
             }
@@ -220,7 +232,7 @@ fn main() {
                 let code = status.code().unwrap_or(-1);
                 log(
                     &log_path,
-                    &format!("Host exited: code {} (uptime {}s)", code, uptime),
+                    &format!("Target exited: code {} (uptime {}s)", code, uptime),
                 );
 
                 // Exit code 0 = graceful user shutdown → watchdog exits too
@@ -256,16 +268,16 @@ fn main() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Kill any existing beacon.exe processes so we start fresh.
-fn kill_stale_hosts(log_path: &PathBuf) {
+/// Kill any existing target processes so we start fresh.
+fn kill_stale_hosts(log_path: &PathBuf, target_bin: &str) {
     let result = Command::new("taskkill")
-        .args(["/F", "/IM", "beacon.exe"])
+        .args(["/F", "/IM", target_bin])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
     match result {
         Ok(out) => {
             if out.status.success() {
-                log(log_path, "Killed stale beacon.exe processes");
+                log(log_path, &format!("Killed stale {} processes", target_bin));
                 thread::sleep(Duration::from_secs(1));
             }
         }
@@ -273,11 +285,11 @@ fn kill_stale_hosts(log_path: &PathBuf) {
     }
 }
 
-/// Path to beacon.exe — always in the same directory as the watchdog.
-fn host_exe_path() -> PathBuf {
+/// Path to the target executable — always in the same directory as the watchdog.
+fn host_exe_path(target_bin: &str) -> PathBuf {
     let mut p = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     p.pop();
-    p.push("beacon.exe");
+    p.push(target_bin);
     p
 }
 
