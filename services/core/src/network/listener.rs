@@ -179,7 +179,8 @@ async fn handle_client(
                 let control_enabled =
                     crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
                 if control_enabled {
-                    crate::input::dispatch_input(event).ok();
+                    let target = { *state.active_target.lock().await };
+                    crate::input::dispatch_input(event, target).ok();
                 }
             }
 

@@ -46,7 +46,7 @@ pub fn run(duration_secs: u64) -> Result<()> {
     // Step 2: Create capture manager
     let (event_tx, mut event_rx) = unbounded_channel();
     let mut cap = CaptureManager::new(PersistentCaptureConfig::default(), event_tx);
-    cap.start_capture(target.clone())?;
+    cap.start_capture(crate::CaptureTarget::Window(target.hwnd), target.clone())?;
 
     // Step 3: Create encoder
     let enc_config = EncoderConfig {

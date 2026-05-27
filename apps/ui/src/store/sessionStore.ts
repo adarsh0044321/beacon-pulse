@@ -110,7 +110,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   encoderInfo: null,
 
   fetchWindows: async () => {
-    set({ windowsLoading: true });
+    const isFirstLoad = get().availableWindows.length === 0;
+    if (isFirstLoad) {
+      set({ windowsLoading: true });
+    }
     try {
       const windows = await invoke<WindowInfo[]>('list_windows');
       set({ availableWindows: windows, windowsLoading: false });
@@ -202,6 +205,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ connectedHost: host });
     } catch (e) {
       console.error('Failed to connect:', e);
+      throw e;
     }
   },
 

@@ -1,6 +1,7 @@
 pub mod capture_manager;
 pub mod compatibility;
 pub mod dda;
+pub mod display_list;
 pub mod wgc;
 pub mod window_list;
 
@@ -99,7 +100,7 @@ pub enum CaptureBackend {
 }
 
 pub trait WindowCapture: Send + Sync {
-    fn start(&mut self, hwnd: isize) -> Result<()>;
+    fn start(&mut self, target: crate::CaptureTarget) -> Result<()>;
     fn next_frame(&mut self) -> Result<Option<CapturedFrame>>;
     fn stop(&mut self);
     fn resize_hint(&mut self, width: u32, height: u32);

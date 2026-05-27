@@ -172,6 +172,7 @@ fn main() {
             load_settings,
             request_keyframe,
             send_input,
+            read_recent_logs,
         ])
         // ── Graceful shutdown on window close ─────────────────────────────
         // Kill watchdog + service when the user closes the last window.
@@ -323,6 +324,68 @@ async fn load_settings(_state: State<'_, AppData>) -> Result<Value, String> {
     }
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+fn logs_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(appdata)
+            .join("Beacon")
+            .join("logs")
+    }
+    #[cfg(not(windows))]
+    {
+        std::path::PathBuf::from("/tmp/beacon/logs")
+    }
+}
+
+#[tauri::command]
+async fn read_recent_logs(log_type: String, limit: usize) -> Result<Vec<String>, String> {
+    let dir = logs_dir();
+    if !dir.exists() {
+        return Ok(vec![format!(
+            "No logs directory found at {}.",
+            dir.display()
+        )]);
+    }
+
+    let filter_pattern = format!("{}.log", log_type);
+
+    let mut log_files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+                    if filename.contains(&filter_pattern) {
+                        if let Ok(meta) = entry.metadata() {
+                            if let Ok(mod_time) = meta.modified() {
+                                log_files.push((path, mod_time));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if log_files.is_empty() {
+        return Ok(vec![format!("No log files found for type '{}'.", log_type)]);
+    }
+
+    log_files.sort_by(|a, b| b.1.cmp(&a.1));
+    let latest_file = &log_files[0].0;
+
+    let file = std::fs::File::open(latest_file).map_err(|e| e.to_string())?;
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+
+    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+    let len = lines.len();
+    let start = if len > limit { len - limit } else { 0 };
+
+    Ok(lines[start..].to_vec())
 }
 
 fn settings_path() -> PathBuf {

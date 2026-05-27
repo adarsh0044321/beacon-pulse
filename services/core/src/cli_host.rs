@@ -684,13 +684,13 @@ fn start_sharing_service(
         let session_manager = Arc::new(RwLock::new(SessionManager::new()));
         let pairing_manager = Arc::new(RwLock::new(PairingManager::new()));
         let (_dummy_tx, dummy_rx) = tokio::sync::mpsc::unbounded_channel::<host_session::HostEvent>();
-
         let state = Arc::new(AppState {
             session_manager,
             pairing_manager,
             shutdown_tx: shutdown_tx.clone(),
             session_id,
             host_session: Arc::new(Mutex::new(None)),
+            active_target: Arc::new(Mutex::new(None)),
             #[cfg(feature = "player")]
             client_session: Arc::new(Mutex::new(None)),
             host_event_rx: Arc::new(Mutex::new(dummy_rx)),
@@ -756,7 +756,7 @@ fn start_sharing_service(
 
         // Start host session
         let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = host_session::start(selected_win.hwnd, stream_port, host_event_tx)?;
+        let handle = host_session::start(crate::CaptureTarget::Window(selected_win.hwnd), stream_port, host_event_tx)?;
         *state.host_session.lock().await = Some(handle);
 
         // Start control channel TCP listener

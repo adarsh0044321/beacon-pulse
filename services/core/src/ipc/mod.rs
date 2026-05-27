@@ -32,7 +32,7 @@ pub enum UiCommand {
     ListWindows,
     #[cfg(feature = "host")]
     StartShare {
-        hwnd: isize,
+        target: crate::CaptureTarget,
     },
     #[cfg(feature = "host")]
     StopShare,
@@ -84,7 +84,7 @@ pub enum ServiceEvent {
     },
     #[cfg(feature = "host")]
     ShareStarted {
-        hwnd: isize,
+        target: crate::CaptureTarget,
         width: u32,
         height: u32,
         stream_port: u16,
@@ -135,23 +135,23 @@ pub enum ServiceEvent {
     #[cfg(feature = "host")]
     #[allow(dead_code)]
     RenderSuspended {
-        hwnd: isize,
+        target: crate::CaptureTarget,
         app_kind: AppKind,
     },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
     RenderResumed {
-        hwnd: isize,
+        target: crate::CaptureTarget,
     },
     #[cfg(feature = "host")]
     CaptureLost {
-        hwnd: isize,
+        target: crate::CaptureTarget,
         reason: String,
     },
     #[cfg(feature = "host")]
     #[allow(dead_code)]
     CaptureRecovered {
-        hwnd: isize,
+        target: crate::CaptureTarget,
         backend: CaptureBackend,
     },
 
@@ -298,8 +298,25 @@ async fn dispatch_cmd(
         }
         // ── Start host stream ────────────────────────────────────────────────
         #[cfg(feature = "host")]
-        UiCommand::StartShare { hwnd } => {
+        UiCommand::StartShare { target } => {
             let port = crate::network::DEFAULT_PORT;
+            *state.active_target.lock().await = Some(target);
+
+            // Write window metadata to registry for watchdog recovery
+            if let crate::CaptureTarget::Window(hwnd) = target {
+                if let Some(w) = window_list::list_visible_windows()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|w| w.hwnd == hwnd)
+                {
+                    crate::registry::write_string("LastWindowProcess", &w.process_name);
+                    crate::registry::write_string("LastWindowTitle", &w.title);
+                }
+            } else if let crate::CaptureTarget::Display(hmon) = target {
+                // Save display target for watchdog recovery
+                crate::registry::write_string("LastTargetType", "Display");
+                crate::registry::write_string("LastTargetDisplay", &hmon.to_string());
+            }
 
             // Bridge host events → push_tx
             let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -313,7 +330,7 @@ async fn dispatch_cmd(
                 }
             });
 
-            match host_session::start(hwnd, port, host_event_tx) {
+            match host_session::start(target, port, host_event_tx) {
                 Ok(handle) => {
                     let mut session = state.host_session.lock().await;
                     *session = Some(handle);
@@ -361,7 +378,7 @@ async fn dispatch_cmd(
                     });
 
                     ServiceEvent::ShareStarted {
-                        hwnd,
+                        target,
                         width: 0,
                         height: 0,
                         stream_port: port,
@@ -379,6 +396,13 @@ async fn dispatch_cmd(
         // ── Stop host stream ─────────────────────────────────────────────────
         #[cfg(feature = "host")]
         UiCommand::StopShare => {
+            *state.active_target.lock().await = None;
+            // Clear last window metadata so watchdog starts in idle mode next time
+            crate::registry::write_string("LastWindowProcess", "");
+            crate::registry::write_string("LastWindowTitle", "");
+            crate::registry::write_string("LastTargetType", "");
+            crate::registry::write_string("LastTargetDisplay", "");
+
             // Cancel the broadcast advertiser
             if let Some(cancel_tx) = state.broadcast_cancel.lock().await.take() {
                 let _ = cancel_tx.send(());
@@ -605,19 +629,19 @@ async fn dispatch_cmd(
 fn host_event_to_service(ev: host_session::HostEvent) -> ServiceEvent {
     match ev {
         host_session::HostEvent::StreamStarted {
-            hwnd,
+            target,
             width,
             height,
             port,
         } => ServiceEvent::ShareStarted {
-            hwnd,
+            target,
             width,
             height,
             stream_port: port,
         },
         host_session::HostEvent::StreamStopped { reason } => ServiceEvent::ShareStopped { reason },
-        host_session::HostEvent::CaptureLost { hwnd } => ServiceEvent::CaptureLost {
-            hwnd,
+        host_session::HostEvent::CaptureLost { target } => ServiceEvent::CaptureLost {
+            target,
             reason: "Capture lost".to_string(),
         },
         // Fix: BackendSwitched was incorrectly mapped to ServiceEvent::Error.
@@ -706,12 +730,13 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
 /// TCP port-scan discovery: scans all local /24 subnets for LANShare control port.
 /// This is the most reliable method — works on hotspots, corporate networks,
 /// and anywhere UDP broadcast/multicast is blocked.
-/// Runs 50 parallel TCP connect attempts for speed (~3s total per subnet).
+/// Runs async TCP connect attempts concurrently up to 128 tasks.
 #[cfg(feature = "player")]
 async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
-    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-    use std::sync::{Arc, Mutex};
+    use std::net::{Ipv4Addr, SocketAddr};
     use std::time::Duration;
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
 
     let control_port = crate::network::CONTROL_PORT;
 
@@ -722,64 +747,69 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
 
     tracing::info!(subnets = ?local_ips, "TCP scan: starting subnet scan");
 
-    tokio::task::spawn_blocking(move || {
-        let results: Arc<Mutex<Vec<discovery::DiscoveredHost>>> = Arc::new(Mutex::new(Vec::new()));
-
-        // Build list of all IPs to scan across all subnets
-        let mut targets: Vec<Ipv4Addr> = Vec::new();
-        for local_ip in &local_ips {
-            let octets = local_ip.octets();
-            for last_octet in 1..255u8 {
-                let target = Ipv4Addr::new(octets[0], octets[1], octets[2], last_octet);
-                if !local_ips.contains(&target) && !targets.contains(&target) {
-                    targets.push(target);
-                }
+    // Build list of all IPs to scan across all subnets
+    let mut targets: Vec<Ipv4Addr> = Vec::new();
+    for local_ip in &local_ips {
+        let octets = local_ip.octets();
+        for last_octet in 1..255u8 {
+            let target = Ipv4Addr::new(octets[0], octets[1], octets[2], last_octet);
+            if !local_ips.contains(&target) && !targets.contains(&target) {
+                targets.push(target);
             }
         }
+    }
 
-        // Scan in batches of 50 threads for speed
-        const BATCH_SIZE: usize = 50;
-        for batch in targets.chunks(BATCH_SIZE) {
-            let mut handles = Vec::new();
-            for &target_ip in batch {
-                let results = Arc::clone(&results);
-                let handle = std::thread::spawn(move || {
-                    let addr = SocketAddr::new(target_ip.into(), control_port);
-                    if let Ok(stream) =
-                        TcpStream::connect_timeout(&addr, Duration::from_millis(500))
-                    {
+    use tokio::task::JoinSet;
+    let mut join_set = JoinSet::new();
+    let scan_timeout = Duration::from_millis(400);
+    let mut discovered = Vec::new();
+    let mut targets_iter = targets.into_iter();
+
+    // Spawn up to 128 tasks initially
+    for _ in 0..128 {
+        if let Some(target_ip) = targets_iter.next() {
+            join_set.spawn(async move {
+                let addr = SocketAddr::new(target_ip.into(), control_port);
+                match timeout(scan_timeout, TcpStream::connect(&addr)).await {
+                    Ok(Ok(stream)) => {
                         drop(stream);
-                        let ip_str = target_ip.to_string();
-                        let name = format!("Beacon@{}", ip_str);
-
-                        tracing::info!(address = %ip_str, "TCP scan: found host");
-
-                        if let Ok(mut r) = results.lock() {
-                            if !r.iter().any(|h| h.address == ip_str) {
-                                r.push(discovery::DiscoveredHost {
-                                    name,
-                                    address: ip_str,
-                                    port: control_port,
-                                    version: None,
-                                });
-                            }
-                        }
+                        Some(target_ip)
                     }
-                });
-                handles.push(handle);
-            }
-            for h in handles {
-                h.join().ok();
-            }
+                    _ => None,
+                }
+            });
+        }
+    }
+
+    // Keep spawning new tasks as older ones finish
+    while let Some(res) = join_set.join_next().await {
+        if let Ok(Some(target_ip)) = res {
+            let ip_str = target_ip.to_string();
+            let name = format!("Beacon@{}", ip_str);
+            tracing::info!(address = %ip_str, "TCP scan: found host");
+            discovered.push(discovery::DiscoveredHost {
+                name,
+                address: ip_str,
+                port: control_port,
+                version: None,
+            });
         }
 
-        Arc::try_unwrap(results)
-            .unwrap_or_else(|a| Mutex::new(a.lock().unwrap().clone()))
-            .into_inner()
-            .unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
+        if let Some(target_ip) = targets_iter.next() {
+            join_set.spawn(async move {
+                let addr = SocketAddr::new(target_ip.into(), control_port);
+                match timeout(scan_timeout, TcpStream::connect(&addr)).await {
+                    Ok(Ok(stream)) => {
+                        drop(stream);
+                        Some(target_ip)
+                    }
+                    _ => None,
+                }
+            });
+        }
+    }
+
+    discovered
 }
 
 /// Get all local IPv4 addresses (non-loopback, non-APIPA).

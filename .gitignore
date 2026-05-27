@@ -47,3 +47,9 @@ $RECYCLE.BIN/
 # Streaming caches
 *.tmp
 *.bak
+
+# Custom Tauri build folders
+dist-host/
+dist-player/
+apps/ui/dist-host/
+apps/ui/dist-player/

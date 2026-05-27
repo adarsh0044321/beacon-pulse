@@ -64,7 +64,7 @@ impl Default for PersistentCaptureConfig {
 
 /// Internal state of the active capture session
 struct ActiveCapture {
-    hwnd: isize,
+    target: crate::CaptureTarget,
     info: WindowInfo,
     backend: Box<dyn WindowCapture>,
     last_frame: Option<CapturedFrame>,
@@ -105,11 +105,10 @@ impl CaptureManager {
     }
 
     /// Start capturing a window. Automatically selects best backend.
-    pub fn start_capture(&mut self, info: WindowInfo) -> Result<()> {
+    pub fn start_capture(&mut self, target: crate::CaptureTarget, info: WindowInfo) -> Result<()> {
         self.stop_capture();
 
-        let backend = self.create_best_backend(&info)?;
-        let hwnd = info.hwnd;
+        let backend = self.create_best_backend(target, &info)?;
 
         info!(
             "Starting capture of '{}' ({}) with {:?} backend",
@@ -119,7 +118,7 @@ impl CaptureManager {
         );
 
         self.active = Some(ActiveCapture {
-            hwnd,
+            target,
             info,
             backend,
             last_frame: None,
@@ -134,7 +133,7 @@ impl CaptureManager {
     pub fn stop_capture(&mut self) {
         if let Some(mut cap) = self.active.take() {
             cap.backend.stop();
-            info!("Capture stopped for hwnd {}", cap.hwnd);
+            info!("Capture stopped for target {:?}", cap.target);
         }
     }
 
@@ -200,14 +199,14 @@ impl CaptureManager {
         }
 
         // 3. Check for stall
-        let (stall_too_long, suspends, hwnd, kind) = {
+        let (stall_too_long, suspends, target, kind) = {
             let cap = self.active.as_ref()?;
             let stall = cap.last_frame_time.elapsed();
             (
                 stall > Duration::from_millis(self.config.stale_frame_notify_ms)
                     && !cap.stale_notified,
                 cap.info.suspends_render_when_minimized,
-                cap.hwnd,
+                cap.target,
                 cap.info.app_kind.clone(),
             )
         };
@@ -216,12 +215,14 @@ impl CaptureManager {
             if let Some(cap) = &mut self.active {
                 cap.stale_notified = true;
             }
-            self.emit(CaptureEvent::RenderSuspended {
-                hwnd,
-                app_kind: kind,
-            });
-            if self.config.prevent_render_suspend {
-                Self::poke_window_render(hwnd);
+            if let crate::CaptureTarget::Window(hwnd) = target {
+                self.emit(CaptureEvent::RenderSuspended {
+                    hwnd,
+                    app_kind: kind,
+                });
+                if self.config.prevent_render_suspend {
+                    Self::poke_window_render(hwnd);
+                }
             }
         }
 
@@ -256,51 +257,85 @@ impl CaptureManager {
     fn update_window_state(&mut self) {
         #[cfg(windows)]
         {
-            let hwnd_val = match &self.active {
-                Some(c) => c.hwnd,
+            let target_val = match &self.active {
+                Some(c) => c.target,
                 None => return,
             };
 
             unsafe {
-                use windows::Win32::Foundation::{HWND, RECT};
-                use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic};
+                match target_val {
+                    crate::CaptureTarget::Window(hwnd_val) => {
+                        use windows::Win32::Foundation::{HWND, RECT};
+                        use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic};
 
-                let hwnd = HWND(hwnd_val as *mut _);
-                let minimized = IsIconic(hwnd).as_bool();
-                let was_minimized = self
-                    .active
-                    .as_ref()
-                    .map(|c| c.info.is_minimized)
-                    .unwrap_or(false);
+                        let hwnd = HWND(hwnd_val as *mut _);
+                        let minimized = IsIconic(hwnd).as_bool();
+                        let was_minimized = self
+                            .active
+                            .as_ref()
+                            .map(|c| c.info.is_minimized)
+                            .unwrap_or(false);
 
-                if minimized && !was_minimized {
-                    if let Some(cap) = &mut self.active {
-                        cap.info.is_minimized = true;
+                        if minimized && !was_minimized {
+                            if let Some(cap) = &mut self.active {
+                                cap.info.is_minimized = true;
+                            }
+                            self.emit(CaptureEvent::WindowMinimized { hwnd: hwnd_val });
+                            self.switch_backend_for_minimized();
+                        } else if !minimized && was_minimized {
+                            if let Some(cap) = &mut self.active {
+                                cap.info.is_minimized = false;
+                            }
+                            self.emit(CaptureEvent::WindowRestored { hwnd: hwnd_val });
+                            self.switch_to_best_backend();
+                        }
+
+                        let mut rect = RECT::default();
+                        if GetWindowRect(hwnd, &mut rect).is_ok() {
+                            let w = (rect.right - rect.left).max(0) as u32;
+                            let h = (rect.bottom - rect.top).max(0) as u32;
+                            let (old_w, old_h) = self
+                                .active
+                                .as_ref()
+                                .map(|c| (c.info.width, c.info.height))
+                                .unwrap_or((0, 0));
+                            if w != old_w || h != old_h {
+                                if let Some(cap) = &mut self.active {
+                                    cap.info.width = w;
+                                    cap.info.height = h;
+                                    cap.backend.resize_hint(w, h);
+                                }
+                            }
+                        }
                     }
-                    self.emit(CaptureEvent::WindowMinimized { hwnd: hwnd_val });
-                    self.switch_backend_for_minimized();
-                } else if !minimized && was_minimized {
-                    if let Some(cap) = &mut self.active {
-                        cap.info.is_minimized = false;
-                    }
-                    self.emit(CaptureEvent::WindowRestored { hwnd: hwnd_val });
-                    self.switch_to_best_backend();
-                }
-
-                let mut rect = RECT::default();
-                if GetWindowRect(hwnd, &mut rect).is_ok() {
-                    let w = (rect.right - rect.left).max(0) as u32;
-                    let h = (rect.bottom - rect.top).max(0) as u32;
-                    let (old_w, old_h) = self
-                        .active
-                        .as_ref()
-                        .map(|c| (c.info.width, c.info.height))
-                        .unwrap_or((0, 0));
-                    if w != old_w || h != old_h {
-                        if let Some(cap) = &mut self.active {
-                            cap.info.width = w;
-                            cap.info.height = h;
-                            cap.backend.resize_hint(w, h);
+                    crate::CaptureTarget::Display(hmonitor_val) => {
+                        use windows::Win32::Graphics::Gdi::{
+                            GetMonitorInfoW, HMONITOR, MONITORINFOEXW,
+                        };
+                        let hmonitor = HMONITOR(hmonitor_val as *mut _);
+                        let mut info = MONITORINFOEXW::default();
+                        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+                        if GetMonitorInfoW(hmonitor, &mut info.monitorInfo as *mut _ as *mut _)
+                            .as_bool()
+                        {
+                            let w = (info.monitorInfo.rcMonitor.right
+                                - info.monitorInfo.rcMonitor.left)
+                                .abs() as u32;
+                            let h = (info.monitorInfo.rcMonitor.bottom
+                                - info.monitorInfo.rcMonitor.top)
+                                .abs() as u32;
+                            let (old_w, old_h) = self
+                                .active
+                                .as_ref()
+                                .map(|c| (c.info.width, c.info.height))
+                                .unwrap_or((0, 0));
+                            if w != old_w || h != old_h {
+                                if let Some(cap) = &mut self.active {
+                                    cap.info.width = w;
+                                    cap.info.height = h;
+                                    cap.backend.resize_hint(w, h);
+                                }
+                            }
                         }
                     }
                 }
@@ -332,49 +367,49 @@ impl CaptureManager {
     }
 
     fn switch_to_best_backend(&mut self) {
-        let (_hwnd, kind, minimized) = match &self.active {
-            Some(c) => (c.hwnd, c.info.app_kind.clone(), c.info.is_minimized),
+        let (_target, kind, minimized) = match &self.active {
+            Some(c) => (c.target, c.info.app_kind.clone(), c.info.is_minimized),
             None => return,
         };
         let preferred = preferred_backend(&kind, minimized);
         self.try_switch_backend(preferred, "window restored");
     }
 
-    fn try_switch_backend(&mut self, target: CaptureBackend, reason: &str) {
+    fn try_switch_backend(&mut self, target_backend: CaptureBackend, reason: &str) {
         let cap = match &mut self.active {
             Some(c) => c,
             None => return,
         };
         let current = cap.backend.backend();
-        if current == target {
+        if current == target_backend {
             return;
         }
 
-        let hwnd = cap.hwnd;
-        let mut new_backend: Box<dyn WindowCapture> = match target {
+        let target = cap.target;
+        let mut new_backend: Box<dyn WindowCapture> = match target_backend {
             CaptureBackend::WGC => Box::new(WgcCapture::new()),
             CaptureBackend::DDA | CaptureBackend::DXShared | CaptureBackend::PrintWindow => {
                 Box::new(DdaCapture::new())
             }
         };
 
-        match new_backend.start(hwnd) {
+        match new_backend.start(target) {
             Ok(_) => {
                 cap.backend.stop();
                 cap.backend = new_backend;
                 cap.consecutive_failures = 0;
                 info!(
                     "Switched capture backend: {:?} → {:?} ({})",
-                    current, target, reason
+                    current, target_backend, reason
                 );
                 self.emit(CaptureEvent::BackendSwitched {
                     from: current,
-                    to: target,
+                    to: target_backend,
                     reason: reason.to_string(),
                 });
             }
             Err(e) => {
-                warn!("Failed to switch to {:?}: {}", target, e);
+                warn!("Failed to switch to {:?}: {}", target_backend, e);
                 // Try next fallback
                 self.try_next_fallback(current);
             }
@@ -397,29 +432,33 @@ impl CaptureManager {
                 Some(c) => c,
                 None => return,
             };
-            let hwnd = cap.hwnd;
+            let target = cap.target;
             let mut nb: Box<dyn WindowCapture> = match backend {
                 CaptureBackend::WGC => Box::new(WgcCapture::new()),
                 _ => Box::new(DdaCapture::new()),
             };
-            if nb.start(hwnd).is_ok() {
+            if nb.start(target).is_ok() {
                 cap.backend.stop();
                 cap.backend = nb;
-                self.emit(CaptureEvent::CaptureRecovered {
-                    hwnd,
-                    backend: *backend,
-                });
+                if let crate::CaptureTarget::Window(hwnd) = target {
+                    self.emit(CaptureEvent::CaptureRecovered {
+                        hwnd,
+                        backend: *backend,
+                    });
+                }
                 info!("Recovered capture with {:?} backend", backend);
                 return;
             }
         }
         // All backends failed
         if let Some(cap) = &self.active {
-            self.emit(CaptureEvent::CaptureLost {
-                hwnd: cap.hwnd,
-                reason: "All capture backends failed".to_string(),
-            });
-            error!("All capture backends exhausted for hwnd {}", cap.hwnd);
+            if let crate::CaptureTarget::Window(hwnd) = cap.target {
+                self.emit(CaptureEvent::CaptureLost {
+                    hwnd,
+                    reason: "All capture backends failed".to_string(),
+                });
+            }
+            error!("All capture backends exhausted for target {:?}", cap.target);
         }
     }
 
@@ -431,7 +470,11 @@ impl CaptureManager {
         self.try_next_fallback(current);
     }
 
-    fn create_best_backend(&self, info: &WindowInfo) -> Result<Box<dyn WindowCapture>> {
+    fn create_best_backend(
+        &self,
+        target: crate::CaptureTarget,
+        info: &WindowInfo,
+    ) -> Result<Box<dyn WindowCapture>> {
         let preferred = preferred_backend(&info.app_kind, info.is_minimized);
         let backends: &[CaptureBackend] = &[
             preferred,
@@ -456,7 +499,7 @@ impl CaptureManager {
                 }
                 _ => Box::new(DdaCapture::new()),
             };
-            match capture.start(info.hwnd) {
+            match capture.start(target) {
                 Ok(_) => {
                     info!(
                         "Using {:?} backend for '{}' ({:?})",
@@ -465,13 +508,16 @@ impl CaptureManager {
                     return Ok(capture);
                 }
                 Err(e) => {
-                    debug!("Backend {:?} failed for hwnd {}: {}", backend, info.hwnd, e);
+                    debug!(
+                        "Backend {:?} failed for target {:?}: {}",
+                        backend, target, e
+                    );
                 }
             }
         }
         Err(anyhow!(
-            "No capture backend could start for hwnd {}",
-            info.hwnd
+            "No capture backend could start for target {:?}",
+            target
         ))
     }
 
@@ -497,8 +543,8 @@ impl CaptureManager {
     }
 
     #[allow(dead_code)]
-    pub fn active_hwnd(&self) -> Option<isize> {
-        self.active.as_ref().map(|c| c.hwnd)
+    pub fn active_target(&self) -> Option<crate::CaptureTarget> {
+        self.active.as_ref().map(|c| c.target)
     }
 
     #[allow(dead_code)]

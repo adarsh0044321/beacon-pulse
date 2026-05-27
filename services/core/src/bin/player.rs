@@ -100,6 +100,8 @@ mod run {
             #[cfg(feature = "host")]
             host_session: Arc::new(Mutex::new(None)),
             #[cfg(feature = "host")]
+            active_target: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "host")]
             host_event_rx: Arc::new(Mutex::new(dummy_rx)),
             client_session: Arc::new(Mutex::new(None)),
             broadcast_cancel: Arc::new(Mutex::new(None)),

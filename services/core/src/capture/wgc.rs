@@ -30,7 +30,7 @@ impl WgcCapture {
 
 #[cfg(not(windows))]
 impl WindowCapture for WgcCapture {
-    fn start(&mut self, _hwnd: isize) -> Result<()> {
+    fn start(&mut self, _target: crate::CaptureTarget) -> Result<()> {
         Err(anyhow!("WGC is Windows-only"))
     }
     fn next_frame(&mut self) -> Result<Option<CapturedFrame>> {
@@ -50,7 +50,7 @@ impl WindowCapture for WgcCapture {
 #[cfg(windows)]
 pub struct WgcCapture {
     inner: Option<WgcInner>,
-    hwnd: isize,
+    target: Option<crate::CaptureTarget>,
     shared_device: Option<SharedGpuDeviceArc>,
 }
 
@@ -102,7 +102,7 @@ impl WgcCapture {
     pub fn new() -> Self {
         Self {
             inner: None,
-            hwnd: 0,
+            target: None,
             shared_device: None,
         }
     }
@@ -114,8 +114,8 @@ impl WgcCapture {
         self
     }
 
-    /// Try to initialize the WinRT capture pipeline for `hwnd`.
-    fn try_init(&mut self, hwnd: isize) -> Result<()> {
+    /// Try to initialize the WinRT capture pipeline for `target`.
+    fn try_init(&mut self, target: crate::CaptureTarget) -> Result<()> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
         use windows::Win32::Graphics::Direct3D11::{
@@ -174,10 +174,25 @@ impl WgcCapture {
         let idirect3d: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice =
             winrt_device.cast()?;
 
-        // Build GraphicsCaptureItem from HWND via interop
-        let interop: IGraphicsCaptureItemInterop =
-            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-        let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(HWND(hwnd as *mut _))? };
+        // Build GraphicsCaptureItem from interop
+        use windows::Win32::Graphics::Gdi::HMONITOR;
+
+        let item: GraphicsCaptureItem = unsafe {
+            match target {
+                crate::CaptureTarget::Window(hwnd) => {
+                    let interop: IGraphicsCaptureItemInterop =
+                        windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>(
+                        )?;
+                    interop.CreateForWindow(HWND(hwnd as *mut _))?
+                }
+                crate::CaptureTarget::Display(hmonitor) => {
+                    let interop: IGraphicsCaptureItemInterop =
+                        windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>(
+                        )?;
+                    interop.CreateForMonitor(HMONITOR(hmonitor as *mut _))?
+                }
+            }
+        };
 
         let size = item.Size()?;
         let width = size.Width as u32;
@@ -363,8 +378,13 @@ impl WgcCapture {
             height,
         });
 
+        let handle_val = match target {
+            crate::CaptureTarget::Window(h) => h,
+            crate::CaptureTarget::Display(h) => h,
+        };
+
         info!(
-            hwnd = hwnd,
+            target_handle = handle_val,
             width, height, "WGC capture started (real implementation)"
         );
         Ok(())
@@ -373,12 +393,16 @@ impl WgcCapture {
 
 #[cfg(windows)]
 impl WindowCapture for WgcCapture {
-    fn start(&mut self, hwnd: isize) -> Result<()> {
-        self.hwnd = hwnd;
-        match self.try_init(hwnd) {
+    fn start(&mut self, target: crate::CaptureTarget) -> Result<()> {
+        self.target = Some(target);
+        match self.try_init(target) {
             Ok(()) => Ok(()),
             Err(e) => {
-                warn!(hwnd, error = %e, "WGC init failed — will use DDA fallback");
+                let handle_val = match target {
+                    crate::CaptureTarget::Window(h) => h,
+                    crate::CaptureTarget::Display(h) => h,
+                };
+                warn!(target_handle = handle_val, error = %e, "WGC init failed — will use DDA fallback");
                 Err(e)
             }
         }
@@ -431,7 +455,14 @@ impl WindowCapture for WgcCapture {
         if let Some(inner) = self.inner.take() {
             let _ = inner.session.Close();
             let _ = inner.frame_pool.Close();
-            debug!(hwnd = self.hwnd, "WGC capture stopped");
+            let handle_val = self
+                .target
+                .map(|t| match t {
+                    crate::CaptureTarget::Window(h) => h,
+                    crate::CaptureTarget::Display(h) => h,
+                })
+                .unwrap_or(0);
+            debug!(target_handle = handle_val, "WGC capture stopped");
         }
     }
 

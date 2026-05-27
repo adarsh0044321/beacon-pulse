@@ -102,6 +102,7 @@ mod run {
             shutdown_tx: shutdown_tx.clone(),
             session_id,
             host_session: Arc::new(Mutex::new(None)),
+            active_target: Arc::new(Mutex::new(None)),
             #[cfg(feature = "player")]
             client_session: Arc::new(Mutex::new(None)),
             host_event_rx: Arc::new(Mutex::new(dummy_rx)),

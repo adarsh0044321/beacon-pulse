@@ -29,7 +29,7 @@ enum DdaMode {
 }
 
 pub struct DdaCapture {
-    hwnd: isize,
+    target: Option<crate::CaptureTarget>,
     width: u32,
     height: u32,
     running: bool,
@@ -58,7 +58,7 @@ struct DxgiState {
 impl DdaCapture {
     pub fn new() -> Self {
         Self {
-            hwnd: 0,
+            target: None,
             width: 0,
             height: 0,
             running: false,
@@ -71,7 +71,7 @@ impl DdaCapture {
     /// Try to initialise DXGI OutputDuplication for the monitor containing `hwnd`.
     /// Returns Ok(Some(DxgiState)) on success, Ok(None) if DDA is unavailable.
     #[cfg(windows)]
-    fn try_init_dxgi(hwnd: isize, w: u32, h: u32) -> Result<Option<DxgiState>> {
+    fn try_init_dxgi(target: crate::CaptureTarget, w: u32, h: u32) -> Result<Option<DxgiState>> {
         use windows::core::Interface;
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
@@ -81,15 +81,20 @@ impl DdaCapture {
         };
         use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
         use windows::Win32::Graphics::Dxgi::{
-            IDXGIAdapter, IDXGIDevice, IDXGIOutput, IDXGIOutput1,
-            DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+            IDXGIAdapter, IDXGIDevice, IDXGIOutput1, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
         };
-        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+        use windows::Win32::Graphics::Gdi::{
+            MonitorFromWindow, HMONITOR, MONITOR_DEFAULTTONEAREST,
+        };
 
         unsafe {
-            // Find which monitor the window is on.
-            let monitor = MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONEAREST);
-            let _ = monitor; // used below for adapter matching
+            // Find which monitor we are duplicating
+            let monitor = match target {
+                crate::CaptureTarget::Window(hwnd) => {
+                    MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONEAREST)
+                }
+                crate::CaptureTarget::Display(hmonitor) => HMONITOR(hmonitor as *mut _),
+            };
 
             // Create a D3D11 device.
             let mut device = None;
@@ -112,7 +117,20 @@ impl DdaCapture {
             // Walk adapters → outputs → attempt AcquireDuplication.
             let dxgi_device: IDXGIDevice = device.cast()?;
             let adapter: IDXGIAdapter = dxgi_device.GetAdapter()?;
-            let output: IDXGIOutput = adapter.EnumOutputs(0)?; // primary output
+
+            // Find matching output for monitor
+            let mut matching_output = None;
+            let mut i = 0;
+            while let Ok(out) = adapter.EnumOutputs(i) {
+                let desc = out.GetDesc()?;
+                if desc.Monitor == monitor {
+                    matching_output = Some(out);
+                    break;
+                }
+                i += 1;
+            }
+            let output = matching_output
+                .ok_or_else(|| anyhow!("Monitor output not found on DXGI adapter"))?;
             let output1: IDXGIOutput1 = output.cast()?;
 
             let duplication = match output1.DuplicateOutput(&device) {
@@ -246,34 +264,77 @@ impl DdaCapture {
 // ── WindowCapture trait impl ──────────────────────────────────────────────────
 
 impl WindowCapture for DdaCapture {
-    fn start(&mut self, hwnd: isize) -> Result<()> {
+    fn start(&mut self, target: crate::CaptureTarget) -> Result<()> {
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::Foundation::{HWND, RECT};
-            use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+            match target {
+                crate::CaptureTarget::Window(hwnd) => {
+                    use windows::Win32::Foundation::{HWND, RECT};
+                    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 
-            let mut rect = RECT::default();
-            if GetClientRect(HWND(hwnd as *mut _), &mut rect).is_err() {
-                return Err(anyhow!("GetClientRect failed for hwnd {}", hwnd));
+                    let mut rect = RECT::default();
+                    if GetClientRect(HWND(hwnd as *mut _), &mut rect).is_err() {
+                        return Err(anyhow!("GetClientRect failed for hwnd {}", hwnd));
+                    }
+                    self.width = (rect.right - rect.left).max(1) as u32;
+                    self.height = (rect.bottom - rect.top).max(1) as u32;
+                }
+                crate::CaptureTarget::Display(hmonitor) => {
+                    use windows::Win32::Graphics::Gdi::{
+                        GetMonitorInfoW, HMONITOR, MONITORINFOEXW,
+                    };
+                    let mut mi = MONITORINFOEXW::default();
+                    mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+                    if GetMonitorInfoW(
+                        HMONITOR(hmonitor as *mut _),
+                        &mut mi.monitorInfo as *mut _ as *mut _,
+                    )
+                    .as_bool()
+                    {
+                        self.width = (mi.monitorInfo.rcMonitor.right
+                            - mi.monitorInfo.rcMonitor.left)
+                            .abs() as u32;
+                        self.height = (mi.monitorInfo.rcMonitor.bottom
+                            - mi.monitorInfo.rcMonitor.top)
+                            .abs() as u32;
+                    } else {
+                        return Err(anyhow!(
+                            "GetMonitorInfoW failed for monitor handle {}",
+                            hmonitor
+                        ));
+                    }
+                }
             }
-            self.width = (rect.right - rect.left).max(1) as u32;
-            self.height = (rect.bottom - rect.top).max(1) as u32;
         }
-        self.hwnd = hwnd;
+        self.target = Some(target);
         self.running = true;
 
         // Try to upgrade to DXGI mode.
         #[cfg(windows)]
         {
-            match Self::try_init_dxgi(hwnd, self.width, self.height) {
+            match Self::try_init_dxgi(target, self.width, self.height) {
                 Ok(Some(state)) => {
                     self.dxgi = Some(state);
                     self.mode = DdaMode::Dxgi;
-                    debug!("DdaCapture started in DXGI mode for hwnd {}", hwnd);
+                    let handle_val = match target {
+                        crate::CaptureTarget::Window(h) => h,
+                        crate::CaptureTarget::Display(h) => h,
+                    };
+                    debug!(
+                        "DdaCapture started in DXGI mode for target handle {}",
+                        handle_val
+                    );
                 }
                 Ok(None) => {
                     self.mode = DdaMode::PrintWindow;
-                    debug!("DdaCapture started in PrintWindow mode for hwnd {}", hwnd);
+                    let handle_val = match target {
+                        crate::CaptureTarget::Window(h) => h,
+                        crate::CaptureTarget::Display(h) => h,
+                    };
+                    debug!(
+                        "DdaCapture started in PrintWindow mode for target handle {}",
+                        handle_val
+                    );
                 }
                 Err(e) => {
                     warn!(error = %e, "DXGI init failed — using PrintWindow fallback");
@@ -284,13 +345,13 @@ impl WindowCapture for DdaCapture {
         #[cfg(not(windows))]
         {
             self.mode = DdaMode::PrintWindow;
-            debug!("DdaCapture started (non-Windows stub) for hwnd {}", hwnd);
+            debug!("DdaCapture started (non-Windows stub)");
         }
         Ok(())
     }
 
     fn next_frame(&mut self) -> Result<Option<CapturedFrame>> {
-        if !self.running || self.hwnd == 0 {
+        if !self.running || self.target.is_none() {
             return Ok(None);
         }
 
@@ -318,7 +379,13 @@ impl WindowCapture for DdaCapture {
             }
 
             // ── PrintWindow / GDI path ───────────────────────────────────────
-            return self.printwindow_frame();
+            if let Some(crate::CaptureTarget::Window(_)) = self.target {
+                return self.printwindow_frame();
+            } else {
+                return Err(anyhow!(
+                    "PrintWindow GDI capture fallback is only supported for Window targets"
+                ));
+            }
         }
 
         #[allow(unreachable_code)]
@@ -327,7 +394,7 @@ impl WindowCapture for DdaCapture {
 
     fn stop(&mut self) {
         self.running = false;
-        self.hwnd = 0;
+        self.target = None;
         #[cfg(windows)]
         {
             self.dxgi = None;
@@ -385,13 +452,17 @@ impl DdaCapture {
         use windows::Win32::UI::WindowsAndMessaging::PW_RENDERFULLCONTENT;
 
         unsafe {
-            let hwnd = HWND(self.hwnd as *mut _);
+            let hwnd_val = match self.target {
+                Some(crate::CaptureTarget::Window(h)) => h,
+                _ => return Err(anyhow!("PrintWindow target must be a Window")),
+            };
+            let hwnd = HWND(hwnd_val as *mut _);
             let w = self.width as i32;
             let h = self.height as i32;
 
             let hdc_window = GetDC(hwnd);
             if hdc_window.is_invalid() {
-                return Err(anyhow!("GetDC failed for hwnd {}", self.hwnd));
+                return Err(anyhow!("GetDC failed for hwnd {}", hwnd_val));
             }
 
             let hdc_mem = CreateCompatibleDC(hdc_window);

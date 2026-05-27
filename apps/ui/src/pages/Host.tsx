@@ -1,10 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, Play, Square, RefreshCw, Users, Key, AlertTriangle, Cpu, Zap, Settings as SettingsIcon } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { 
+  ArrowLeft, Play, Square, RefreshCw, Users, Key, AlertTriangle, 
+  Cpu, Zap, Settings as SettingsIcon, Monitor, Activity, Terminal, ShieldAlert
+} from 'lucide-react';
 import type { Page } from '../App';
 import { useSessionStore, type WindowInfo } from '../store/sessionStore';
+import { useToastStore } from '../store/toastStore';
+import { DebugOverlay } from '../components/DebugOverlay';
 
 interface HostProps { onNavigate: (p: Page) => void; }
+
+interface ParsedLog {
+  timestamp?: string;
+  level?: string;
+  message?: string;
+  target?: string;
+  raw: string;
+}
 
 export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   const {
@@ -16,8 +30,23 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     encoderInfo, setEncoderInfo,
   } = useSessionStore();
 
+  const { addToast } = useToastStore();
+
+  const [tab, setTab] = useState<'share' | 'devices' | 'performance' | 'logs'>('share');
   const [selectedHwnd, setSelectedHwnd] = useState<number | null>(null);
   const [codeTimer, setCodeTimer] = useState(0);
+  const [windowSearch, setWindowSearch] = useState('');
+  
+  // Real-time logs state
+  const [logs, setLogs] = useState<string[]>([]);
+  const [logType, setLogType] = useState<string>('service');
+  const [logSearch, setLogSearch] = useState('');
+  
+  // Stats history for chart
+  const [statsHistory, setStatsHistory] = useState<{ fps: number; encode: number; latency: number }[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
   const [captureStatus, setCaptureStatus] = useState<{
     backend: string;
     isStale: boolean;
@@ -34,23 +63,24 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Auto-retry window listing — the service may take 2–3 s to start via the watchdog.
+  // Auto-retry and periodic refresh of windows list
   useEffect(() => {
     let cancelled = false;
     let retries = 0;
     const maxRetries = 6;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const tryFetch = async () => {
       while (!cancelled && retries < maxRetries) {
         try {
           await fetchWindows();
-          // If we got windows, stop retrying
           const state = useSessionStore.getState();
           if (state.availableWindows.length > 0) {
             setLoadError(null);
-            return;
+            break;
           }
         } catch {
-          // Service might not be ready yet
+          // ignore
         }
         retries++;
         if (retries < maxRetries) {
@@ -59,22 +89,35 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
         }
       }
       if (!cancelled) {
-        setLoadError(null); // Clear the retrying message even if no windows found
+        setLoadError(null);
+        // Start periodic refresh when on the share tab and not sharing
+        intervalId = setInterval(() => {
+          const state = useSessionStore.getState();
+          if (!state.isSharing && tab === 'share') {
+            fetchWindows().catch(console.error);
+          }
+        }, 4000);
       }
     };
-    tryFetch();
-    return () => { cancelled = true; };
-  }, [fetchWindows]);
 
-  // Listen for backend-switched events from the service.
+    tryFetch();
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [fetchWindows, tab]);
+
+  // Capture backend change listener
   useEffect(() => {
     const unlisten = listen<{ to: string; reason: string }>('capture_backend_switched', ev => {
       setCaptureStatus(s => ({ ...s, backend: ev.payload.to }));
+      addToast('Backend Switched', `Capture engine changed to ${ev.payload.to}`, 'info');
     });
     return () => { unlisten.then(f => f()); };
-  }, []);
+  }, [addToast]);
 
-  // Listen for all service push events (Stats, PairingCode, EncoderReady, etc.)
+  // IPC push events router
   useEffect(() => {
     const unlisten = listen<string>('service-event', (event) => {
       try {
@@ -105,34 +148,15 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
               hw_accelerated: ev.hw_accelerated,
             });
             break;
-          case 'client_connected':
-            useSessionStore.getState().addConnectedClient({
-              client_id: ev.client_id,
-              display_name: ev.display_name,
-              addr: ev.addr,
-              permissions: {
-                input_control: true,
-                clipboard: true,
-                audio: true,
-              },
-              stats: {
-                fps: 60,
-                latency_ms: 0,
-                bitrate_kbps: 0,
-              }
-            });
-            break;
-          case 'client_disconnected':
-            useSessionStore.getState().removeConnectedClient(ev.client_id);
-            break;
         }
       } catch {
-        // ignore parse errors
+        // ignore
       }
     });
     return () => { unlisten.then(f => f()); };
   }, [updateStats, setEncoderInfo]);
 
+  // Expiry Timer countdown
   useEffect(() => {
     if (!pairingCode) return;
     setCodeTimer(pairingExpiresIn);
@@ -145,9 +169,102 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     return () => clearInterval(iv);
   }, [pairingCode, pairingExpiresIn]);
 
+  // Logs polling
+  const fetchLogs = useCallback(async () => {
+    try {
+      const lines = await invoke<string[]>('read_recent_logs', { logType, limit: 120 });
+      setLogs(lines);
+    } catch (e) {
+      console.error('Failed to read logs:', e);
+    }
+  }, [logType]);
+
+  useEffect(() => {
+    fetchLogs();
+    const iv = setInterval(fetchLogs, 1500);
+    return () => clearInterval(iv);
+  }, [fetchLogs]);
+
+  // Scroll to bottom of logs console
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs]);
+
+  // Performance stats accumulator
+  useEffect(() => {
+    if (isSharing) {
+      setStatsHistory(h => {
+        const next = [...h, { fps: stats.fps, encode: stats.encode_ms, latency: stats.latency_ms }];
+        return next.length > 60 ? next.slice(-60) : next;
+      });
+    } else {
+      setStatsHistory([]);
+    }
+  }, [stats.fps, stats.encode_ms, stats.latency_ms, isSharing]);
+
+  // Performance chart renderer
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || statsHistory.length < 2) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      const y = (h / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Draw FPS (Green)
+    ctx.beginPath();
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 2;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.fps, 75) / 75) * (h - 20) - 10;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw Encoder Latency (Yellow)
+    ctx.beginPath();
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 1.5;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.encode, 20) / 20) * (h - 20) - 10;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw Network Latency (Blue)
+    ctx.beginPath();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1.5;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.latency, 40) / 40) * (h - 20) - 10;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }, [statsHistory]);
+
   const handleStartShare = async () => {
     if (!selectedHwnd) return;
-    // Find selected window info to show render-suspension warning early
     const win = availableWindows.find(w => w.hwnd === selectedHwnd);
     if (win?.suspends_render_when_minimized) {
       setCaptureStatus(s => ({
@@ -160,231 +277,413 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     await generatePairingCode();
   };
 
+  const parseLogLine = (line: string): ParsedLog => {
+    try {
+      const data = JSON.parse(line);
+      const msg = data.fields?.message || data.message || line;
+      return {
+        timestamp: data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : undefined,
+        level: data.level,
+        message: msg,
+        target: data.target,
+        raw: line,
+      };
+    } catch {
+      return {
+        raw: line,
+        message: line,
+      };
+    }
+  };
+
   const getWindowIcon = (win: WindowInfo) => {
     const name = win.process_name.toLowerCase();
-    if (name.includes('chrome')) return '🌐';
-    if (name.includes('firefox')) return '🦊';
-    if (name.includes('code')) return '💻';
-    if (name.includes('notepad')) return '📝';
-    if (name.includes('explorer')) return '📁';
-    if (name.includes('discord')) return '💬';
+    if (name.includes('chrome') || name.includes('edge') || name.includes('browser')) return '🌐';
+    if (name.includes('code') || name.includes('studio') || name.includes('visual')) return '💻';
+    if (name.includes('notepad') || name.includes('word') || name.includes('text')) return '📝';
+    if (name.includes('explorer') || name.includes('files')) return '📁';
+    if (name.includes('discord') || name.includes('slack') || name.includes('teams')) return '💬';
+    if (name.includes('player') || name.includes('media') || name.includes('vlc')) return '🎬';
     return '🖥️';
   };
 
+  // Window list search query
+  const filteredWindows = availableWindows.filter(win => 
+    win.title.toLowerCase().includes(windowSearch.toLowerCase()) ||
+    win.process_name.toLowerCase().includes(windowSearch.toLowerCase())
+  );
+
   return (
-    <div className="page">
-      {/* Header */}
-      <div className="page-header">
-        {import.meta.env.MODE === 'host' ? (
-          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('settings')}>
+    <div className="dashboard-container">
+      {/* Sidebar Navigation */}
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <Monitor size={22} style={{ color: 'var(--accent)' }} />
+          <h2>Beacon Host</h2>
+        </div>
+
+        <div className="sidebar-nav">
+          <div className={`sidebar-item ${tab === 'share' ? 'active' : ''}`} onClick={() => setTab('share')}>
+            <Play size={16} />
+            <span>Share Screen</span>
+          </div>
+          
+          <div className={`sidebar-item ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
+            <Users size={16} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
+              Devices
+              {connectedClients.length > 0 && (
+                <span className="badge badge-active" style={{ marginLeft: 'auto', padding: '1px 6px', fontSize: '0.68rem' }}>
+                  {connectedClients.length}
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className={`sidebar-item ${tab === 'performance' ? 'active' : ''}`} onClick={() => setTab('performance')}>
+            <Activity size={16} />
+            <span>Performance</span>
+          </div>
+
+          <div className={`sidebar-item ${tab === 'logs' ? 'active' : ''}`} onClick={() => setTab('logs')}>
+            <Terminal size={16} />
+            <span>System Logs</span>
+          </div>
+        </div>
+
+        <div className="sidebar-footer">
+          <button className="btn btn-ghost btn-sm btn-full" onClick={() => onNavigate('settings')}>
             <SettingsIcon size={14} /> Settings
           </button>
-        ) : (
-          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('home')}>
-            <ArrowLeft size={14} /> Back
-          </button>
-        )}
-        <h2 style={{ flex: 1 }}>Host Mode</h2>
-        {isSharing && (
-          <div className="badge badge-active">
-            <div className="pulse-dot" /> Sharing Active
-          </div>
-        )}
+          
+          {import.meta.env.MODE !== 'host' && (
+            <button className="btn btn-ghost btn-sm btn-full" onClick={() => onNavigate('home')}>
+              <ArrowLeft size={14} /> Main Menu
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="page-content">
-        {/* Window Picker */}
-        {!isSharing && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3>Select Window to Share</h3>
-              <button className="btn btn-ghost btn-sm" onClick={fetchWindows} disabled={windowsLoading}>
-                <RefreshCw size={12} className={windowsLoading ? 'spinner' : ''} />
-                Refresh
-              </button>
+      {/* Main Dashboard Space */}
+      <div className="main-content">
+        <div className="page-header">
+          <h2 style={{ textTransform: 'capitalize' }}>
+            {tab === 'share' ? 'Capture Engine' : tab === 'devices' ? 'Connected Devices' : tab === 'performance' ? 'Performance Analytics' : 'System Logs'}
+          </h2>
+          {isSharing && (
+            <div className="badge badge-active" style={{ marginLeft: 'auto' }}>
+              <div className="pulse-dot" /> Broadcasting
             </div>
+          )}
+        </div>
 
-            {windowsLoading ? (
-              <div className="empty-state">
-                <div className="spinner" />
-                <p>{loadError || 'Scanning windows…'}</p>
-              </div>
-            ) : availableWindows.length === 0 ? (
-              <div className="empty-state">
-                <span className="empty-state-icon">🪟</span>
-                <p>No visible windows found</p>
-                <button className="btn btn-ghost btn-sm" onClick={fetchWindows} style={{ marginTop: '8px' }}>
-                  <RefreshCw size={12} /> Try Again
-                </button>
-              </div>
-            ) : (
-              <div className="window-grid">
-                {availableWindows.map(win => (
-                  <div
-                    key={win.hwnd}
-                    id={`window-card-${win.hwnd}`}
-                    className={`window-card ${selectedHwnd === win.hwnd ? 'selected' : ''}`}
-                    onClick={() => setSelectedHwnd(win.hwnd)}
+        <div className="page-content">
+          
+          {/* TAB 1: Share Panel */}
+          {tab === 'share' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
+              {!isSharing ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="text"
+                        placeholder="Search open windows..."
+                        value={windowSearch}
+                        onChange={e => setWindowSearch(e.target.value)}
+                        style={{ maxWidth: '360px' }}
+                      />
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={fetchWindows} disabled={windowsLoading}>
+                      <RefreshCw size={14} className={windowsLoading ? 'spinner' : ''} />
+                      Refresh List
+                    </button>
+                  </div>
+
+                  {windowsLoading ? (
+                    <div className="empty-state" style={{ flex: 1 }}>
+                      <div className="spinner" />
+                      <p>{loadError || 'Scanning local Windows handles...'}</p>
+                    </div>
+                  ) : filteredWindows.length === 0 ? (
+                    <div className="empty-state" style={{ flex: 1 }}>
+                      <span className="empty-state-icon">🪟</span>
+                      <p>{windowSearch ? 'No windows match your query' : 'No capture-eligible windows found'}</p>
+                      <button className="btn btn-ghost btn-sm" onClick={fetchWindows} style={{ marginTop: '8px' }}>
+                        <RefreshCw size={12} /> Retry Scan
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="window-grid" style={{ overflowY: 'auto', flex: 1, maxHeight: 'calc(100vh - 280px)' }}>
+                      {filteredWindows.map(win => (
+                        <div
+                          key={win.hwnd}
+                          id={`window-card-${win.hwnd}`}
+                          className={`window-card ${selectedHwnd === win.hwnd ? 'selected' : ''}`}
+                          onClick={() => setSelectedHwnd(win.hwnd)}
+                        >
+                          <div className="window-thumb">{getWindowIcon(win)}</div>
+                          <div className="window-info">
+                            <span className="window-title" title={win.title}>{win.title}</span>
+                            <span className="window-process">{win.process_name} · {win.width}×{win.height}</span>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                              {win.is_minimized && <span className="badge badge-warning" style={{ fontSize: '0.65rem', padding: '1px 6px' }}>Minimized</span>}
+                              <span className="badge badge-inactive" style={{ fontSize: '0.65rem', padding: '1px 6px' }}>{win.app_kind}</span>
+                              {win.suspends_render_when_minimized && (
+                                <span title="This app stops rendering when minimized"
+                                  style={{ fontSize: '0.7rem', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                  ⚠ Suspends
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    id="btn-start-share"
+                    className="btn btn-success btn-lg btn-full"
+                    disabled={!selectedHwnd || windowsLoading}
+                    onClick={handleStartShare}
+                    style={{ marginTop: 'auto' }}
                   >
-                    <div className="window-thumb">{getWindowIcon(win)}</div>
-                    <div className="window-info">
-                      <span className="window-title">{win.title}</span>
-                      <span className="window-process">{win.process_name} · {win.width}×{win.height}</span>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                        {win.is_minimized && <span className="badge badge-warning" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>Minimized</span>}
-                        <span className="badge badge-inactive" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>{win.app_kind}</span>
-                        {win.suspends_render_when_minimized && (
-                          <span title="This app may pause rendering when minimized"
-                            style={{ fontSize: '0.7rem', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            ⚠
+                    <Play size={16} /> Broadcast Selected Window
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {/* Backend Warning */}
+                  {captureStatus.warning && (
+                    <div className="glass-panel" style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '12px',
+                      background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)',
+                      borderRadius: 'var(--radius-md)', padding: '14px 16px',
+                    }}>
+                      <AlertTriangle size={18} style={{ color: 'var(--warning)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.820rem', color: 'var(--warning)', lineHeight: 1.5 }}>
+                        {captureStatus.warning}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* active panel details */}
+                  <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+                        <Key size={16} />
+                        <span style={{ fontSize: '0.875rem' }}>Connection Pairing Code</span>
+                        {codeTimer > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({codeTimer}s)</span>}
+                      </div>
+                      <div className="pairing-code">{pairingCode ?? '------'}</div>
+                      <button className="btn btn-ghost btn-sm" onClick={generatePairingCode}>Cycle Pairing Code</button>
+                    </div>
+
+                    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Streaming Session</h3>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Window HWND:</span>
+                        <span style={{ fontFamily: 'monospace' }}>{activeHwnd ?? 'Unknown'}</span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Capture Engine:</span>
+                        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{captureStatus.backend}</span>
+                      </div>
+
+                      {encoderInfo && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>GPU Encoder:</span>
+                          <span style={{ color: encoderInfo.hw_accelerated ? 'var(--success)' : 'var(--text-secondary)' }}>
+                            {encoderInfo.encoder_name} ({encoderInfo.hw_accelerated ? 'HW Accelerated' : 'Software'})
                           </span>
-                        )}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Zero-Copy Mode:</span>
+                        <span style={{ color: stats.gpu_path_active ? 'var(--success)' : 'var(--warning)' }}>
+                          {stats.gpu_path_active ? 'Enabled' : 'CPU Fallback'}
+                        </span>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
 
-            <button
-              id="btn-start-share"
-              className="btn btn-success btn-lg btn-full"
-              disabled={!selectedHwnd}
-              onClick={handleStartShare}
-            >
-              <Play size={16} /> Start Sharing
-            </button>
-          </>
-        )}
-
-        {/* Active Share Panel */}
-        {isSharing && (
-          <>
-            {/* Capture status warning */}
-            {captureStatus.warning && (
-              <div style={{
-                display: 'flex', alignItems: 'flex-start', gap: '10px',
-                background: 'rgba(247,166,79,0.1)', border: '1px solid rgba(247,166,79,0.3)',
-                borderRadius: 'var(--radius-md)', padding: '12px 14px',
-              }}>
-                <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '1px' }} />
-                <span style={{ fontSize: '0.8rem', color: 'var(--warning)', lineHeight: 1.5 }}>
-                  {captureStatus.warning}
-                </span>
-              </div>
-            )}
-
-            {/* Capture backend info */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              background: 'var(--bg-surface)', borderRadius: 'var(--radius-sm)',
-              padding: '8px 12px', fontSize: '0.78rem',
-            }}>
-              <Cpu size={13} style={{ color: 'var(--accent)' }} />
-              <span style={{ color: 'var(--text-muted)' }}>Capture backend:</span>
-              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{captureStatus.backend}</span>
-              {captureStatus.renderSuspended && (
-                <span className="badge badge-warning" style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>⚠ Render Paused</span>
-              )}
-              {captureStatus.isStale && !captureStatus.renderSuspended && (
-                <span className="badge badge-inactive" style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>Last Frame</span>
+                  <button id="btn-stop-share" className="btn btn-danger btn-lg btn-full" onClick={stopShare}>
+                    <Square size={16} /> Terminate Broadcast Stream
+                  </button>
+                </div>
               )}
             </div>
+          )}
 
-            {/* Pairing code */}
-            <div className="card" style={{ textAlign: 'center', gap: '12px', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                <Key size={14} />
-                <span style={{ fontSize: '0.8rem' }}>Pairing Code</span>
-                {codeTimer > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>expires in {codeTimer}s</span>}
+          {/* TAB 2: Devices */}
+          {tab === 'devices' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={16} />
+                <h3>Active Client Viewers ({connectedClients.length})</h3>
               </div>
-              <div className="pairing-code">{pairingCode ?? '------'}</div>
-              <button className="btn btn-ghost btn-sm" onClick={generatePairingCode}>Generate new code</button>
-            </div>
-
-            {/* Connected clients */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <Users size={14} />
-                <h3>Connected Devices ({connectedClients.length})</h3>
-              </div>
+              
               {connectedClients.length === 0 ? (
-                <div className="empty-state" style={{ padding: '20px' }}>
-                  <p>Waiting for clients… Share the code above</p>
+                <div className="empty-state" style={{ padding: '36px' }}>
+                  <p>No connections established. Share the 6-digit pairing code on page tab 1 to allow client joining.</p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {connectedClients.map(client => (
                     <div key={client.client_id} className="device-card">
                       <div>
-                        <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{client.display_name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {client.addr} · {client.permissions.input_control ? 'Full Control' : 'View Only'}
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>{client.display_name}</div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          IP: {client.addr} · Input Permission: {client.permissions.input_control ? 'Allow Control' : 'Read Only'}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <span className="badge badge-active">{client.stats.fps.toFixed(0)} fps</span>
-                        <button className="btn btn-danger btn-sm" onClick={() => kickClient(client.client_id)}>Kick</button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span className="badge badge-active">{client.stats.fps.toFixed(0)} FPS</span>
+                        <button className="btn btn-danger btn-sm" onClick={() => kickClient(client.client_id)}>Kick Connection</button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+          )}
 
-            <button id="btn-stop-share" className="btn btn-danger btn-lg btn-full" onClick={stopShare}>
-              <Square size={16} /> Stop Sharing
-            </button>
-          </>
-        )}
+          {/* TAB 3: Performance */}
+          {tab === 'performance' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {isSharing ? (
+                <>
+                  {/* Dashboard stats cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+                    <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Stream Frame Rate</span>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--success)', marginTop: '6px' }}>
+                        {stats.fps.toFixed(0)} <span style={{ fontSize: '0.9rem' }}>FPS</span>
+                      </div>
+                    </div>
+                    
+                    <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Encode Delay</span>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 700, color: stats.encode_ms > 15 ? 'var(--warning)' : 'var(--text-primary)', marginTop: '6px' }}>
+                        {stats.encode_ms} <span style={{ fontSize: '0.9rem' }}>ms</span>
+                      </div>
+                    </div>
+
+                    <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Network RTT</span>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 700, color: stats.latency_ms > 50 ? 'var(--danger)' : 'var(--accent)', marginTop: '6px' }}>
+                        {stats.latency_ms} <span style={{ fontSize: '0.9rem' }}>ms</span>
+                      </div>
+                    </div>
+
+                    <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Bitrate Transfer</span>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-purple)', marginTop: '6px' }}>
+                        {(stats.bitrate_kbps / 1000).toFixed(1)} <span style={{ fontSize: '0.9rem' }}>Mbps</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sparkline canvas graph */}
+                  <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3>Real-Time Engine Graphs</h3>
+                      <div style={{ display: 'flex', gap: '14px', fontSize: '0.75rem' }}>
+                        <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>■ FPS</span>
+                        <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '4px' }}>■ Encode</span>
+                        <span style={{ color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '4px' }}>■ Network</span>
+                      </div>
+                    </div>
+                    <canvas ref={canvasRef} width={600} height={180} style={{ width: '100%', height: '180px', display: 'block', background: 'rgba(0,0,0,0.15)', borderRadius: 'var(--radius-md)' }} />
+                  </div>
+
+                  {/* Zero-Copy info card */}
+                  <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '14px', border: `1px solid ${stats.gpu_path_active ? '#10b98144' : '#f59e0b44'}` }}>
+                    {stats.gpu_path_active ? (
+                      <Zap size={24} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <Cpu size={24} style={{ color: 'var(--warning)' }} />
+                    )}
+                    <div>
+                      <h4 style={{ fontWeight: 600 }}>Zero-Copy GPU Path</h4>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {stats.gpu_path_active 
+                          ? 'Active. Display frames transit directly from your GPU memory into the encoder without CPU readback copies, preserving system performance.'
+                          : 'Inactive. Falling back to CPU texture rendering buffer. Ensure graphics drivers are updated to optimize LAN encoding.'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">
+                  <Activity size={32} style={{ opacity: 0.3 }} />
+                  <p>Performance analytics will plot once a window share stream begins broadcasting.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: Logs */}
+          {tab === 'logs' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: '100%', minHeight: 'calc(100vh - 260px)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {['service', 'capture', 'network', 'metrics'].map(type => (
+                    <button
+                      key={type}
+                      className={`btn btn-sm ${logType === type ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => setLogType(type)}
+                      style={{ textTransform: 'capitalize' }}
+                    >
+                      {type} Logs
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Filter logs by keyword..."
+                  value={logSearch}
+                  onChange={e => setLogSearch(e.target.value)}
+                  style={{ maxWidth: '240px' }}
+                />
+              </div>
+
+              {/* Console log box */}
+              <div className="logs-console" style={{ flex: 1, maxHeight: 'calc(100vh - 330px)' }}>
+                {logs.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>Loading service logs...</div>
+                ) : (
+                  logs
+                    .map(parseLogLine)
+                    .filter(log => log.message?.toLowerCase().includes(logSearch.toLowerCase()) || (log.target?.toLowerCase() || '').includes(logSearch.toLowerCase()))
+                    .map((log, index) => (
+                      <div key={index} className={`log-entry ${(log.level || '').toLowerCase()}`}>
+                        {log.timestamp && <span className="log-time">[{log.timestamp}]</span>}
+                        {log.level && <span className="log-level" style={{ fontWeight: 600 }}>{log.level}</span>}
+                        {log.target && <span className="log-target" style={{ color: 'var(--accent-purple)' }}>{log.target}:</span>}
+                        <span className="log-text">{log.message}</span>
+                      </div>
+                    ))
+                )}
+                <div ref={logsEndRef} />
+              </div>
+            </div>
+          )}
+
+        </div>
       </div>
 
-      {/* Stats bar */}
+      {/* Debug Overlay listener trigger */}
       {isSharing && (
-        <div className="stats-bar">
-          {/* FPS — colour-coded */}
-          <div className="stat-item">
-            FPS
-            <span
-              className="stat-value"
-              style={{
-                color: stats.fps >= 55 ? 'var(--success)'
-                     : stats.fps >= 30 ? 'var(--warning)'
-                     : 'var(--danger)',
-              }}
-            >
-              {stats.fps.toFixed(0)}
-            </span>
-          </div>
-
-          <div className="stat-item">Enc <span className="stat-value">{stats.encode_ms ?? 0}ms</span></div>
-          <div className="stat-item">Net <span className="stat-value">{stats.latency_ms}ms</span></div>
-          <div className="stat-item">Bitrate <span className="stat-value">{(stats.bitrate_kbps / 1000).toFixed(1)} Mbps</span></div>
-          <div className="stat-item">Clients <span className="stat-value">{stats.client_count}</span></div>
-
-          {/* GPU / CPU badge */}
-          <div
-            className="stat-item"
-            title={stats.gpu_path_active ? 'GPU zero-copy texture path is active' : 'CPU software encode path'}
-            style={{ marginLeft: 'auto', cursor: 'default' }}
-          >
-            {stats.gpu_path_active ? (
-              <span style={{
-                display: 'flex', alignItems: 'center', gap: '4px',
-                color: 'var(--success)', fontWeight: 600, fontSize: '0.72rem',
-              }}>
-                <Zap size={11} /> GPU
-              </span>
-            ) : (
-              <span style={{
-                display: 'flex', alignItems: 'center', gap: '4px',
-                color: 'var(--text-muted)', fontWeight: 500, fontSize: '0.72rem',
-              }}>
-                <Cpu size={11} /> CPU
-              </span>
-            )}
-          </div>
-        </div>
+        <DebugOverlay 
+          backend={captureStatus.backend} 
+          sessionId={useSessionStore.getState().stats.gpu_path_active ? "GPU-Direct" : "CPU-Render"} 
+        />
       )}
     </div>
   );

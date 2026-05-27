@@ -13,15 +13,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 
 /// Dispatch a received input event to the system.
-/// target_hwnd: the HWND that is currently being shared.
-pub fn dispatch_input(event: InputMsg) -> Result<()> {
+/// target: the CaptureTarget that is currently being shared.
+pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> Result<()> {
     match event {
         InputMsg::MouseMove {
             x,
             y,
             viewport_w,
             viewport_h,
-        } => inject_mouse_move(x, y, viewport_w, viewport_h, None),
+        } => inject_mouse_move(x, y, viewport_w, viewport_h, target),
         InputMsg::MouseButton {
             button,
             pressed,
@@ -29,7 +29,7 @@ pub fn dispatch_input(event: InputMsg) -> Result<()> {
             y,
             viewport_w,
             viewport_h,
-        } => inject_mouse_button(button, pressed, x, y, viewport_w, viewport_h, None),
+        } => inject_mouse_button(button, pressed, x, y, viewport_w, viewport_h, target),
         InputMsg::MouseScroll {
             delta_x: _,
             delta_y,
@@ -43,22 +43,110 @@ pub fn dispatch_input(event: InputMsg) -> Result<()> {
 }
 
 #[cfg(windows)]
+fn get_target_rect(
+    target: Option<crate::CaptureTarget>,
+) -> Option<windows::Win32::Foundation::RECT> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN,
+    };
+    if let Some(t) = target {
+        match t {
+            crate::CaptureTarget::Window(hwnd) => {
+                let mut rect = Default::default();
+                unsafe {
+                    if GetWindowRect(windows::Win32::Foundation::HWND(hwnd as *mut _), &mut rect)
+                        .is_ok()
+                    {
+                        return Some(rect);
+                    }
+                }
+            }
+            crate::CaptureTarget::Display(hmon) => {
+                let mut info = MONITORINFO {
+                    cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                unsafe {
+                    if GetMonitorInfoW(
+                        windows::Win32::Graphics::Gdi::HMONITOR(hmon as *mut _),
+                        &mut info,
+                    )
+                    .as_bool()
+                    {
+                        return Some(info.rcMonitor);
+                    }
+                }
+            }
+        }
+    }
+    // Default to primary monitor if None
+    unsafe {
+        Some(windows::Win32::Foundation::RECT {
+            left: 0,
+            top: 0,
+            right: GetSystemMetrics(SM_CXSCREEN),
+            bottom: GetSystemMetrics(SM_CYSCREEN),
+        })
+    }
+}
+
+#[cfg(windows)]
 fn screen_coords(
     norm_x: f32,
     norm_y: f32,
     viewport_w: u32,
     viewport_h: u32,
-    _hwnd: Option<isize>,
-) -> (i32, i32) {
-    // Normalize to 0..65535 for MOUSEEVENTF_ABSOLUTE
-    let sx = (norm_x / viewport_w as f32 * 65535.0) as i32;
-    let sy = (norm_y / viewport_h as f32 * 65535.0) as i32;
-    (sx.clamp(0, 65535), sy.clamp(0, 65535))
+    target: Option<crate::CaptureTarget>,
+) -> (
+    i32,
+    i32,
+    windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS,
+) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_VIRTUALDESK;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN,
+    };
+
+    let v_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let v_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let v_width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let v_height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+
+    let rect = get_target_rect(target).unwrap_or(windows::Win32::Foundation::RECT {
+        left: 0,
+        top: 0,
+        right: v_width,
+        bottom: v_height,
+    });
+
+    let target_w = rect.right - rect.left;
+    let target_h = rect.bottom - rect.top;
+
+    let phys_x = rect.left + ((norm_x / viewport_w as f32) * target_w as f32) as i32;
+    let phys_y = rect.top + ((norm_y / viewport_h as f32) * target_h as f32) as i32;
+
+    // Map to virtual desktop coordinates (0..65535)
+    let sx = ((phys_x - v_left) as f32 / v_width as f32 * 65535.0) as i32;
+    let sy = ((phys_y - v_top) as f32 / v_height as f32 * 65535.0) as i32;
+
+    (
+        sx.clamp(0, 65535),
+        sy.clamp(0, 65535),
+        MOUSEEVENTF_VIRTUALDESK,
+    )
 }
 
 #[cfg(windows)]
-fn inject_mouse_move(x: f32, y: f32, vw: u32, vh: u32, hwnd: Option<isize>) -> Result<()> {
-    let (sx, sy) = screen_coords(x, y, vw, vh, hwnd);
+fn inject_mouse_move(
+    x: f32,
+    y: f32,
+    vw: u32,
+    vh: u32,
+    target: Option<crate::CaptureTarget>,
+) -> Result<()> {
+    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, target);
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
@@ -66,7 +154,7 @@ fn inject_mouse_move(x: f32, y: f32, vw: u32, vh: u32, hwnd: Option<isize>) -> R
                 dx: sx,
                 dy: sy,
                 mouseData: 0,
-                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | vdesk_flag,
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -86,9 +174,9 @@ fn inject_mouse_button(
     y: f32,
     vw: u32,
     vh: u32,
-    hwnd: Option<isize>,
+    target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
-    let (sx, sy) = screen_coords(x, y, vw, vh, hwnd);
+    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, target);
     let flags = match (button, pressed) {
         (0, true) => MOUSEEVENTF_LEFTDOWN,
         (0, false) => MOUSEEVENTF_LEFTUP,
@@ -105,7 +193,7 @@ fn inject_mouse_button(
                 dx: sx,
                 dy: sy,
                 mouseData: 0,
-                dwFlags: MOUSEEVENTF_ABSOLUTE | flags,
+                dwFlags: MOUSEEVENTF_ABSOLUTE | flags | vdesk_flag,
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -165,7 +253,13 @@ fn inject_key(vk: u16, scan: u16, pressed: bool) -> Result<()> {
 }
 
 #[cfg(not(windows))]
-fn inject_mouse_move(_x: f32, _y: f32, _vw: u32, _vh: u32, _hwnd: Option<isize>) -> Result<()> {
+fn inject_mouse_move(
+    _x: f32,
+    _y: f32,
+    _vw: u32,
+    _vh: u32,
+    _target: Option<crate::CaptureTarget>,
+) -> Result<()> {
     Ok(())
 }
 #[cfg(not(windows))]
@@ -176,7 +270,7 @@ fn inject_mouse_button(
     _y: f32,
     _vw: u32,
     _vh: u32,
-    _hwnd: Option<isize>,
+    _target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
     Ok(())
 }

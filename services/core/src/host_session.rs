@@ -107,7 +107,7 @@ impl HostSessionHandle {
 ///
 /// `event_tx` receives `HostEvent`s for forwarding to the UI via IPC.
 pub fn start(
-    hwnd: isize,
+    target: crate::CaptureTarget,
     stream_port: u16,
     event_tx: mpsc::UnboundedSender<HostEvent>,
 ) -> Result<HostSessionHandle> {
@@ -126,7 +126,7 @@ pub fn start(
 
     // Spawn the capture + encode loop
     tokio::spawn(capture_encode_loop(
-        hwnd,
+        target,
         stream_port,
         enc_tx,
         event_tx.clone(),
@@ -140,7 +140,7 @@ pub fn start(
         event_tx,
         stream_port,
     };
-    info!(hwnd = hwnd, port = stream_port, "Host session started");
+    info!(target = ?target, port = stream_port, "Host session started");
     Ok(handle)
 }
 
@@ -151,7 +151,7 @@ pub fn start(
 #[derive(Debug)]
 pub enum HostEvent {
     StreamStarted {
-        hwnd: isize,
+        target: crate::CaptureTarget,
         width: u32,
         height: u32,
         port: u16,
@@ -160,7 +160,7 @@ pub enum HostEvent {
         reason: String,
     },
     CaptureLost {
-        hwnd: isize,
+        target: crate::CaptureTarget,
     },
     BackendSwitched {
         from: String,
@@ -189,7 +189,7 @@ pub enum HostEvent {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn capture_encode_loop(
-    hwnd: isize,
+    target_val: crate::CaptureTarget,
     stream_port: u16,
     enc_tx: mpsc::Sender<EncodedPacket>, // bounded — pairs with STREAM_QUEUE_CAP
     event_tx: mpsc::UnboundedSender<HostEvent>,
@@ -200,24 +200,33 @@ async fn capture_encode_loop(
     let (cap_event_tx, _cap_event_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut cap = CaptureManager::new(PersistentCaptureConfig::default(), cap_event_tx);
 
-    // Find the WindowInfo for this hwnd
-    let target = {
-        match list_visible_windows() {
-            Ok(wins) => wins.into_iter().find(|w| w.hwnd == hwnd),
-            Err(_) => None,
-        }
-    };
-    let target = match target {
-        Some(t) => t,
-        None => {
-            // Build a minimal WindowInfo if enumeration failed
-            WindowInfo {
+    // Find the WindowInfo for this target
+    let info = match target_val {
+        crate::CaptureTarget::Window(hwnd) => {
+            let found = match list_visible_windows() {
+                Ok(wins) => wins.into_iter().find(|w| w.hwnd == hwnd),
+                Err(_) => None,
+            };
+            found.unwrap_or_else(|| WindowInfo {
                 hwnd,
                 title: format!("hwnd:{}", hwnd),
                 process_name: String::new(),
                 process_id: 0,
                 width: 1920,
                 height: 1080,
+                is_minimized: false,
+                app_kind: AppKind::Unknown,
+                suspends_render_when_minimized: false,
+            })
+        }
+        crate::CaptureTarget::Display(hmonitor) => {
+            WindowInfo {
+                hwnd: 0,
+                title: format!("Display {}", hmonitor),
+                process_name: "Display".to_string(),
+                process_id: 0,
+                width: 1920,
+                height: 1080, // Will be updated by capture manager
                 is_minimized: false,
                 app_kind: AppKind::Unknown,
                 suspends_render_when_minimized: false,
@@ -272,7 +281,7 @@ async fn capture_encode_loop(
     #[cfg(windows)]
     let gpu_dev = {
         if hw_enc.is_some() {
-            let (w, h) = (target.width, target.height);
+            let (w, h) = (info.width, info.height);
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 SharedGpuDevice::new(w, h)
             })) {
@@ -311,7 +320,7 @@ async fn capture_encode_loop(
         }
     }
 
-    if let Err(e) = cap.start_capture(target) {
+    if let Err(e) = cap.start_capture(target_val, info) {
         error!(error = %e, "CaptureManager failed to start");
         let _ = event_tx.send(HostEvent::StreamStopped {
             reason: format!("Capture init failed: {e}"),
@@ -345,7 +354,7 @@ async fn capture_encode_loop(
     #[cfg(windows)]
     METRICS.set_gpu_path_active(hw_enc.is_some() && gpu_dev.is_some());
 
-    info!(hwnd = hwnd, "Capture-encode loop running at 60fps");
+    info!(target = ?target_val, "Capture-encode loop running at 60fps");
 
     loop {
         tokio::task::yield_now().await;
@@ -397,7 +406,7 @@ async fn capture_encode_loop(
             announced = true;
             force_keyframe = true;
             let _ = event_tx.send(HostEvent::StreamStarted {
-                hwnd,
+                target: target_val,
                 width: raw.width,
                 height: raw.height,
                 port: stream_port,

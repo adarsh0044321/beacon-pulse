@@ -40,6 +40,24 @@ pub use crate::host_session::HostSessionHandle;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum ShareMode {
+    Window,
+    Display,
+}
+
+impl Default for ShareMode {
+    fn default() -> Self {
+        ShareMode::Window
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum CaptureTarget {
+    Window(isize),
+    Display(isize),
+}
+
 /// Global shared application state.
 /// All fields are thread-safe and cheaply cloneable.
 pub struct AppState {
@@ -50,6 +68,9 @@ pub struct AppState {
     /// Active host streaming session (None when not sharing)
     #[cfg(feature = "host")]
     pub host_session: Arc<Mutex<Option<HostSessionHandle>>>,
+    /// Active sharing target
+    #[cfg(feature = "host")]
+    pub active_target: Arc<Mutex<Option<CaptureTarget>>>,
     /// Active client receive session (None when not watching)
     #[cfg(feature = "player")]
     pub client_session: Arc<Mutex<Option<ClientSessionHandle>>>,

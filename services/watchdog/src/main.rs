@@ -133,6 +133,33 @@ fn reg_read_dword(name: &str) -> Option<u32> {
     }
 }
 
+#[link(name = "kernel32")]
+extern "system" {
+    fn OpenProcess(
+        dwDesiredAccess: u32,
+        bInheritHandle: i32,
+        dwProcessId: u32,
+    ) -> *mut std::ffi::c_void;
+    fn GetExitCodeProcess(hProcess: *mut std::ffi::c_void, lpExitCode: *mut u32) -> i32;
+    fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+}
+
+const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+const STILL_ACTIVE: u32 = 259;
+
+fn is_process_alive(pid: u32) -> bool {
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code = 0u32;
+        let res = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        res != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
 fn main() {
     // ── Single-instance guard ──────────────────────────────────────────────
     #[cfg(windows)]
@@ -151,12 +178,43 @@ fn main() {
     };
 
     let args: Vec<String> = std::env::args().collect();
-    let target_bin = args.get(2).cloned().unwrap_or_else(|| "beacon.exe".to_string());
+    let parent_pid: Option<u32> = args.get(1).and_then(|s| s.parse().ok());
+    let target_bin = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "beacon.exe".to_string());
     let is_player = target_bin.contains("player") || target_bin.contains("pulse");
 
     let log_path = log_file_path();
     let _ = std::fs::create_dir_all(log_path.parent().unwrap());
-    log(&log_path, &format!("Watchdog starting for target: {}", target_bin));
+    log(
+        &log_path,
+        &format!("Watchdog starting for target: {}", target_bin),
+    );
+
+    if let Some(ppid) = parent_pid {
+        let log_path_clone = log_path.clone();
+        let target_bin_clone = target_bin.clone();
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                if !is_process_alive(ppid) {
+                    log(
+                        &log_path_clone,
+                        "Parent process is dead — shutting down service and watchdog",
+                    );
+
+                    // Terminate the child processes
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/IM", &target_bin_clone])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
 
     // Kill any stale target_bin bg-service instances before we start
     kill_stale_hosts(&log_path, &target_bin);
@@ -188,31 +246,32 @@ fn main() {
         } else {
             // Read last shared window from registry for Host
             let window_proc = match reg_read_string("LastWindowProcess") {
-                Some(p) if !p.is_empty() => p,
-                _ => {
-                    log(
-                        &log_path,
-                        "No LastWindowProcess in registry — waiting 10s and retrying",
-                    );
-                    thread::sleep(Duration::from_secs(10));
-                    continue;
-                }
+                Some(p) if !p.is_empty() => Some(p),
+                _ => None,
             };
 
             let unattended = reg_read_dword("Unattended").unwrap_or(0) == 1;
 
-            cmd.arg("host");
-            cmd.arg("--bg-service");
-            cmd.arg("--window");
-            cmd.arg(&window_proc);
+            if let Some(proc) = window_proc {
+                cmd.arg("host");
+                cmd.arg("--bg-service");
+                cmd.arg("--window");
+                cmd.arg(&proc);
 
-            log(
-                &log_path,
-                &format!(
-                    "Launching host: --bg-service --window \"{}\" (unattended={})",
-                    window_proc, unattended
-                ),
-            );
+                log(
+                    &log_path,
+                    &format!(
+                        "Launching host: --bg-service --window \"{}\" (unattended={})",
+                        proc, unattended
+                    ),
+                );
+            } else {
+                cmd.arg("bg-service");
+                log(
+                    &log_path,
+                    "No LastWindowProcess in registry — launching bg-service in idle mode",
+                );
+            }
         }
 
         let start = Instant::now();
