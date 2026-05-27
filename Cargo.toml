@@ -2,7 +2,6 @@
 members = [
     "services/core",
     "services/watchdog",
-    "apps/ui/src-tauri",
 ]
 resolver = "2"
 

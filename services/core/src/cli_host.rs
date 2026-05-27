@@ -13,12 +13,16 @@ use crate::network::session::SessionManager;
 use crate::registry;
 use crate::AppState;
 
+#[derive(Clone)]
 struct HostArgs {
     window_title: Option<String>,
     port: Option<u16>,
     code: Option<String>,
     control_port: Option<u16>,
     quality: Option<u32>, // bitrate in Mbps
+    fps: Option<u32>,
+    audio: Option<bool>,
+    clipboard: Option<bool>,
 }
 
 /// Hide the console window (Windows only).
@@ -114,6 +118,18 @@ fn spawn_background_process(
         cmd.arg("--quality");
         cmd.arg(q.to_string());
     }
+    if let Some(fps) = host_args.fps {
+        cmd.arg("--fps");
+        cmd.arg(fps.to_string());
+    }
+    if let Some(audio) = host_args.audio {
+        cmd.arg("--audio");
+        cmd.arg(audio.to_string());
+    }
+    if let Some(cb) = host_args.clipboard {
+        cmd.arg("--clipboard");
+        cmd.arg(cb.to_string());
+    }
     if !unattended {
         if let Some(ref c) = code {
             cmd.arg("--code");
@@ -144,6 +160,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
         code: None,
         control_port: None,
         quality: None,
+        fps: None,
+        audio: None,
+        clipboard: None,
     };
 
     let is_startup = args.iter().any(|arg| arg == "--startup");
@@ -196,6 +215,34 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     return Err(anyhow::anyhow!("Missing value for --quality"));
                 }
             }
+            "--fps" | "-f" => {
+                if i + 1 < args.len() {
+                    host_args.fps = Some(args[i + 1].parse().context("Invalid FPS number")?);
+                    i += 2;
+                } else {
+                    return Err(anyhow::anyhow!("Missing value for --fps"));
+                }
+            }
+            "--audio" | "-a" => {
+                if i + 1 < args.len() {
+                    let val = args[i + 1].parse().unwrap_or(false);
+                    host_args.audio = Some(val);
+                    i += 2;
+                } else {
+                    host_args.audio = Some(true);
+                    i += 1;
+                }
+            }
+            "--clipboard" | "-cb" => {
+                if i + 1 < args.len() {
+                    let val = args[i + 1].parse().unwrap_or(true);
+                    host_args.clipboard = Some(val);
+                    i += 2;
+                } else {
+                    host_args.clipboard = Some(true);
+                    i += 1;
+                }
+            }
             "--startup" | "--bg-service" => {
                 i += 1;
             }
@@ -233,7 +280,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
         hide_console_window();
 
         let wins = window_list::list_visible_windows()?;
-        let selected_win = if let Some(ref title) = host_args.window_title {
+        let mut selected_win = None;
+        if let Some(ref title) = host_args.window_title {
             let matched: Vec<_> = wins
                 .iter()
                 .filter(|w| {
@@ -243,13 +291,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             .contains(&title.to_lowercase())
                 })
                 .collect();
-            if matched.is_empty() {
-                return Err(anyhow::anyhow!("No matching window found for bg service"));
+            if !matched.is_empty() {
+                selected_win = Some(matched[0].clone());
+            } else {
+                tracing::warn!("No matching window found for background service '{}'. Falling back to idle mode.", title);
             }
-            matched[0].clone()
         } else {
-            return Err(anyhow::anyhow!("No window title supplied for bg service"));
-        };
+            tracing::warn!("No window title supplied for bg service. Starting in idle mode.");
+        }
 
         return start_sharing_service(selected_win, host_args, true, true);
     }
@@ -477,12 +526,64 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 registry::write_string("LastWindowProcess", &selected_win.process_name);
                 registry::write_string("LastWindowTitle", &selected_win.title);
 
+                // Prompt user for custom parameters
+                println!();
+                println!("  ⚙️ Configure Sharing Options:");
+
+                print!("  [+] Enter target bitrate in Mbps [default: 20]: ");
+                std::io::stdout().flush()?;
+                let mut bitrate_input = String::new();
+                std::io::stdin().read_line(&mut bitrate_input)?;
+                let custom_quality = bitrate_input.trim().parse::<u32>().ok();
+
+                print!("  [+] Enter target FPS [default: 60]: ");
+                std::io::stdout().flush()?;
+                let mut fps_input = String::new();
+                std::io::stdin().read_line(&mut fps_input)?;
+                let custom_fps = fps_input.trim().parse::<u32>().ok();
+
+                print!("  [+] Share audio? (y/n) [default: n]: ");
+                std::io::stdout().flush()?;
+                let mut audio_input = String::new();
+                std::io::stdin().read_line(&mut audio_input)?;
+                let trimmed_audio = audio_input.trim().to_lowercase();
+                let custom_audio = if trimmed_audio.is_empty() {
+                     None
+                } else {
+                     Some(trimmed_audio == "y" || trimmed_audio == "yes")
+                };
+
+                print!("  [+] Synchronize clipboard? (y/n) [default: y]: ");
+                std::io::stdout().flush()?;
+                let mut cb_input = String::new();
+                std::io::stdin().read_line(&mut cb_input)?;
+                let trimmed_cb = cb_input.trim().to_lowercase();
+                let custom_clipboard = if trimmed_cb.is_empty() {
+                     None
+                } else {
+                     Some(trimmed_cb != "n" && trimmed_cb != "no")
+                };
+
+                let mut final_args = host_args.clone();
+                if let Some(q) = custom_quality {
+                    final_args.quality = Some(q);
+                }
+                if let Some(f) = custom_fps {
+                    final_args.fps = Some(f);
+                }
+                if let Some(a) = custom_audio {
+                    final_args.audio = Some(a);
+                }
+                if let Some(cb) = custom_clipboard {
+                    final_args.clipboard = Some(cb);
+                }
+
                 let unattended = registry::read_dword("Unattended").unwrap_or(0) == 1;
 
                 // Generate code
                 let code = if unattended {
                     None
-                } else if let Some(ref c) = host_args.code {
+                } else if let Some(ref c) = final_args.code {
                     Some(c.clone())
                 } else {
                     let mut rng = rand::thread_rng();
@@ -492,7 +593,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 };
 
                 // Spawn the detached background process
-                spawn_background_process(&selected_win, &host_args, unattended, &code)?;
+                spawn_background_process(&selected_win, &final_args, unattended, &code)?;
 
                 if unattended {
                     println!();
@@ -657,7 +758,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
 /// Spawns the tokio runtime and begins sharing
 fn start_sharing_service(
-    selected_win: crate::capture::WindowInfo,
+    selected_win: Option<crate::capture::WindowInfo>,
     host_args: HostArgs,
     silent_startup: bool,
     is_bg_service: bool,
@@ -667,6 +768,20 @@ fn start_sharing_service(
         println!("  Quality: {} Mbps (custom)", mbps);
     } else {
         println!("  Quality: 20 Mbps (LAN default)");
+    }
+
+    if let Some(fps) = host_args.fps {
+        println!("  Frame Rate: {} FPS (custom)", fps);
+    } else {
+        println!("  Frame Rate: 60 FPS (default)");
+    }
+
+    if let Some(audio) = host_args.audio {
+        println!("  Audio Sharing: {}", if audio { "ENABLED" } else { "DISABLED" });
+    }
+
+    if let Some(cb) = host_args.clipboard {
+        println!("  Clipboard Sync: {}", if cb { "ENABLED" } else { "DISABLED" });
     }
 
     // Initialize tracing (logs go to stderr/files)
@@ -724,11 +839,27 @@ fn start_sharing_service(
             std::env::set_var("BEACON_BITRATE_BPS", bps.to_string());
         }
 
+        if let Some(fps) = host_args.fps {
+            std::env::set_var("BEACON_FPS", fps.to_string());
+        }
+
+        if let Some(audio) = host_args.audio {
+            std::env::set_var("BEACON_SHARE_AUDIO", if audio { "true" } else { "false" });
+        }
+
+        if let Some(cb) = host_args.clipboard {
+            std::env::set_var("BEACON_SYNC_CLIPBOARD", if cb { "true" } else { "false" });
+        }
+
         // ── Output setup info ──────────────────────────────────────────
         if !silent_startup {
             println!();
             println!("  ┌──────────────────────────────────────────┐");
-            println!("  │  Window:  {:30}  │", truncate_str(&selected_win.title, 30));
+            if let Some(ref win) = selected_win {
+                println!("  │  Window:  {:30}  │", truncate_str(&win.title, 30));
+            } else {
+                println!("  │  Window:  [Idle Mode - No Active Share]   │");
+            }
             println!("  │                                          │");
             if let Some(ref c) = code {
                 println!("  │  ┌────────────────────────────────────┐  │");
@@ -756,8 +887,14 @@ fn start_sharing_service(
 
         // Start host session
         let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = host_session::start(crate::CaptureTarget::Window(selected_win.hwnd), stream_port, host_event_tx)?;
-        *state.host_session.lock().await = Some(handle);
+        // Prevent host_event_tx from being dropped if we don't start a host session immediately.
+        let _keep_alive_tx = host_event_tx.clone();
+
+        if let Some(ref win) = selected_win {
+            let handle = host_session::start(crate::CaptureTarget::Window(win.hwnd), stream_port, host_event_tx)?;
+            *state.host_session.lock().await = Some(handle);
+            *state.active_target.lock().await = Some(crate::CaptureTarget::Window(win.hwnd));
+        }
 
         // Start control channel TCP listener
         let listener_state = Arc::clone(&state);
@@ -795,7 +932,8 @@ fn start_sharing_service(
 
         // ── Spawn System Tray Icon ───────────────────────────────────
         if is_bg_service {
-            crate::tray::spawn(shutdown_tx.clone(), selected_win.title.clone());
+            let tray_title = selected_win.as_ref().map(|w| w.title.clone()).unwrap_or_else(|| "Idle".to_string());
+            crate::tray::spawn(shutdown_tx.clone(), tray_title);
         }
 
         // ── Background Mode Transition ───────────────────────────────

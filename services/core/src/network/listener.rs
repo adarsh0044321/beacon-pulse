@@ -118,10 +118,24 @@ async fn handle_client(
                         super::DEFAULT_PORT
                     }
                 };
+                let permissions = {
+                    let input_control = crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
+                    let audio = std::env::var("BEACON_SHARE_AUDIO")
+                        .map(|v| v.to_lowercase() == "true")
+                        .unwrap_or(false);
+                    let clipboard = std::env::var("BEACON_SYNC_CLIPBOARD")
+                        .map(|v| v.to_lowercase() == "true")
+                        .unwrap_or(true);
+                    super::Permissions {
+                        input_control,
+                        clipboard,
+                        audio,
+                    }
+                };
                 let accept = ControlMessage::JoinAccepted {
                     session_id: session_id.clone(),
                     stream_port,
-                    permissions: super::Permissions::default(),
+                    permissions,
                 };
                 let json = serde_json::to_string(&accept)? + "\n";
                 writer.write_all(json.as_bytes()).await?;

@@ -29,11 +29,6 @@ jobs:
       with:
         components: clippy, rustfmt
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
 
@@ -51,12 +46,6 @@ jobs:
 
     - name: Build Watchdog
       run: cargo build --release -p beacon-watchdog
-      
-    - name: Build UI (Tauri)
-      working-directory: apps/ui
-      run: |
-        npm ci --legacy-peer-deps
-        npm run build
 
   release:
     needs: build-and-test

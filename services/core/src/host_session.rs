@@ -233,7 +233,7 @@ async fn capture_encode_loop(
             }
         }
     };
-    // Create encoder configuration — allow override from env (set by CLI --quality flag)
+    // Create encoder configuration — allow override from env (set by CLI flags)
     let enc_cfg = {
         let mut cfg = EncoderConfig::default();
         if let Ok(bps_str) = std::env::var("BEACON_BITRATE_BPS") {
@@ -243,6 +243,16 @@ async fn capture_encode_loop(
                     "Encoder bitrate overridden via BEACON_BITRATE_BPS"
                 );
                 cfg.bitrate_bps = bps;
+            }
+        }
+        if let Ok(fps_str) = std::env::var("BEACON_FPS") {
+            if let Ok(fps) = fps_str.parse::<u32>() {
+                info!(
+                    target_fps = fps,
+                    "Encoder FPS overridden via BEACON_FPS"
+                );
+                cfg.fps = fps;
+                cfg.keyframe_interval = fps;
             }
         }
         cfg
@@ -340,7 +350,8 @@ async fn capture_encode_loop(
         }
     };
 
-    let frame_budget = Duration::from_micros(1_000_000 / 60); // 60 fps target
+    let target_fps = enc_cfg.fps as u64;
+    let frame_budget = Duration::from_micros(1_000_000 / target_fps);
     let mut last_frame = Instant::now();
     let stats_interval = Duration::from_millis(500);
     let mut last_stats = Instant::now();
@@ -354,7 +365,7 @@ async fn capture_encode_loop(
     #[cfg(windows)]
     METRICS.set_gpu_path_active(hw_enc.is_some() && gpu_dev.is_some());
 
-    info!(target = ?target_val, "Capture-encode loop running at 60fps");
+    info!(target = ?target_val, fps = target_fps, "Capture-encode loop running");
 
     loop {
         tokio::task::yield_now().await;
