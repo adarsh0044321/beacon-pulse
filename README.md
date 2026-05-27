@@ -78,6 +78,22 @@ For more detailed architectural insights, please read our [Architecture Guide](d
 
 ---
 
+## ⚙️ Recommended Settings
+
+To achieve the best possible stream quality, lowest latency, and pixel-perfect text rendering, use the following recommended settings:
+
+### 📶 Network Configuration
+- **Connection Type:** Wired Gigabit Ethernet or 5GHz WiFi-6 / WiFi-5.
+- **Bandwidth:** At least **20–30 Mbps** of local throughput dedicated to the streaming protocol.
+
+### 🖥️ Encoder & Decoder Settings
+- **Hardware Encoder (Host):** The system utilizes the Windows Media Foundation (WMF) hardware encoder to perform zero-copy GPU capture and NV12 encoding.
+- **Quality Preset:** The host encoder is configured with a quality preset of `80` (`CODECAPI_AVEncCommonQuality`) to ensure crisp text and sharp UI elements under fast motion.
+- **Codec Profile:** Constrained Baseline Profile (profile code `66`) is enforced to guarantee compatibility across both the native Tauri client and the lightweight `openh264`-based CLI player.
+- **WebCodecs Level (Client):** The client's decoder is configured to use **H.264 Level 5.1** (`avc1.42C033`). This unlocks full GPU hardware-accelerated decoding for high resolution (1080p+) and high refresh rate (60 FPS+) stream rendering without browser-side downscaling.
+
+---
+
 ## 🛠️ Building from Source
 
 We welcome open-source contributions. To build the project locally, please ensure you have the following prerequisites installed:
