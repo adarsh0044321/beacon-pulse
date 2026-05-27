@@ -767,6 +767,14 @@ fn start_sharing_service(
             }
         });
 
+        // Start IPC server (named pipe for UI communication)
+        let ipc_server = crate::ipc::IpcServer::new(Arc::clone(&state), r"\\.\pipe\Beacon".to_string());
+        tokio::spawn(async move {
+            if let Err(e) = ipc_server.run().await {
+                error!("IPC server stopped with error: {}", e);
+            }
+        });
+
         // Start UDP broadcast advertiser
         let hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
