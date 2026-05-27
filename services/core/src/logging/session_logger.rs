@@ -1,8 +1,11 @@
 //! Session logger — attaches a session/connection context span to every log event.
 //!
 //! Usage:
-//! ```rust
-//! let _guard = SessionLogger::new("sess_8821", 0x001A09BC).enter();
+//! ```rust,no_run
+//! # use lanshare_service::logging::session_logger::SessionLogger;
+//! # use tracing::info;
+//! let logger = SessionLogger::new("sess_8821", 0x001A09BC, "chrome.exe");
+//! let _guard = logger.enter();
 //! info!("Render suspended detected"); // → includes session_id + hwnd automatically
 //! ```
 

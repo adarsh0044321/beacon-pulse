@@ -65,7 +65,7 @@ function useWebCodecsDecoder(canvasRef: React.RefObject<HTMLCanvasElement>) {
     });
 
     decoder.configure({
-      codec: 'avc1.42E01E',           // Baseline H.264
+      codec: 'avc1.42C033',           // Constrained Baseline H.264, Level 5.1
       codedWidth: width,
       codedHeight: height,
       optimizeForLatency: true,        // Critical for streaming

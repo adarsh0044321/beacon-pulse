@@ -166,6 +166,7 @@ struct MfInner {
     name: String,
     frame_count: u64,
     force_keyframe: bool,
+    device_manager: Option<windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager>,
 }
 
 #[cfg(windows)]
@@ -218,6 +219,7 @@ impl MfHardwareEncoder {
                     name: best.name.clone(),
                     frame_count: 0,
                     force_keyframe: true,
+                    device_manager: None,
                 },
             })
         }
@@ -283,6 +285,12 @@ impl MfHardwareEncoder {
                 &VARIANT::from(0u32),
             );
 
+            // Encoding quality vs speed preset: 80 (high quality)
+            let _ = codec_api.SetValue(
+                &codec_api::CODECAPI_AVEncCommonQuality,
+                &VARIANT::from(80u32),
+            );
+
             // Low-latency mode
             let _ = codec_api.SetValue(&codec_api::CODECAPI_AVLowLatencyMode, &VARIANT::from(true));
         }
@@ -322,7 +330,7 @@ impl MfHardwareEncoder {
             MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE,
             MFT_ENUM_FLAG_SORTANDFILTER, MFT_REGISTER_TYPE_INFO, MF_MT_AVG_BITRATE,
             MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
-            MF_MT_SUBTYPE, MF_VERSION,
+            MF_MT_SUBTYPE, MF_VERSION, MF_MT_MPEG2_PROFILE,
         };
 
         unsafe {
@@ -364,6 +372,8 @@ impl MfHardwareEncoder {
             out_mt.SetUINT64(&MF_MT_FRAME_RATE, pack_u64(config.fps, 1))?;
             out_mt.SetUINT32(&MF_MT_AVG_BITRATE, config.bitrate_bps)?;
             out_mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
+            // Set Constrained Baseline profile (66) for OpenH264/CLI compatibility
+            out_mt.SetUINT32(&MF_MT_MPEG2_PROFILE, 66)?;
             transform
                 .SetOutputType(0, &out_mt, 0)
                 .context("SetOutputType")?;
@@ -468,7 +478,7 @@ impl MfHardwareEncoder {
     /// surface buffers from `push_frame_from_texture`.
     #[cfg(windows)]
     pub fn set_dxgi_device_manager(
-        &self,
+        &mut self,
         mgr: &windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager,
     ) -> Result<()> {
         use windows::core::Interface;
@@ -480,7 +490,39 @@ impl MfHardwareEncoder {
                 .transform
                 .ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, ptr)?;
         }
+        self.inner.device_manager = Some(mgr.clone());
         debug!("MF encoder: DXGI device manager set — GPU surface input enabled");
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn reinit(&mut self) -> Result<()> {
+        let best = HwEncoderInfo {
+            vendor: self.inner.vendor.clone(),
+            name: self.inner.name.clone(),
+        };
+        let transform = Self::activate_transform(&self.inner.config, &best)?;
+        Self::configure_low_latency(&transform, &self.inner.config);
+
+        if let Some(ref mgr) = self.inner.device_manager {
+            use windows::core::Interface;
+            use windows::Win32::Media::MediaFoundation::MFT_MESSAGE_SET_D3D_MANAGER;
+            let unk: windows::core::IUnknown = mgr.cast()?;
+            let ptr = unk.as_raw() as usize;
+            unsafe {
+                transform.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, ptr)?;
+            }
+            debug!("MF encoder reinit: DXGI device manager re-registered");
+        }
+
+        self.inner.transform = transform;
+        self.inner.frame_count = 0;
+        self.inner.force_keyframe = true;
+        info!(
+            width = self.inner.config.width,
+            height = self.inner.config.height,
+            "MF hardware encoder reinitialised due to dimension change"
+        );
         Ok(())
     }
 
@@ -504,6 +546,17 @@ impl MfHardwareEncoder {
             IMFMediaBuffer, MFCreateDXGISurfaceBuffer, MFCreateSample,
             MFSampleExtension_CleanPoint, MFT_OUTPUT_DATA_BUFFER, MF_E_TRANSFORM_NEED_MORE_INPUT,
         };
+
+        let mut desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+        unsafe { tex.GetDesc(&mut desc) };
+        let width = desc.Width;
+        let height = desc.Height;
+
+        if width != self.inner.config.width || height != self.inner.config.height {
+            self.inner.config.width = width;
+            self.inner.config.height = height;
+            self.reinit()?;
+        }
 
         let inner = &mut self.inner;
         let w = inner.config.width;
@@ -583,11 +636,24 @@ impl VideoEncoder for MfHardwareEncoder {
         height: u32,
         ts: u64,
     ) -> Result<Option<EncodedPacket>> {
-        let nv12 = yuv::bgra_to_nv12(bgra, width, height);
         #[cfg(windows)]
-        return self.push_frame(&nv12, ts);
+        {
+            if width != self.inner.config.width || height != self.inner.config.height {
+                self.inner.config.width = width;
+                self.inner.config.height = height;
+                self.reinit()?;
+            }
+            let nv12 = yuv::bgra_to_nv12(bgra, width, height);
+            return self.push_frame(&nv12, ts);
+        }
         #[cfg(not(windows))]
-        Err(anyhow!("Hardware encoding is Windows-only"))
+        {
+            let _ = bgra;
+            let _ = width;
+            let _ = height;
+            let _ = ts;
+            Err(anyhow!("Hardware encoding is Windows-only"))
+        }
     }
 
     fn request_keyframe(&mut self) {
