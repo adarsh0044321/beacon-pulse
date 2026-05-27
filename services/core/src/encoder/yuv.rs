@@ -35,7 +35,11 @@ pub fn bgra_to_yuv420p(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Ve
 
     for row in (0..height).step_by(2) {
         let row_base = row * width;
-        let row2_base = if row + 1 < height { (row + 1) * width } else { row_base };
+        let row2_base = if row + 1 < height {
+            (row + 1) * width
+        } else {
+            row_base
+        };
         for col in (0..width).step_by(2) {
             // Luma for all pixels in 2×2 block
             for dy in 0..2 {
@@ -157,8 +161,16 @@ pub fn bgra_to_nv12(bgra: &[u8], width: u32, height: u32) -> Vec<u8> {
     for row in (0..h).step_by(2) {
         let src_top = &bgra[row * w * 4..(row + 1) * w * 4];
         let has_bottom = row + 1 < h;
-        let src_bot_start = if has_bottom { (row + 1) * w * 4 } else { row * w * 4 };
-        let src_bot_end = if has_bottom { (row + 2) * w * 4 } else { (row + 1) * w * 4 };
+        let src_bot_start = if has_bottom {
+            (row + 1) * w * 4
+        } else {
+            row * w * 4
+        };
+        let src_bot_end = if has_bottom {
+            (row + 2) * w * 4
+        } else {
+            (row + 1) * w * 4
+        };
         let src_bot = &bgra[src_bot_start..src_bot_end];
         let uv_row = (row / 2) * w; // byte offset into uv_plane
 
