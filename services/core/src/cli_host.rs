@@ -16,6 +16,9 @@ use crate::AppState;
 #[derive(Clone)]
 struct HostArgs {
     window_title: Option<String>,
+    display_handle: Option<isize>,
+    multi_windows: Option<Vec<isize>>,
+    dual_windows: Option<(isize, isize)>,
     port: Option<u16>,
     code: Option<String>,
     control_port: Option<u16>,
@@ -91,7 +94,7 @@ fn auto_select_window() -> Result<crate::capture::WindowInfo> {
 
 #[cfg(windows)]
 fn spawn_background_process(
-    selected_win: &crate::capture::WindowInfo,
+    target: &crate::CaptureTarget,
     host_args: &HostArgs,
     unattended: bool,
     code: &Option<String>,
@@ -103,8 +106,33 @@ fn spawn_background_process(
     cmd.arg("host");
     cmd.arg("--bg-service");
 
-    cmd.arg("--window");
-    cmd.arg(&selected_win.process_name);
+    match target {
+        crate::CaptureTarget::Window(hwnd) => {
+            cmd.arg("--window");
+            if let Ok(wins) = window_list::list_visible_windows() {
+                if let Some(w) = wins.iter().find(|w| w.hwnd == *hwnd) {
+                    cmd.arg(&w.process_name);
+                } else {
+                    cmd.arg(hwnd.to_string());
+                }
+            } else {
+                cmd.arg(hwnd.to_string());
+            }
+        }
+        crate::CaptureTarget::Display(hmon) => {
+            cmd.arg("--display");
+            cmd.arg(hmon.to_string());
+        }
+        crate::CaptureTarget::MultiWindow(hwnds) => {
+            cmd.arg("--multi-window");
+            let hwnds_str = hwnds.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(",");
+            cmd.arg(hwnds_str);
+        }
+        crate::CaptureTarget::DualWindow(h1, h2) => {
+            cmd.arg("--dual-window");
+            cmd.arg(format!("{},{}", h1, h2));
+        }
+    }
 
     if let Some(port) = host_args.port {
         cmd.arg("--port");
@@ -144,7 +172,7 @@ fn spawn_background_process(
 
 #[cfg(not(windows))]
 fn spawn_background_process(
-    _selected_win: &crate::capture::WindowInfo,
+    _target: &crate::CaptureTarget,
     _host_args: &HostArgs,
     _unattended: bool,
     _code: &Option<String>,
@@ -156,6 +184,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
     // Parse arguments
     let mut host_args = HostArgs {
         window_title: None,
+        display_handle: None,
+        multi_windows: None,
+        dual_windows: None,
         port: None,
         code: None,
         control_port: None,
@@ -177,6 +208,39 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     i += 2;
                 } else {
                     return Err(anyhow::anyhow!("Missing value for --window"));
+                }
+            }
+            "--display" | "-d" => {
+                if i + 1 < args.len() {
+                    host_args.display_handle = Some(args[i + 1].parse().context("Invalid display handle")?);
+                    i += 2;
+                } else {
+                    return Err(anyhow::anyhow!("Missing value for --display"));
+                }
+            }
+            "--multi-window" | "-mw" => {
+                if i + 1 < args.len() {
+                    let hwnds = args[i + 1].split(',')
+                        .map(|part| part.trim().parse::<isize>().context("Invalid HWND"))
+                        .collect::<Result<Vec<isize>>>()?;
+                    host_args.multi_windows = Some(hwnds);
+                    i += 2;
+                } else {
+                    return Err(anyhow::anyhow!("Missing value for --multi-window"));
+                }
+            }
+            "--dual-window" | "-dw" => {
+                if i + 1 < args.len() {
+                    let parts: Vec<isize> = args[i + 1].split(',')
+                        .map(|part| part.trim().parse::<isize>().context("Invalid HWND"))
+                        .collect::<Result<Vec<isize>>>()?;
+                    if parts.len() != 2 {
+                        return Err(anyhow::anyhow!("--dual-window requires exactly two HWNDs"));
+                    }
+                    host_args.dual_windows = Some((parts[0], parts[1]));
+                    i += 2;
+                } else {
+                    return Err(anyhow::anyhow!("Missing value for --dual-window"));
                 }
             }
             "--port" | "-p" => {
@@ -332,7 +396,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     }
                 };
                 let unattended = registry::read_dword("Unattended").unwrap_or(0) == 1;
-                spawn_background_process(&selected_win, &host_args, unattended, &None)?;
+                let target = crate::CaptureTarget::Window(selected_win.hwnd);
+                spawn_background_process(&target, &host_args, unattended, &None)?;
             }
         }
         std::process::exit(0);
@@ -443,7 +508,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
         );
         println!("  ╚══════════════════════════════════════════╝");
         println!();
-        println!("    [1] Start Sharing Window");
+        println!("    [1] Start Sharing Session (Window, Display, Multi, Dual)");
         println!("    [2] Configuration Settings");
         println!("    [3] Show CLI Helper / Commands");
         println!("    [4] Exit");
@@ -459,72 +524,196 @@ pub fn run(args: Vec<String>) -> Result<()> {
             "1" => {
                 // ── Start Sharing Flow ──
                 let wins = window_list::list_visible_windows()?;
-                if wins.is_empty() {
-                    println!(
-                        "  ✗ No visible windows found. Make sure at least one application is open."
-                    );
-                    continue;
-                }
+                
+                println!();
+                println!("  Select Sharing Mode:");
+                println!("    [1] Single Window");
+                println!("    [2] Entire Display / Monitor");
+                println!("    [3] Multi-Window Grid");
+                println!("    [4] Dual-Window Side-by-Side");
+                println!();
+                print!("  Select mode (1-4) [default: 1]: ");
+                std::io::stdout().flush()?;
+                let mut mode_input = String::new();
+                std::io::stdin().read_line(&mut mode_input)?;
+                let mode_sel = mode_input.trim();
 
-                let selected_win = if let Some(ref title) = host_args.window_title {
-                    let matched: Vec<_> = wins
-                        .iter()
-                        .filter(|w| {
-                            w.title.to_lowercase().contains(&title.to_lowercase())
-                                || w.process_name
-                                    .to_lowercase()
-                                    .contains(&title.to_lowercase())
-                        })
-                        .collect();
-                    if matched.is_empty() {
-                        println!(
-                            "  ✗ No window found matching '{}'. Showing options instead:\n",
-                            title
-                        );
-                        for (i, w) in wins.iter().enumerate() {
-                            println!("    [{}] {} ({})", i + 1, w.title, w.process_name);
-                        }
-                        continue;
-                    }
-                    println!(
-                        "  Auto-selected: {} ({})",
-                        matched[0].title, matched[0].process_name
-                    );
-                    matched[0].clone()
-                } else {
-                    println!("  Available windows to share:\n");
-                    for (i, w) in wins.iter().enumerate() {
-                        let dims = format!("{}x{}", w.width, w.height);
-                        println!(
-                            "    [{:>2}]  {:50} {:>10}  ({})",
-                            i + 1,
-                            truncate_str(&w.title, 50),
-                            dims,
-                            w.process_name
-                        );
-                    }
-                    println!();
-                    print!("  Select window (1-{}): ", wins.len());
-                    std::io::stdout().flush()?;
-                    let mut input = String::new();
-                    std::io::stdin().read_line(&mut input)?;
-                    let idx: usize = match input.trim().parse() {
-                        Ok(num) => num,
-                        Err(_) => {
-                            println!("  ✗ Invalid input.");
+                let (target, display_name) = match mode_sel {
+                    "2" => {
+                        let monitors = crate::capture::display_list::list_monitors()?;
+                        if monitors.is_empty() {
+                            println!("  ✗ No display monitors discovered.");
                             continue;
                         }
-                    };
-                    if idx == 0 || idx > wins.len() {
-                        println!("  ✗ Selection out of range.");
-                        continue;
+                        println!("\n  Available monitors:\n");
+                        for (i, m) in monitors.iter().enumerate() {
+                            println!(
+                                "    [{}] Display {} ({}x{} @ {}Hz) {}",
+                                i + 1,
+                                m.index,
+                                m.width,
+                                m.height,
+                                m.refresh_rate,
+                                if m.is_primary { "[Primary]" } else { "" }
+                            );
+                        }
+                        println!();
+                        print!("  Select monitor (1-{}): ", monitors.len());
+                        std::io::stdout().flush()?;
+                        let mut mon_input = String::new();
+                        std::io::stdin().read_line(&mut mon_input)?;
+                        let mon_idx: usize = match mon_input.trim().parse() {
+                            Ok(num) => num,
+                            Err(_) => {
+                                println!("  ✗ Invalid input.");
+                                continue;
+                            }
+                        };
+                        if mon_idx == 0 || mon_idx > monitors.len() {
+                            println!("  ✗ Selection out of range.");
+                            continue;
+                        }
+                        let selected_mon = &monitors[mon_idx - 1];
+                        (
+                            crate::CaptureTarget::Display(selected_mon.handle),
+                            format!("Display {} ({})", selected_mon.index, selected_mon.name),
+                        )
                     }
-                    wins[idx - 1].clone()
-                };
+                    "3" => {
+                        if wins.is_empty() {
+                            println!("  ✗ No visible windows found to select.");
+                            continue;
+                        }
+                        println!("\n  Available windows to share:\n");
+                        for (i, w) in wins.iter().enumerate() {
+                            println!("    [{:>2}]  {:50} ({})", i + 1, truncate_str(&w.title, 50), w.process_name);
+                        }
+                        println!();
+                        print!("  Select window indices to share (comma separated, e.g. 1, 3): ");
+                        std::io::stdout().flush()?;
+                        let mut multi_input = String::new();
+                        std::io::stdin().read_line(&mut multi_input)?;
+                        let mut selected_hwnds = Vec::new();
+                        for part in multi_input.split(',') {
+                            if let Ok(idx) = part.trim().parse::<usize>() {
+                                if idx > 0 && idx <= wins.len() {
+                                    selected_hwnds.push(wins[idx - 1].hwnd);
+                                }
+                            }
+                        }
+                        if selected_hwnds.is_empty() {
+                            println!("  ✗ No valid windows selected.");
+                            continue;
+                        }
+                        let count = selected_hwnds.len();
+                        (
+                            crate::CaptureTarget::MultiWindow(selected_hwnds),
+                            format!("Multi-Window ({} windows)", count),
+                        )
+                    }
+                    "4" => {
+                        if wins.is_empty() {
+                            println!("  ✗ No visible windows found to select.");
+                            continue;
+                        }
+                        println!("\n  Available windows to share:\n");
+                        for (i, w) in wins.iter().enumerate() {
+                            println!("    [{:>2}]  {:50} ({})", i + 1, truncate_str(&w.title, 50), w.process_name);
+                        }
+                        println!();
+                        print!("  Select exactly 2 window indices (comma separated, e.g. 1, 2): ");
+                        std::io::stdout().flush()?;
+                        let mut dual_input = String::new();
+                        std::io::stdin().read_line(&mut dual_input)?;
+                        let mut selected_hwnds = Vec::new();
+                        for part in dual_input.split(',') {
+                            if let Ok(idx) = part.trim().parse::<usize>() {
+                                if idx > 0 && idx <= wins.len() {
+                                    selected_hwnds.push(wins[idx - 1].hwnd);
+                                }
+                            }
+                        }
+                        if selected_hwnds.len() != 2 {
+                            println!("  ✗ Dual-window mode requires exactly 2 windows. You selected {}.", selected_hwnds.len());
+                            continue;
+                        }
+                        (
+                            crate::CaptureTarget::DualWindow(selected_hwnds[0], selected_hwnds[1]),
+                            "Dual Window Side-by-Side".to_string(),
+                        )
+                    }
+                    _ => {
+                        // Default to Single Window
+                        if wins.is_empty() {
+                            println!("  ✗ No visible windows found to select.");
+                            continue;
+                        }
+                        let selected_win = if let Some(ref title) = host_args.window_title {
+                            let matched: Vec<_> = wins
+                                .iter()
+                                .filter(|w| {
+                                    w.title.to_lowercase().contains(&title.to_lowercase())
+                                        || w.process_name
+                                            .to_lowercase()
+                                            .contains(&title.to_lowercase())
+                                })
+                                .collect();
+                            if matched.is_empty() {
+                                println!(
+                                    "  ✗ No window found matching '{}'. Showing options instead:\n",
+                                    title
+                                );
+                                for (i, w) in wins.iter().enumerate() {
+                                    println!("    [{}] {} ({})", i + 1, w.title, w.process_name);
+                                }
+                                continue;
+                            }
+                            println!(
+                                "  Auto-selected: {} ({})",
+                                matched[0].title, matched[0].process_name
+                            );
+                            matched[0].clone()
+                        } else {
+                            println!("\n  Available windows to share:\n");
+                            for (i, w) in wins.iter().enumerate() {
+                                let dims = format!("{}x{}", w.width, w.height);
+                                println!(
+                                    "    [{:>2}]  {:50} {:>10}  ({})",
+                                    i + 1,
+                                    truncate_str(&w.title, 50),
+                                    dims,
+                                    w.process_name
+                                );
+                            }
+                            println!();
+                            print!("  Select window (1-{}): ", wins.len());
+                            std::io::stdout().flush()?;
+                            let mut input = String::new();
+                            std::io::stdin().read_line(&mut input)?;
+                            let idx: usize = match input.trim().parse() {
+                                Ok(num) => num,
+                                Err(_) => {
+                                    println!("  ✗ Invalid input.");
+                                    continue;
+                                }
+                            };
+                            if idx == 0 || idx > wins.len() {
+                                println!("  ✗ Selection out of range.");
+                                continue;
+                            }
+                            wins[idx - 1].clone()
+                        };
 
-                // Save selected window metadata to registry for next startup/unattended relaunch
-                registry::write_string("LastWindowProcess", &selected_win.process_name);
-                registry::write_string("LastWindowTitle", &selected_win.title);
+                        // Save selected window metadata to registry for next startup/unattended relaunch
+                        registry::write_string("LastWindowProcess", &selected_win.process_name);
+                        registry::write_string("LastWindowTitle", &selected_win.title);
+
+                        (
+                            crate::CaptureTarget::Window(selected_win.hwnd),
+                            selected_win.title.clone(),
+                        )
+                    }
+                };
 
                 // Prompt user for custom parameters
                 println!();
@@ -593,7 +782,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 };
 
                 // Spawn the detached background process
-                spawn_background_process(&selected_win, &final_args, unattended, &code)?;
+                spawn_background_process(&target, &final_args, unattended, &code)?;
 
                 if unattended {
                     println!();
@@ -604,8 +793,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     println!();
                     println!("  ┌──────────────────────────────────────────┐");
                     println!(
-                        "  │  Window:  {:30}  │",
-                        truncate_str(&selected_win.title, 30)
+                        "  │  Target:  {:30}  │",
+                        truncate_str(&display_name, 30)
                     );
                     println!("  │                                          │");
                     println!("  │  ┌────────────────────────────────────┐  │");
@@ -857,14 +1046,38 @@ fn start_sharing_service(
             std::env::set_var("BEACON_SYNC_CLIPBOARD", if cb { "true" } else { "false" });
         }
 
+        let mut initial_target = None;
+        if let Some(ref win) = selected_win {
+            initial_target = Some(crate::CaptureTarget::Window(win.hwnd));
+        } else if let Some(hmon) = host_args.display_handle {
+            initial_target = Some(crate::CaptureTarget::Display(hmon));
+        } else if let Some(ref hwnds) = host_args.multi_windows {
+            initial_target = Some(crate::CaptureTarget::MultiWindow(hwnds.clone()));
+        } else if let Some((h1, h2)) = host_args.dual_windows {
+            initial_target = Some(crate::CaptureTarget::DualWindow(h1, h2));
+        }
+
         // ── Output setup info ──────────────────────────────────────────
         if !silent_startup {
             println!();
             println!("  ┌──────────────────────────────────────────┐");
-            if let Some(ref win) = selected_win {
-                println!("  │  Window:  {:30}  │", truncate_str(&win.title, 30));
-            } else {
-                println!("  │  Window:  [Idle Mode - No Active Share]   │");
+            match &initial_target {
+                Some(crate::CaptureTarget::Window(_hwnd)) => {
+                    let title = selected_win.as_ref().map(|w| w.title.as_str()).unwrap_or("Window");
+                    println!("  │  Window:  {:30}  │", truncate_str(&title, 30));
+                }
+                Some(crate::CaptureTarget::Display(hmon)) => {
+                    println!("  │  Display: {:30}  │", truncate_str(&format!("Handle {}", hmon), 30));
+                }
+                Some(crate::CaptureTarget::MultiWindow(hwnds)) => {
+                    println!("  │  Multi:   {:30}  │", truncate_str(&format!("{} windows", hwnds.len()), 30));
+                }
+                Some(crate::CaptureTarget::DualWindow(h1, h2)) => {
+                    println!("  │  Dual:    {:30}  │", truncate_str(&format!("{} & {}", h1, h2), 30));
+                }
+                None => {
+                    println!("  │  Window:  [Idle Mode - No Active Share]   │");
+                }
             }
             println!("  │                                          │");
             if let Some(ref c) = code {
@@ -896,10 +1109,10 @@ fn start_sharing_service(
         // Prevent host_event_tx from being dropped if we don't start a host session immediately.
         let _keep_alive_tx = host_event_tx.clone();
 
-        if let Some(ref win) = selected_win {
-            let handle = host_session::start(crate::CaptureTarget::Window(win.hwnd), stream_port, host_event_tx)?;
+        if let Some(ref target) = initial_target {
+            let handle = host_session::start(target.clone(), stream_port, host_event_tx)?;
             *state.host_session.lock().await = Some(handle);
-            *state.active_target.lock().await = Some(crate::CaptureTarget::Window(win.hwnd));
+            *state.active_target.lock().await = Some(target.clone());
         }
 
         // Start control channel TCP listener
