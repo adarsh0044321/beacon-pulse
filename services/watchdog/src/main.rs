@@ -1,5 +1,5 @@
-// No console window in release — watchdog runs silently in background.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Watchdog runs silently in background without console window.
+#![windows_subsystem = "windows"]
 // #![deny(warnings)]
 
 //! Beacon Watchdog
@@ -166,12 +166,14 @@ fn hide_console_window() {
     #[link(name = "kernel32")]
     extern "system" {
         fn GetConsoleWindow() -> *mut c_void;
+        fn FreeConsole() -> i32;
     }
     #[link(name = "user32")]
     extern "system" {
         fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
     }
     unsafe {
+        FreeConsole();
         let hwnd = GetConsoleWindow();
         if !hwnd.is_null() {
             ShowWindow(hwnd, 0); // SW_HIDE = 0

@@ -36,12 +36,14 @@ fn hide_console_window() {
     #[link(name = "kernel32")]
     extern "system" {
         fn GetConsoleWindow() -> *mut c_void;
+        fn FreeConsole() -> i32;
     }
     #[link(name = "user32")]
     extern "system" {
         fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
     }
     unsafe {
+        FreeConsole();
         let hwnd = GetConsoleWindow();
         if !hwnd.is_null() {
             ShowWindow(hwnd, 0); // SW_HIDE = 0
