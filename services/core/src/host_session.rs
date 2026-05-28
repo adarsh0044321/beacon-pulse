@@ -305,6 +305,12 @@ async fn capture_encode_loop(
         }
     };
 
+    let is_multi = match &target_val {
+        crate::CaptureTarget::MultiWindow(hwnds) if hwnds.len() > 1 => true,
+        crate::CaptureTarget::DualWindow(_, _) => true,
+        _ => false,
+    };
+
     // Phase 4d: create the shared D3D11 device before capture starts so the
     // WGC backend uses it for its frame pool.  The same device is registered
     // with the MF encoder via IMFDXGIDeviceManager — enabling zero-copy.
@@ -314,7 +320,7 @@ async fn capture_encode_loop(
     // taking down the whole service.
     #[cfg(windows)]
     let gpu_dev = {
-        if hw_enc.is_some() {
+        if hw_enc.is_some() && !is_multi {
             let (w, h) = (info.width, info.height);
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 SharedGpuDevice::new(w, h)
@@ -339,18 +345,24 @@ async fn capture_encode_loop(
                 }
             }
         } else {
-            info!("No hardware encoder available; GPU zero-copy path disabled, falling back to CPU path");
+            if is_multi {
+                info!("Multi-window capture mode active — GPU zero-copy path disabled, using CPU composition path");
+            } else {
+                info!("No hardware encoder available; GPU zero-copy path disabled, falling back to CPU path");
+            }
             None
         }
     };
 
     // Register the DXGI device manager with the hardware encoder if both are active
     #[cfg(windows)]
-    if let (Some(ref mut enc), Some(ref dev)) = (&mut hw_enc, &gpu_dev) {
-        if let Err(e) = enc.set_dxgi_device_manager(dev.mf_mgr()) {
-            warn!(error = %e, "set_dxgi_device_manager failed — GPU surface input disabled");
-        } else {
-            info!("MF encoder: DXGI device manager registered — zero-copy active");
+    if !is_multi {
+        if let (Some(ref mut enc), Some(ref dev)) = (&mut hw_enc, &gpu_dev) {
+            if let Err(e) = enc.set_dxgi_device_manager(dev.mf_mgr()) {
+                warn!(error = %e, "set_dxgi_device_manager failed — GPU surface input disabled");
+            } else {
+                info!("MF encoder: DXGI device manager registered — zero-copy active");
+            }
         }
     }
 
@@ -433,7 +445,10 @@ async fn capture_encode_loop(
         // Poll capture (returns Option<CapturedFrame> directly)
         let raw = match cap.poll_frame() {
             Some(f) => f,
-            None => continue, // No new frame yet
+            None => {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                continue;
+            }
         };
 
         // Announce dimensions once on first real frame

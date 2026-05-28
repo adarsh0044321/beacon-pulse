@@ -138,6 +138,7 @@ pub async fn start(
     let stream = TcpStream::connect(control_addr)
         .await
         .with_context(|| format!("TCP connect to {} failed", control_addr))?;
+    let _ = stream.set_nodelay(true);
     let (reader, mut writer) = stream.into_split();
     let mut lines = TokioBufReader::new(reader).lines();
 

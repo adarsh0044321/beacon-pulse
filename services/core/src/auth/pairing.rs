@@ -17,7 +17,6 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rand::Rng;
 use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
@@ -76,9 +75,8 @@ impl PairingManager {
             warn!("generate_challenge called with no active pairing code");
             return None;
         }
-        let rng = SystemRandom::new();
         let mut challenge = [0u8; CHALLENGE_LEN];
-        rng.fill(&mut challenge).ok()?;
+        rand::thread_rng().fill(&mut challenge);
         let encoded = B64.encode(challenge);
         self.active_challenge = Some(challenge);
         Some(encoded)

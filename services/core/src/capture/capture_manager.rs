@@ -148,7 +148,11 @@ impl CaptureManager {
     pub fn start_capture(&mut self, target: crate::CaptureTarget, _info: WindowInfo) -> Result<()> {
         info!("CaptureManager::start_capture with target {:?}", target);
 
-        let mut old_actives = std::mem::take(&mut self.actives);
+        let old_actives = std::mem::take(&mut self.actives);
+        for mut old in old_actives {
+            old.backend.stop();
+        }
+
         let mut new_actives = Vec::new();
         let mut is_multi = false;
 
@@ -162,53 +166,45 @@ impl CaptureManager {
             _ => {}
         }
 
-        let mut get_or_create = |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
-            if let Some(pos) = old_actives.iter().position(|c| c.target == t) {
-                Ok(old_actives.remove(pos))
-            } else {
-                let win_info = match &t {
-                    crate::CaptureTarget::Window(hwnd) => mgr.get_window_info(*hwnd)?,
-                    crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
-                    _ => return Err(anyhow!("Unsupported target variant")),
-                };
-                let backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
-                Ok(ActiveCapture {
-                    target: t,
-                    info: win_info,
-                    backend,
-                    last_frame: None,
-                    last_frame_time: Instant::now(),
-                    stale_notified: false,
-                    consecutive_failures: 0,
-                })
-            }
+        let create_active = |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
+            let win_info = match &t {
+                crate::CaptureTarget::Window(hwnd) => mgr.get_window_info(*hwnd)?,
+                crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
+                _ => return Err(anyhow!("Unsupported target variant")),
+            };
+            let backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
+            Ok(ActiveCapture {
+                target: t,
+                info: win_info,
+                backend,
+                last_frame: None,
+                last_frame_time: Instant::now(),
+                stale_notified: false,
+                consecutive_failures: 0,
+            })
         };
 
         match target {
             crate::CaptureTarget::Window(hwnd) => {
-                new_actives.push(get_or_create(crate::CaptureTarget::Window(hwnd), self)?);
+                new_actives.push(create_active(crate::CaptureTarget::Window(hwnd), self)?);
             }
             crate::CaptureTarget::Display(hmonitor) => {
-                new_actives.push(get_or_create(crate::CaptureTarget::Display(hmonitor), self)?);
+                new_actives.push(create_active(crate::CaptureTarget::Display(hmonitor), self)?);
             }
             crate::CaptureTarget::MultiWindow(hwnds) => {
                 for hwnd in hwnds {
-                    if let Ok(act) = get_or_create(crate::CaptureTarget::Window(hwnd), self) {
+                    if let Ok(act) = create_active(crate::CaptureTarget::Window(hwnd), self) {
                         new_actives.push(act);
                     }
                 }
             }
             crate::CaptureTarget::DualWindow(h1, h2) => {
                 for hwnd in [h1, h2] {
-                    if let Ok(act) = get_or_create(crate::CaptureTarget::Window(hwnd), self) {
+                    if let Ok(act) = create_active(crate::CaptureTarget::Window(hwnd), self) {
                         new_actives.push(act);
                     }
                 }
             }
-        }
-
-        for mut old in old_actives {
-            old.backend.stop();
         }
 
         self.actives = new_actives;

@@ -19,6 +19,7 @@ pub async fn run(state: Arc<AppState>, control_port: u16) -> Result<()> {
         match listener.accept().await {
             Ok((stream, peer_addr)) => {
                 info!("Incoming connection from {}", peer_addr);
+                let _ = stream.set_nodelay(true);
                 let state = Arc::clone(&state);
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(stream, peer_addr, state).await {
