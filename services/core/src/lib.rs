@@ -52,10 +52,13 @@ impl Default for ShareMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum CaptureTarget {
     Window(isize),
     Display(isize),
+    MultiWindow(Vec<isize>),
+    DualWindow(isize, isize),
 }
 
 /// Global shared application state.

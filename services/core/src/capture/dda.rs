@@ -94,6 +94,7 @@ impl DdaCapture {
                     MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONEAREST)
                 }
                 crate::CaptureTarget::Display(hmonitor) => HMONITOR(hmonitor as *mut _),
+                _ => HMONITOR(std::ptr::null_mut()),
             };
 
             // Create a D3D11 device.
@@ -304,21 +305,23 @@ impl WindowCapture for DdaCapture {
                         ));
                     }
                 }
+                _ => {}
             }
         }
-        self.target = Some(target);
+        self.target = Some(target.clone());
         self.running = true;
 
         // Try to upgrade to DXGI mode.
         #[cfg(windows)]
         {
-            match Self::try_init_dxgi(target, self.width, self.height) {
+            match Self::try_init_dxgi(target.clone(), self.width, self.height) {
                 Ok(Some(state)) => {
                     self.dxgi = Some(state);
                     self.mode = DdaMode::Dxgi;
-                    let handle_val = match target {
-                        crate::CaptureTarget::Window(h) => h,
-                        crate::CaptureTarget::Display(h) => h,
+                    let handle_val = match &target {
+                        crate::CaptureTarget::Window(h) => *h,
+                        crate::CaptureTarget::Display(h) => *h,
+                        _ => 0,
                     };
                     debug!(
                         "DdaCapture started in DXGI mode for target handle {}",
@@ -327,9 +330,10 @@ impl WindowCapture for DdaCapture {
                 }
                 Ok(None) => {
                     self.mode = DdaMode::PrintWindow;
-                    let handle_val = match target {
-                        crate::CaptureTarget::Window(h) => h,
-                        crate::CaptureTarget::Display(h) => h,
+                    let handle_val = match &target {
+                        crate::CaptureTarget::Window(h) => *h,
+                        crate::CaptureTarget::Display(h) => *h,
+                        _ => 0,
                     };
                     debug!(
                         "DdaCapture started in PrintWindow mode for target handle {}",

@@ -35,7 +35,7 @@ pub fn bgra_to_yuv420p(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Ve
 
     for row in (0..height).step_by(2) {
         let row_base = row * width;
-        let row2_base = if row + 1 < height {
+        let _row2_base = if row + 1 < height {
             (row + 1) * width
         } else {
             row_base

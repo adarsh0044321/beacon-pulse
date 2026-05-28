@@ -31,6 +31,8 @@ pub enum UiCommand {
     #[cfg(feature = "host")]
     ListWindows,
     #[cfg(feature = "host")]
+    ListMonitors,
+    #[cfg(feature = "host")]
     StartShare {
         target: crate::CaptureTarget,
     },
@@ -81,6 +83,10 @@ pub enum ServiceEvent {
     #[cfg(feature = "host")]
     WindowList {
         windows: Vec<crate::capture::WindowInfo>,
+    },
+    #[cfg(feature = "host")]
+    MonitorList {
+        monitors: Vec<crate::capture::display_list::MonitorInfo>,
     },
     #[cfg(feature = "host")]
     ShareStarted {
@@ -296,23 +302,29 @@ async fn dispatch_cmd(
             let windows = window_list::list_visible_windows().unwrap_or_default();
             ServiceEvent::WindowList { windows }
         }
+        #[cfg(feature = "host")]
+        UiCommand::ListMonitors => {
+            let monitors = crate::capture::display_list::list_monitors().unwrap_or_default();
+            ServiceEvent::MonitorList { monitors }
+        }
         // ── Start host stream ────────────────────────────────────────────────
         #[cfg(feature = "host")]
         UiCommand::StartShare { target } => {
             let port = crate::network::DEFAULT_PORT;
-            *state.active_target.lock().await = Some(target);
+            *state.active_target.lock().await = Some(target.clone());
 
             // Write window metadata to registry for watchdog recovery
-            if let crate::CaptureTarget::Window(hwnd) = target {
+            if let crate::CaptureTarget::Window(hwnd) = &target {
+                let hwnd_val = *hwnd;
                 if let Some(w) = window_list::list_visible_windows()
                     .unwrap_or_default()
                     .into_iter()
-                    .find(|w| w.hwnd == hwnd)
+                    .find(|w| w.hwnd == hwnd_val)
                 {
                     crate::registry::write_string("LastWindowProcess", &w.process_name);
                     crate::registry::write_string("LastWindowTitle", &w.title);
                 }
-            } else if let crate::CaptureTarget::Display(hmon) = target {
+            } else if let crate::CaptureTarget::Display(hmon) = &target {
                 // Save display target for watchdog recovery
                 crate::registry::write_string("LastTargetType", "Display");
                 crate::registry::write_string("LastTargetDisplay", &hmon.to_string());
@@ -330,7 +342,7 @@ async fn dispatch_cmd(
                 }
             });
 
-            match host_session::start(target, port, host_event_tx) {
+            match host_session::start(target.clone(), port, host_event_tx) {
                 Ok(handle) => {
                     let mut session = state.host_session.lock().await;
                     *session = Some(handle);

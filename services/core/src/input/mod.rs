@@ -78,6 +78,7 @@ fn get_target_rect(
                     }
                 }
             }
+            _ => {}
         }
     }
     // Default to primary monitor if None

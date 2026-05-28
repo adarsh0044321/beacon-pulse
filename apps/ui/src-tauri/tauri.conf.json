@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Beacon",
+  "version": "1.0.0",
+  "identifier": "com.beacon.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "Beacon",
+        "width": 960,
+        "height": 660,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": {
+      "resources/beacon-watchdog.exe": "beacon-watchdog.exe"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

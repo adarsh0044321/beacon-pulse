@@ -449,7 +449,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 // HALFTONE stretch mode — bilinear interpolation for smooth scaling
                 // instead of default nearest-neighbor (BLACKONWHITE)
                 SetStretchBltMode(mem_dc, HALFTONE);
-                SetBrushOrgEx(mem_dc, 0, 0, None);
+                let _ = SetBrushOrgEx(mem_dc, 0, 0, None);
 
                 // Paint frame to offscreen buffer
                 let mut bmi = BITMAPINFO::default();
@@ -483,12 +483,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
 
             // Blit offscreen buffer to screen — flicker-free
-            BitBlt(hdc, 0, 0, cw, ch, mem_dc, 0, 0, SRCCOPY);
+            let _ = BitBlt(hdc, 0, 0, cw, ch, mem_dc, 0, 0, SRCCOPY);
 
             // Cleanup offscreen DC
             SelectObject(mem_dc, old_bmp);
             let _ = DeleteObject(mem_bmp);
-            DeleteDC(mem_dc);
+            let _ = DeleteDC(mem_dc);
 
             let _ = EndPaint(hwnd, &ps);
             LRESULT(0)

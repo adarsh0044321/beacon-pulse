@@ -126,7 +126,7 @@ pub fn start(
 
     // Spawn the capture + encode loop
     tokio::spawn(capture_encode_loop(
-        target,
+        target.clone(),
         stream_port,
         enc_tx,
         event_tx.clone(),
@@ -201,15 +201,16 @@ async fn capture_encode_loop(
     let mut cap = CaptureManager::new(PersistentCaptureConfig::default(), cap_event_tx);
 
     // Find the WindowInfo for this target
-    let info = match target_val {
+    let info = match &target_val {
         crate::CaptureTarget::Window(hwnd) => {
+            let hwnd_val = *hwnd;
             let found = match list_visible_windows() {
-                Ok(wins) => wins.into_iter().find(|w| w.hwnd == hwnd),
+                Ok(wins) => wins.into_iter().find(|w| w.hwnd == hwnd_val),
                 Err(_) => None,
             };
             found.unwrap_or_else(|| WindowInfo {
-                hwnd,
-                title: format!("hwnd:{}", hwnd),
+                hwnd: hwnd_val,
+                title: format!("hwnd:{}", hwnd_val),
                 process_name: String::new(),
                 process_id: 0,
                 width: 1920,
@@ -227,6 +228,32 @@ async fn capture_encode_loop(
                 process_id: 0,
                 width: 1920,
                 height: 1080, // Will be updated by capture manager
+                is_minimized: false,
+                app_kind: AppKind::Unknown,
+                suspends_render_when_minimized: false,
+            }
+        }
+        crate::CaptureTarget::MultiWindow(hwnds) => {
+            WindowInfo {
+                hwnd: 0,
+                title: format!("MultiWindow {:?}", hwnds),
+                process_name: "MultiWindow".to_string(),
+                process_id: 0,
+                width: 1920,
+                height: 1080,
+                is_minimized: false,
+                app_kind: AppKind::Unknown,
+                suspends_render_when_minimized: false,
+            }
+        }
+        crate::CaptureTarget::DualWindow(h1, h2) => {
+            WindowInfo {
+                hwnd: 0,
+                title: format!("DualWindow {}, {}", h1, h2),
+                process_name: "DualWindow".to_string(),
+                process_id: 0,
+                width: 1920,
+                height: 1080,
                 is_minimized: false,
                 app_kind: AppKind::Unknown,
                 suspends_render_when_minimized: false,
@@ -327,7 +354,7 @@ async fn capture_encode_loop(
         }
     }
 
-    if let Err(e) = cap.start_capture(target_val, info) {
+    if let Err(e) = cap.start_capture(target_val.clone(), info.clone()) {
         error!(error = %e, "CaptureManager failed to start");
         let _ = event_tx.send(HostEvent::StreamStopped {
             reason: format!("Capture init failed: {e}"),
@@ -414,7 +441,7 @@ async fn capture_encode_loop(
             announced = true;
             force_keyframe = true;
             let _ = event_tx.send(HostEvent::StreamStarted {
-                target: target_val,
+                target: target_val.clone(),
                 width: raw.width,
                 height: raw.height,
                 port: stream_port,

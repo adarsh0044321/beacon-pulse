@@ -191,6 +191,7 @@ impl WgcCapture {
                         )?;
                     interop.CreateForMonitor(HMONITOR(hmonitor as *mut _))?
                 }
+                _ => return Err(anyhow!("WGC: MultiWindow and DualWindow not supported directly")),
             }
         };
 
@@ -381,6 +382,7 @@ impl WgcCapture {
         let handle_val = match target {
             crate::CaptureTarget::Window(h) => h,
             crate::CaptureTarget::Display(h) => h,
+            _ => 0,
         };
 
         info!(
@@ -394,13 +396,14 @@ impl WgcCapture {
 #[cfg(windows)]
 impl WindowCapture for WgcCapture {
     fn start(&mut self, target: crate::CaptureTarget) -> Result<()> {
-        self.target = Some(target);
-        match self.try_init(target) {
+        self.target = Some(target.clone());
+        match self.try_init(target.clone()) {
             Ok(()) => Ok(()),
             Err(e) => {
                 let handle_val = match target {
                     crate::CaptureTarget::Window(h) => h,
                     crate::CaptureTarget::Display(h) => h,
+                    _ => 0,
                 };
                 warn!(target_handle = handle_val, error = %e, "WGC init failed — will use DDA fallback");
                 Err(e)
@@ -457,9 +460,11 @@ impl WindowCapture for WgcCapture {
             let _ = inner.frame_pool.Close();
             let handle_val = self
                 .target
+                .as_ref()
                 .map(|t| match t {
-                    crate::CaptureTarget::Window(h) => h,
-                    crate::CaptureTarget::Display(h) => h,
+                    crate::CaptureTarget::Window(h) => *h,
+                    crate::CaptureTarget::Display(h) => *h,
+                    _ => 0,
                 })
                 .unwrap_or(0);
             debug!(target_handle = handle_val, "WGC capture stopped");

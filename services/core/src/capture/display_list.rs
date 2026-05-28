@@ -8,6 +8,8 @@ pub struct MonitorInfo {
     pub width: u32,
     pub height: u32,
     pub is_primary: bool,
+    pub refresh_rate: u32,
+    pub index: u32,
 }
 
 #[cfg(windows)]
@@ -15,6 +17,7 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
     use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+        EnumDisplaySettingsW, ENUM_CURRENT_SETTINGS, DEVMODEW,
     };
 
     let mut monitors = Vec::new();
@@ -39,12 +42,32 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
                     .abs() as u32;
                 let is_primary = (info.monitorInfo.dwFlags & 1) != 0; // MONITORINFOF_PRIMARY = 1
 
+                let mut refresh_rate = 60;
+                let mut devmode = DEVMODEW::default();
+                devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+                let sz_device_pcwstr = windows::core::PCWSTR::from_raw(info.szDevice.as_ptr());
+                if EnumDisplaySettingsW(
+                    sz_device_pcwstr,
+                    ENUM_CURRENT_SETTINGS,
+                    &mut devmode,
+                ).as_bool() {
+                    refresh_rate = devmode.dmDisplayFrequency;
+                }
+
+                let index = name.chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u32>()
+                    .unwrap_or(0);
+
                 list.push(MonitorInfo {
                     handle: hmonitor.0 as isize,
                     name,
                     width,
                     height,
                     is_primary,
+                    refresh_rate,
+                    index,
                 });
             }
             BOOL(1)
