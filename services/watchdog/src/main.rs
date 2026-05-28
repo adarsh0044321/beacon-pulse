@@ -160,7 +160,31 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
+#[cfg(windows)]
+fn hide_console_window() {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleWindow() -> *mut c_void;
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
+    }
+    unsafe {
+        let hwnd = GetConsoleWindow();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, 0); // SW_HIDE = 0
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_console_window() {}
+
 fn main() {
+    hide_console_window();
+
     // ── Single-instance guard ──────────────────────────────────────────────
     #[cfg(windows)]
     let _mutex_guard = {
