@@ -104,71 +104,93 @@ fn spawn_background_process(
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let mut cmd = std::process::Command::new(std::env::current_exe()?);
-    cmd.arg("host");
-    cmd.arg("--bg-service");
+    // 1. Kill any existing watchdog to prevent conflicts
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "beacon-watchdog.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 
-    match target {
-        crate::CaptureTarget::Window(hwnd) => {
-            cmd.arg("--window");
-            if let Ok(wins) = window_list::list_visible_windows() {
-                if let Some(w) = wins.iter().find(|w| w.hwnd == *hwnd) {
-                    cmd.arg(&w.process_name);
+    // 2. Spawn the watchdog process detached
+    let mut watchdog_path = std::env::current_exe()?;
+    watchdog_path.pop();
+    watchdog_path.push("beacon-watchdog.exe");
+
+    if watchdog_path.exists() {
+        let mut cmd = std::process::Command::new(&watchdog_path);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()?;
+    } else {
+        // Fallback: spawn background host directly if watchdog doesn't exist
+        let mut cmd = std::process::Command::new(std::env::current_exe()?);
+        cmd.arg("host");
+        cmd.arg("--bg-service");
+
+        match target {
+            crate::CaptureTarget::Window(hwnd) => {
+                cmd.arg("--window");
+                if let Ok(wins) = window_list::list_visible_windows() {
+                    if let Some(w) = wins.iter().find(|w| w.hwnd == *hwnd) {
+                        cmd.arg(&w.process_name);
+                    } else {
+                        cmd.arg(hwnd.to_string());
+                    }
                 } else {
                     cmd.arg(hwnd.to_string());
                 }
-            } else {
-                cmd.arg(hwnd.to_string());
+            }
+            crate::CaptureTarget::Display(hmon) => {
+                cmd.arg("--display");
+                cmd.arg(hmon.to_string());
+            }
+            crate::CaptureTarget::MultiWindow(hwnds) => {
+                cmd.arg("--multi-window");
+                let hwnds_str = hwnds
+                    .iter()
+                    .map(|h| h.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                cmd.arg(hwnds_str);
+            }
+            crate::CaptureTarget::DualWindow(h1, h2) => {
+                cmd.arg("--dual-window");
+                cmd.arg(format!("{},{}", h1, h2));
             }
         }
-        crate::CaptureTarget::Display(hmon) => {
-            cmd.arg("--display");
-            cmd.arg(hmon.to_string());
-        }
-        crate::CaptureTarget::MultiWindow(hwnds) => {
-            cmd.arg("--multi-window");
-            let hwnds_str = hwnds.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(",");
-            cmd.arg(hwnds_str);
-        }
-        crate::CaptureTarget::DualWindow(h1, h2) => {
-            cmd.arg("--dual-window");
-            cmd.arg(format!("{},{}", h1, h2));
-        }
-    }
 
-    if let Some(port) = host_args.port {
-        cmd.arg("--port");
-        cmd.arg(port.to_string());
-    }
-    if let Some(cp) = host_args.control_port {
-        cmd.arg("--control-port");
-        cmd.arg(cp.to_string());
-    }
-    if let Some(q) = host_args.quality {
-        cmd.arg("--quality");
-        cmd.arg(q.to_string());
-    }
-    if let Some(fps) = host_args.fps {
-        cmd.arg("--fps");
-        cmd.arg(fps.to_string());
-    }
-    if let Some(audio) = host_args.audio {
-        cmd.arg("--audio");
-        cmd.arg(audio.to_string());
-    }
-    if let Some(cb) = host_args.clipboard {
-        cmd.arg("--clipboard");
-        cmd.arg(cb.to_string());
-    }
-    if !unattended {
-        if let Some(ref c) = code {
-            cmd.arg("--code");
-            cmd.arg(c);
+        if let Some(port) = host_args.port {
+            cmd.arg("--port");
+            cmd.arg(port.to_string());
         }
-    }
+        if let Some(cp) = host_args.control_port {
+            cmd.arg("--control-port");
+            cmd.arg(cp.to_string());
+        }
+        if let Some(q) = host_args.quality {
+            cmd.arg("--quality");
+            cmd.arg(q.to_string());
+        }
+        if let Some(fps) = host_args.fps {
+            cmd.arg("--fps");
+            cmd.arg(fps.to_string());
+        }
+        if let Some(audio) = host_args.audio {
+            cmd.arg("--audio");
+            cmd.arg(audio.to_string());
+        }
+        if let Some(cb) = host_args.clipboard {
+            cmd.arg("--clipboard");
+            cmd.arg(cb.to_string());
+        }
+        if !unattended {
+            if let Some(ref c) = code {
+                cmd.arg("--code");
+                cmd.arg(c);
+            }
+        }
 
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.spawn()?;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()?;
+    }
     Ok(())
 }
 
@@ -214,7 +236,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--display" | "-d" => {
                 if i + 1 < args.len() {
-                    host_args.display_handle = Some(args[i + 1].parse().context("Invalid display handle")?);
+                    host_args.display_handle =
+                        Some(args[i + 1].parse().context("Invalid display handle")?);
                     i += 2;
                 } else {
                     return Err(anyhow::anyhow!("Missing value for --display"));
@@ -222,7 +245,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--multi-window" | "-mw" => {
                 if i + 1 < args.len() {
-                    let hwnds = args[i + 1].split(',')
+                    let hwnds = args[i + 1]
+                        .split(',')
                         .map(|part| part.trim().parse::<isize>().context("Invalid HWND"))
                         .collect::<Result<Vec<isize>>>()?;
                     host_args.multi_windows = Some(hwnds);
@@ -233,7 +257,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             "--dual-window" | "-dw" => {
                 if i + 1 < args.len() {
-                    let parts: Vec<isize> = args[i + 1].split(',')
+                    let parts: Vec<isize> = args[i + 1]
+                        .split(',')
                         .map(|part| part.trim().parse::<isize>().context("Invalid HWND"))
                         .collect::<Result<Vec<isize>>>()?;
                     if parts.len() != 2 {
@@ -332,7 +357,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 ) -> *mut std::ffi::c_void;
                 fn GetLastError() -> u32;
             }
-            let name: Vec<u16> = "Local\\BeaconBgService\0".encode_utf16().collect();
+            let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
                 // Another bg-service already running — exit with code 42
@@ -526,7 +551,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             "1" => {
                 // ── Start Sharing Flow ──
                 let wins = window_list::list_visible_windows()?;
-                
+
                 println!();
                 println!("  Select Sharing Mode:");
                 println!("    [1] Single Window");
@@ -576,6 +601,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             continue;
                         }
                         let selected_mon = &monitors[mon_idx - 1];
+                        registry::write_string("LastSharingMode", "display");
+                        registry::write_string(
+                            "LastSharingTarget",
+                            &selected_mon.handle.to_string(),
+                        );
                         (
                             crate::CaptureTarget::Display(selected_mon.handle),
                             format!("Display {} ({})", selected_mon.index, selected_mon.name),
@@ -588,7 +618,12 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         }
                         println!("\n  Available windows to share:\n");
                         for (i, w) in wins.iter().enumerate() {
-                            println!("    [{:>2}]  {:50} ({})", i + 1, truncate_str(&w.title, 50), w.process_name);
+                            println!(
+                                "    [{:>2}]  {:50} ({})",
+                                i + 1,
+                                truncate_str(&w.title, 50),
+                                w.process_name
+                            );
                         }
                         println!();
                         print!("  Select window indices to share (comma separated, e.g. 1, 3): ");
@@ -608,6 +643,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             continue;
                         }
                         let count = selected_hwnds.len();
+                        let hwnds_str = selected_hwnds
+                            .iter()
+                            .map(|h| h.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        registry::write_string("LastSharingMode", "multi");
+                        registry::write_string("LastSharingTarget", &hwnds_str);
                         (
                             crate::CaptureTarget::MultiWindow(selected_hwnds),
                             format!("Multi-Window ({} windows)", count),
@@ -620,7 +662,12 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         }
                         println!("\n  Available windows to share:\n");
                         for (i, w) in wins.iter().enumerate() {
-                            println!("    [{:>2}]  {:50} ({})", i + 1, truncate_str(&w.title, 50), w.process_name);
+                            println!(
+                                "    [{:>2}]  {:50} ({})",
+                                i + 1,
+                                truncate_str(&w.title, 50),
+                                w.process_name
+                            );
                         }
                         println!();
                         print!("  Select exactly 2 window indices (comma separated, e.g. 1, 2): ");
@@ -636,9 +683,17 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             }
                         }
                         if selected_hwnds.len() != 2 {
-                            println!("  ✗ Dual-window mode requires exactly 2 windows. You selected {}.", selected_hwnds.len());
+                            println!(
+                                "  ✗ Dual-window mode requires exactly 2 windows. You selected {}.",
+                                selected_hwnds.len()
+                            );
                             continue;
                         }
+                        registry::write_string("LastSharingMode", "dual");
+                        registry::write_string(
+                            "LastSharingTarget",
+                            &format!("{},{}", selected_hwnds[0], selected_hwnds[1]),
+                        );
                         (
                             crate::CaptureTarget::DualWindow(selected_hwnds[0], selected_hwnds[1]),
                             "Dual Window Side-by-Side".to_string(),
@@ -709,7 +764,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         // Save selected window metadata to registry for next startup/unattended relaunch
                         registry::write_string("LastWindowProcess", &selected_win.process_name);
                         registry::write_string("LastWindowTitle", &selected_win.title);
-
+                        registry::write_string("LastSharingMode", "window");
+                        registry::write_string("LastSharingTarget", &selected_win.process_name);
                         (
                             crate::CaptureTarget::Window(selected_win.hwnd),
                             selected_win.title.clone(),
@@ -783,6 +839,43 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     Some(generated)
                 };
 
+                // Write custom config options to the registry
+                if let Some(port) = final_args.port {
+                    registry::write_dword("Port", port as u32);
+                } else {
+                    registry::delete_value("Port");
+                }
+                if let Some(cp) = final_args.control_port {
+                    registry::write_dword("ControlPort", cp as u32);
+                } else {
+                    registry::delete_value("ControlPort");
+                }
+                if let Some(q) = final_args.quality {
+                    registry::write_dword("Quality", q);
+                } else {
+                    registry::delete_value("Quality");
+                }
+                if let Some(fps) = final_args.fps {
+                    registry::write_dword("Fps", fps);
+                } else {
+                    registry::delete_value("Fps");
+                }
+                if let Some(audio) = final_args.audio {
+                    registry::write_dword("Audio", if audio { 1 } else { 0 });
+                } else {
+                    registry::delete_value("Audio");
+                }
+                if let Some(cb) = final_args.clipboard {
+                    registry::write_dword("Clipboard", if cb { 1 } else { 0 });
+                } else {
+                    registry::delete_value("Clipboard");
+                }
+                if let Some(ref c) = code {
+                    registry::write_string("PairingCode", c);
+                } else {
+                    registry::delete_value("PairingCode");
+                }
+
                 // Spawn the detached background process
                 spawn_background_process(&target, &final_args, unattended, &code)?;
 
@@ -794,10 +887,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 } else {
                     println!();
                     println!("  ┌──────────────────────────────────────────┐");
-                    println!(
-                        "  │  Target:  {:30}  │",
-                        truncate_str(&display_name, 30)
-                    );
+                    println!("  │  Target:  {:30}  │", truncate_str(&display_name, 30));
                     println!("  │                                          │");
                     println!("  │  ┌────────────────────────────────────┐  │");
                     println!("  │  │                                    │  │");
@@ -1118,9 +1208,19 @@ fn start_sharing_service(
         }
 
         // Start control channel TCP listener
+        // Bind TCP listener first to verify port is free and service is healthy!
+        let addr = format!("0.0.0.0:{}", control_port);
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Network listener FAILED to bind to {} — port may be in use: {}", addr, e);
+                std::process::exit(5); // Exit with code 5 so watchdog knows it failed
+            }
+        };
+
         let listener_state = Arc::clone(&state);
         tokio::spawn(async move {
-            if let Err(e) = network::listener::run(listener_state, control_port).await {
+            if let Err(e) = network::listener::run_with_listener(listener_state, listener).await {
                 error!("TCP control listener stopped: {}", e);
             }
         });
@@ -1214,7 +1314,10 @@ fn start_sharing_service(
             h.stop();
         }
 
-        Ok(())
+        // Hard exit to avoid DLL/driver/COM detach deadlocks on worker thread joins.
+        // Bypasses graceful drop of tokio runtime which can block indefinitely.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::process::exit(0);
     })
 }
 

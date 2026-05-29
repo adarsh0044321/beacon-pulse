@@ -1,164 +1,344 @@
 <div align="center">
-  
-# 🚀 Beacon & Pulse (LAN Remote Desktop)
 
-**Low-latency, hardware-accelerated local network remote streaming and control system, built entirely for the terminal.**
+# 📡 Beacon & Pulse
 
-[![Rust](https://img.shields.io/badge/Rust-1.77%2B-orange.svg)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://microsoft.com/windows)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+### Low-Latency LAN Remote Desktop
 
-[Features](#features) • [Architecture](#architecture) • [Usage](#usage) • [Building](#building) • [Settings](#settings) • [License](#license)
+**Hardware-accelerated screen sharing and remote control over local networks — built entirely in Rust.**
+
+[![Release](https://img.shields.io/github/v/release/adarsh0044321/beacon-pulse?style=flat-square&color=blue)](https://github.com/adarsh0044321/beacon-pulse/releases/latest)
+[![Rust](https://img.shields.io/badge/Rust-1.77%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows)](https://microsoft.com/windows)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+[Download](#-download) · [Features](#-features) · [Quick Start](#-quick-start) · [CLI Reference](#-cli-reference) · [Architecture](#-architecture) · [Building](#-building-from-source) · [Changelog](#-changelog)
 
 </div>
 
 ---
 
-## 📖 Overview
+## 📦 Download
 
-Beacon & Pulse is a highly optimized, Rust-based LAN remote desktop system designed specifically for low-latency screen sharing and control over local networks. The project is 100% terminal/console-based, ensuring zero GUI overhead and absolute efficiency:
+> **No installation required for standalone use** — just download, extract, and run.
 
-- **Beacon (Host):** A lightweight background service providing hardware-accelerated display capture, input simulation, clipboard sync, and a watchdog service. Configured via command-line flags or a rich, interactive console menu.
-- **Pulse (Client/Player):** A viewer application that discovers available hosts automatically on the LAN, connects via TCP control stream, and launches a raw Win32 render window for zero-latency video feed displaying and input capture.
+| Component | Description | Download |
+|-----------|-------------|----------|
+| **BeaconSetup.exe** | Host installer — share your screen | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
+| **PulseSetup.exe** | Player installer — view remote screen | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
 
-This system bypasses cloud-based relays entirely, ensuring **zero external dependencies, absolute privacy, and uncompromised performance** on Gigabit or WiFi-6 networks.
+**BeaconSetup.exe** extracts `beacon.exe` + `beacon-watchdog.exe` to `%APPDATA%\Beacon\` and optionally adds to Windows startup.  
+**PulseSetup.exe** extracts `pulse.exe` to `%APPDATA%\Pulse\` and creates a desktop shortcut.
 
 ---
 
 ## ✨ Features
 
-- ⚡ **Ultra-Low Latency Streaming:** Hardware-accelerated capturing and encoding utilizing Windows Media Foundation (WMF) zero-copy GPU capture and NV12 encoding.
-- ⚙️ **Configurable Streaming parameters:** Prompt or specify custom target bitrates, frame rates (FPS), audio sharing permission, and clipboard sync directly from the terminal or CLI flags.
-- 🛡️ **Watchdog Resilience & Orphan Prevention:** A dedicated `beacon-watchdog` service monitors and relaunches the host service. It queries parent process PIDs using Win32 raw APIs to automatically shut down background service processes if the launcher console is closed.
-- 🔄 **Registry-Driven State Synchronization:** Automatic Windows Registry integration (`Software\Beacon`) tracks the active sharing window process and title (`LastWindowProcess`, `LastWindowTitle`), enabling persistent, unattended host sessions upon system reboot.
-- 🖱️ **Remote Input Forwarding:** Full simulation of remote keyboard and mouse inputs, with support for clipboard synchronization.
-- 🌐 **Blazing-Fast Async Discovery:** A fully asynchronous TCP port scanner utilizing Tokio's concurrent task pooling (`JoinSet`) scanning subnets in a fraction of a second, merging with mDNS and UDP broadcast listeners for bulletproof host discovery.
-- 💬 **Continuous Named-Pipe IPC:** Named-pipe server communication remains active across both idle background states and active sharing loops to enable real-time UI/CLI control and settings adjustments.
+| Feature | Details |
+|---------|---------|
+| ⚡ **Ultra-Low Latency** | Hardware-accelerated capture via Windows Graphics Capture API + Media Foundation H.264 encoding (NVENC/AMF/QSV) |
+| 🖥️ **Multiple Capture Modes** | Single window, entire display, multi-window grid, or dual-window side-by-side |
+| 🖱️ **Remote Control** | Full keyboard + mouse input forwarding with optional clipboard synchronization |
+| 🔒 **Secure Pairing** | 6-digit pairing codes for each session, or unattended mode for trusted networks |
+| 🛡️ **Watchdog Service** | Automatic crash recovery with exponential back-off — never lose your remote session |
+| 🔄 **System Tray** | Runs silently in background with tray icon — change window or exit via right-click menu |
+| 🌐 **Auto-Discovery** | Finds hosts automatically via UDP broadcast + mDNS + async subnet scanning |
+| 🚀 **Windows Startup** | Optional auto-start on boot — shares the last window automatically |
+| 📋 **Registry Persistence** | Remembers your last shared window, settings, and pairing preferences |
+| ⌨️ **Keyboard Fixes** | Layout-independent scan-code injection, extended keys support, loopback loop isolation, and auto key-release on disconnect |
+| 🎛️ **Configurable** | Custom bitrate (Mbps), FPS, audio sharing, and port settings |
+
+---
+
+## 🚀 Quick Start
+
+### Step 1: Start Sharing (Host Machine)
+
+Run `beacon.exe` (or launch via `BeaconSetup.exe`):
+
+```
+  ╔══════════════════════════════════════════╗
+  ║         Beacon  v1.0.3                   ║
+  ╚══════════════════════════════════════════╝
+
+    [1] Start Sharing Session (Window, Display, Multi, Dual)
+    [2] Configuration Settings
+    [3] Show CLI Helper / Commands
+    [4] Exit
+```
+
+1. Select **[1]** → choose sharing mode (Single Window / Display / Multi / Dual)
+2. Pick the window or display to share
+3. Configure bitrate, FPS, audio, and clipboard settings
+4. A **6-digit pairing code** is generated — share it with the viewer
+5. Beacon moves to the **system tray** once a player connects
+
+### Step 2: Connect & View (Player Machine)
+
+Run `pulse.exe` (or launch via `PulseSetup.exe`):
+
+```
+Scanning LAN for available Beacon hosts...
+
+Discovered hosts:
+  [1] DESKTOP-PC (192.168.1.100:45101)
+  [M] Enter IP address manually
+
+Select host to connect (1-1 or M):
+```
+
+1. Select the discovered host (or enter IP manually)
+2. Enter the **pairing code** displayed on the host
+3. A fullscreen render window opens with the remote screen
+4. Use mouse and keyboard to control the remote machine
+
+### System Tray Controls
+
+Once connected, Beacon runs in the system tray. Right-click the tray icon for:
+- **Change Shared Window** — kills the current session cleanly and relaunches Beacon to pick a new window
+- **Exit Sharing** — stops all sharing and exits completely
+
+---
+
+## 📖 CLI Reference
+
+### Beacon (Host)
+
+```powershell
+# Interactive mode (recommended)
+.\beacon.exe
+
+# Direct sharing with CLI flags
+.\beacon.exe host --window "Chrome" --quality 30 --fps 60 --code 123456
+
+# Silent background startup (used by Windows Startup)
+.\beacon.exe host --startup
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--window <title>` | `-w` | Auto-match window by title or process name | Interactive picker |
+| `--display <handle>` | `-d` | Share an entire display/monitor | — |
+| `--multi-window <hwnds>` | `-mw` | Share multiple windows in a grid (comma-separated) | — |
+| `--dual-window <hwnds>` | `-dw` | Share two windows side-by-side (comma-separated) | — |
+| `--quality <mbps>` | `-q` | Target bitrate in Mbps | `20` |
+| `--fps <fps>` | `-f` | Target frame rate | `60` |
+| `--audio <true/false>` | `-a` | Enable audio sharing | `false` |
+| `--clipboard <true/false>` | `-cb` | Enable clipboard sync | `true` |
+| `--code <code>` | `-c` | Set a static 6-digit pairing code | Random |
+| `--port <port>` | `-p` | UDP streaming port | `45100` |
+| `--control-port <port>` | `-cp` | TCP control port | `45101` |
+| `--startup` | — | Launch silently in background mode | — |
+
+### Pulse (Player)
+
+```powershell
+# Interactive mode (auto-discovers hosts)
+.\pulse.exe
+
+# Direct connect with CLI flags
+.\pulse.exe play --host 192.168.1.100 --code 123456
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--host <ip>` | `-h` | Host IP address (skip discovery) | Auto-discover |
+| `--port <port>` | `-p` | Host TCP control port | `45101` |
+| `--recv-port <port>` | `-rp` | Local UDP receive port | `45102` |
+| `--code <code>` | `-c` | Pairing code (skip prompt) | Interactive |
 
 ---
 
 ## 🏗️ Architecture
 
-The system is built entirely in **Rust** for performance-critical display capture, networking, and rendering.
-
-```text
-+-------------------+                          +-------------------+
-|   Beacon (Host)   |     Direct LAN TCP/UDP   |  Pulse (Client)   |
-|-------------------|    <-------------------> |-------------------|
-| - Capture Engine  |                          | - Render Engine   |
-| - Input Simulator |                          | - Input Capture   |
-| - Console Menu    |                          | - Win32 Renderer  |
-+-------------------+                          +-------------------+
-          |
-    (Monitored By)
-          |
-+-------------------+
-|  Beacon Watchdog  |
-| - Crash Recovery  |
-| - Parent Tracking |
-+-------------------+
 ```
+┌─────────────────────────────┐                    ┌─────────────────────────────┐
+│       Beacon (Host)         │  TCP Control +     │       Pulse (Player)        │
+│─────────────────────────────│  UDP Video Stream  │─────────────────────────────│
+│  ┌─────────────────────┐    │◄──────────────────►│  ┌─────────────────────┐    │
+│  │ WGC Capture Engine  │    │                    │  │ H.264 Decoder       │    │
+│  │ (GPU Zero-Copy)     │    │                    │  │ (Media Foundation)  │    │
+│  └─────────┬───────────┘    │                    │  └─────────┬───────────┘    │
+│            │                │                    │            │                │
+│  ┌─────────▼───────────┐    │                    │  ┌─────────▼───────────┐    │
+│  │ H.264 HW Encoder    │    │                    │  │ Win32 Render Window │    │
+│  │ (NVENC/AMF/QSV)     │    │                    │  │ (Direct Blit)       │    │
+│  └─────────┬───────────┘    │                    │  └─────────────────────┘    │
+│            │                │                    │                             │
+│  ┌─────────▼───────────┐    │                    │  ┌─────────────────────┐    │
+│  │ Input Simulator     │◄───│────────────────────│──│ Input Capture       │    │
+│  │ (KB + Mouse)        │    │                    │  │ (KB + Mouse + Clip) │    │
+│  └─────────────────────┘    │                    │  └─────────────────────┘    │
+│                             │                    │                             │
+│  ┌─────────────────────┐    │                    └─────────────────────────────┘
+│  │ System Tray Icon    │    │
+│  │ (Change Window/Exit)│    │
+│  └─────────────────────┘    │
+│                             │
+│  ┌─────────────────────┐    │
+│  │ Named Pipe IPC      │    │
+│  │ (UI Communication)  │    │
+│  └─────────────────────┘    │
+└──────────────┬──────────────┘
+               │ Monitored by
+    ┌──────────▼──────────┐
+    │  Beacon Watchdog    │
+    │  - Crash Recovery   │
+    │  - Auto-Restart     │
+    │  - Exponential      │
+    │    Back-off          │
+    └─────────────────────┘
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Beacon** | `beacon.exe` | Host service — captures, encodes, and streams |
+| **Pulse** | `pulse.exe` | Player client — receives, decodes, and renders |
+| **Watchdog** | `beacon-watchdog.exe` | Monitors beacon and restarts on crash |
+| **Capture Engine** | `capture/wgc.rs` | Windows Graphics Capture API integration |
+| **Encoder** | `encoder/mod.rs` | Media Foundation H.264 hardware encoding |
+| **Network** | `network/` | TCP control channel + UDP video streaming |
+| **Tray** | `tray.rs` | System tray icon with window change/exit |
+| **Registry** | `registry.rs` | Windows Registry persistence for settings |
+
+### Network Protocol
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| `45100` | UDP | Video frame streaming |
+| `45101` | TCP | Control channel (pairing, session management) |
+| `45102` | UDP | Client receive port |
 
 ---
 
-## 🚀 Usage
+## ⚙️ Configuration
 
-### Host (Beacon)
-Run the host application:
-```powershell
-.\beacon.exe host
+### First-Time Setup
+
+On first launch, Beacon walks through an interactive setup:
+
+1. **Windows Startup** — Auto-start Beacon when Windows boots
+2. **Unattended Mode** — Skip pairing codes (for trusted networks only)
+3. **Remote Control** — Allow/deny keyboard and mouse input from players
+
+### Settings Menu
+
+Access anytime via the main menu → **[2] Configuration Settings**:
+
 ```
-Upon startup, Beacon will check your configuration (Startup permissions, Unattended access, Remote control) and present the main console menu:
-```text
-  ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.0.2                   ║
-  ╚══════════════════════════════════════════╝
-
-    [1] Start Sharing Window
-    [2] Configuration Settings
-    [3] Show CLI Helper / Commands
-    [4] Exit
-
-    Select option (1-4):
+    [1] Windows Startup App:    ENABLED / DISABLED
+    [2] Unattended Mode:        ENABLED / DISABLED
+    [3] Keyboard/Mouse Control: ENABLED / DISABLED
+    [4] Back to Main Menu
 ```
 
-Selecting option `[1]` lets you select from a list of currently open visible windows and customize settings interactively:
-- **Bitrate:** Enter target bitrate in Mbps (default: 20 Mbps)
-- **Frame Rate:** Enter target FPS (default: 60 FPS)
-- **Audio Sharing:** Turn audio sharing on/off (default: off)
-- **Clipboard Sync:** Turn clipboard sync on/off (default: on)
+### Recommended Network Settings
 
-#### CLI Options
-You can bypass the interactive menu by passing arguments:
-```powershell
-.\beacon.exe host --window "Chrome" --quality 30 --fps 60 --audio true --clipboard true
-```
-**Flags:**
-* `-w, --window <title>`: Match a window name to share automatically.
-* `-c, --code <code>`: Specify a static 6-digit pairing code.
-* `-q, --quality <mbps>`: Target streaming bitrate in Mbps (default: 20).
-* `-f, --fps <fps>`: Target capture/stream frame rate (default: 60).
-* `-a, --audio <true/false>`: Enable or disable audio sharing.
-* `-cb, --clipboard <true/false>`: Enable or disable clipboard synchronization.
-* `-p, --port <port>`: Set the UDP streaming port.
-* `-cp, --control-port <port>`: Set the TCP control port.
-* `--startup`: Launch silently in background.
-
----
-
-### Player (Pulse)
-Run the player client:
-```powershell
-.\pulse.exe play
-```
-The client scans the local network automatically for active Beacon hosts and displays a selection menu:
-```text
-Scanning LAN for available Beacon hosts...
-
-Discovered hosts:
-  [1] LAPTOP-12345 (192.168.1.50:45101)
-  [M] Enter IP address manually
-
-Select host to connect (1-1 or M):
-```
-Once selected, enter the 6-digit pairing code displayed on the host machine to begin viewing and controlling the shared window.
-
-#### CLI Options
-```powershell
-.\pulse.exe play --host 192.168.1.50 --code 123456
-```
-**Flags:**
-* `-h, --host <ip>`: Host IP address to connect directly.
-* `-p, --port <port>`: Host control TCP port (default: 45101).
-* `-rp, --recv-port <port>`: UDP receive port on client (default: 45102).
-* `-c, --code <code>`: Pairing code to bypass prompt.
-
----
-
-## ⚙️ Recommended Settings
-
-To achieve the best possible stream quality, lowest latency, and pixel-perfect text rendering:
-- **Connection:** Wired Gigabit Ethernet or 5GHz WiFi-6.
-- **Bandwidth:** Dedicated **20–30 Mbps** local throughput.
-- **Hardware Encoding:** Utilizes Windows Media Foundation (WMF) zero-copy GPU capture and NV12 hardware encoding when available.
-- **Codec Profile:** Constrained Baseline Profile (H.264 profile `66`) is enforced to ensure compatibility.
+| Setting | Recommendation |
+|---------|---------------|
+| Connection | Wired Gigabit Ethernet or 5 GHz WiFi-6 |
+| Bitrate | 20–30 Mbps for crisp text, 10–15 Mbps for general use |
+| FPS | 60 for interactive use, 30 for presentations |
+| Encoding | Automatic hardware encoding (NVENC / AMD AMF / Intel QSV) |
 
 ---
 
 ## 🛠️ Building from Source
 
-To compile the projects from source, ensure you have:
-- **Rust:** `v1.77.0` or newer ([Install Rust](https://rustup.rs/))
-- **Windows Build Tools:** C++ build tools via Visual Studio Installer.
+### Prerequisites
 
-Build the workspace:
+- **Rust** 1.77+ — [Install Rust](https://rustup.rs/)
+- **Windows 10/11** with C++ Build Tools (Visual Studio Installer)
+- **.NET Framework 4.x** (for compiling the standalone installers)
+
+### Build
+
 ```powershell
+# Clone the repository
+git clone https://github.com/adarsh0044321/beacon-pulse.git
+cd beacon-pulse
+
+# Build in release mode
 cargo build --release
+
+# Binaries output to:
+#   target/release/beacon.exe
+#   target/release/beacon-watchdog.exe
+#   target/release/pulse.exe
 ```
-The compiled binaries will be output to `target/release/beacon.exe` and `target/release/pulse.exe`.
+
+### Build Standalone Installers
+
+```powershell
+# Copy binaries to installer directories
+copy target\release\beacon.exe installer\host\
+copy target\release\beacon-watchdog.exe installer\host\
+copy target\release\pulse.exe installer\player\
+
+# Compile self-extracting installers
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
+  /out:installer\host\BeaconSetup.exe `
+  /resource:installer\host\beacon.exe,beacon.exe `
+  /resource:installer\host\beacon-watchdog.exe,beacon-watchdog.exe `
+  installer\BeaconSetup.cs
+
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
+  /out:installer\player\PulseSetup.exe `
+  /resource:installer\player\pulse.exe,pulse.exe `
+  installer\player\PulseSetup.cs
+```
+
+---
+
+## 📋 Changelog
+
+### v1.0.3 (2026-05-29)
+
+**Bug Fixes**
+- **Fixed system tray "Change Shared Window"** — now properly kills the old beacon session and watchdog before restarting, preventing port conflicts and ghost sessions
+- **Fixed "Exit Sharing" tray menu** — now kills the watchdog so it doesn't auto-restart beacon after exit
+- **Fixed connection reliability** — resolved TCP port 45101 binding failures when restarting sessions
+- **Fixed host keyboard unresponsiveness/freezes** — implemented layout-independent scan-code input injection and extended key flag support (`WM_SYSKEYDOWN`, arrow keys, right Alt/Ctrl)
+- **Prevented stuck keys on client disconnect** — implemented automatic key-release cleanup guard that automatically clears any stuck key states on connection drop
+- **Isolated local loopback feedback loops** — tagged injected inputs with a custom signature (`0xBEAC0D`) to prevent infinite input storms when testing locally
+
+**Improvements**
+- **Display sharing mode** — share an entire monitor instead of a single window
+- **Multi-window grid mode** — share multiple windows composited into a grid layout
+- **Dual-window side-by-side mode** — share two windows in a split-screen layout
+- **D3D11 Video Processor caching** — reduced GPU allocation overhead during capture
+- **Capture recovery cooldown** — 2-second cooldown prevents rapid recovery loops
+- **Improved watchdog** — registry-driven configuration with exponential back-off crash recovery
+- **Standalone installers** — self-extracting `.exe` installers for both Beacon and Pulse
+
+### v1.0.2 (2026-05-27)
+
+- Hardware-accelerated H.264 encoding via Windows Media Foundation
+- Zero-copy GPU capture via Windows Graphics Capture API
+- Async LAN host discovery (mDNS + UDP broadcast + subnet scan)
+- Named Pipe IPC for UI integration
+- Interactive console menu with configuration settings
+
+### v1.0.0 (2026-05-26)
+
+- Initial release
+- Basic screen sharing with pairing codes
+- Remote keyboard and mouse control
+- Clipboard synchronization
 
 ---
 
 ## 📝 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+
+**Made with ❤️ in Rust**
+
+[Report a Bug](https://github.com/adarsh0044321/beacon-pulse/issues) · [Request a Feature](https://github.com/adarsh0044321/beacon-pulse/issues)
+
+</div>

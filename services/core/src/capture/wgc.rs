@@ -191,7 +191,11 @@ impl WgcCapture {
                         )?;
                     interop.CreateForMonitor(HMONITOR(hmonitor as *mut _))?
                 }
-                _ => return Err(anyhow!("WGC: MultiWindow and DualWindow not supported directly")),
+                _ => {
+                    return Err(anyhow!(
+                        "WGC: MultiWindow and DualWindow not supported directly"
+                    ))
+                }
             }
         };
 
@@ -216,6 +220,17 @@ impl WgcCapture {
         let gpu_pending_cb = gpu_pending.clone();
         let use_gpu_path_cb = use_gpu_path;
         let device_cb = SendWrapper(device.clone());
+
+        // Cache the CPU-readable staging texture to avoid high-frequency allocations (VRAM leaks)
+        let cached_staging: std::sync::Arc<
+            std::sync::Mutex<Option<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cached_staging_cb = cached_staging.clone();
+
+        // Cache the D3D11 Video Processor to avoid high-frequency allocations and device removed crashes
+        let cached_processor: std::sync::Arc<std::sync::Mutex<Option<VideoProcessorCache>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cached_processor_cb = cached_processor.clone();
 
         // FrameArrived callback — copies GPU texture to system RAM
         frame_pool.FrameArrived(&windows::Foundation::TypedEventHandler::new(
@@ -250,7 +265,7 @@ impl WgcCapture {
                         .unwrap_or_default()
                         .as_micros() as u64;
                     if let Ok(nv12) =
-                        blit_bgra_to_nv12(&device_cb.0, &src_tex, desc.Width, desc.Height)
+                        blit_bgra_to_nv12(&device_cb.0, &src_tex, desc.Width, desc.Height, &cached_processor_cb)
                     {
                         if let Ok(mut g) = gpu_pending_cb.lock() {
                             *g = Some(GpuRawFrame {
@@ -265,34 +280,45 @@ impl WgcCapture {
                     warn!("WGC: GPU blit failed — falling back to CPU staging");
                 }
 
-                // Create a staging (CPU-readable) texture with same dims
-                let staging_desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC {
-                    Width: desc.Width,
-                    Height: desc.Height,
-                    MipLevels: 1,
-                    ArraySize: 1,
-                    Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
-                        Count: 1,
-                        Quality: 0,
-                    },
-                    Usage: windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING,
-                    // windows-rs 0.58: flag fields in D3D11_TEXTURE2D_DESC are plain u32;
-                    // the newtype inner fields are i32, so cast explicitly.
-                    BindFlags: windows::Win32::Graphics::Direct3D11::D3D11_BIND_FLAG(0).0 as u32,
-                    CPUAccessFlags: windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0
-                        as u32,
-                    MiscFlags: windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0
-                        as u32,
-                };
-                let mut staging: Option<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> =
-                    None;
-                unsafe {
-                    device_cb
-                        .0
-                        .CreateTexture2D(&staging_desc, None, Some(&mut staging))?
-                };
-                let staging = staging.unwrap();
+                // Check the cached staging texture or create a new one on size change
+                let mut staging_tex = None;
+                if let Ok(mut guard) = cached_staging_cb.lock() {
+                    if let Some(ref stg) = *guard {
+                        let mut stg_desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+                        unsafe { stg.GetDesc(&mut stg_desc) };
+                        if stg_desc.Width == desc.Width && stg_desc.Height == desc.Height {
+                            staging_tex = Some(stg.clone());
+                        }
+                    }
+                    if staging_tex.is_none() {
+                        let staging_desc = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC {
+                            Width: desc.Width,
+                            Height: desc.Height,
+                            MipLevels: 1,
+                            ArraySize: 1,
+                            Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                            SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
+                            Usage: windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING,
+                            BindFlags: windows::Win32::Graphics::Direct3D11::D3D11_BIND_FLAG(0).0 as u32,
+                            CPUAccessFlags: windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32,
+                            MiscFlags: windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0 as u32,
+                        };
+                        let mut staging = None;
+                        unsafe {
+                            device_cb
+                                .0
+                                .CreateTexture2D(&staging_desc, None, Some(&mut staging))?
+                        };
+                        if let Some(ref stg) = staging {
+                            *guard = Some(stg.clone());
+                        }
+                        staging_tex = staging;
+                    }
+                }
+                let staging = staging_tex.ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-2147467259), "WGC: Failed to obtain staging texture"))?;
 
                 // Copy GPU → staging
                 // windows-rs 0.58: GetImmediateContext() returns Result<ID3D11DeviceContext>
@@ -506,6 +532,14 @@ impl WindowCapture for WgcCapture {
     }
 }
 
+#[cfg(windows)]
+struct VideoProcessorCache {
+    width: u32,
+    height: u32,
+    processor: windows::Win32::Graphics::Direct3D11::ID3D11VideoProcessor,
+    enumerator: windows::Win32::Graphics::Direct3D11::ID3D11VideoProcessorEnumerator,
+}
+
 // ── Phase 4c: GPU BGRA→NV12 blit helper ──────────────────────────────────────
 /// Convert a BGRA8 D3D11 texture to a new NV12 texture using the D3D11 Video
 /// Processor.  Runs entirely on the GPU — no CPU memory is touched.
@@ -515,6 +549,7 @@ fn blit_bgra_to_nv12(
     src_tex: &windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
     w: u32,
     h: u32,
+    cache: &std::sync::Arc<std::sync::Mutex<Option<VideoProcessorCache>>>,
 ) -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> {
     use windows::core::Interface;
     use windows::Win32::Foundation::BOOL;
@@ -546,19 +581,44 @@ fn blit_bgra_to_nv12(
     let ctx: ID3D11DeviceContext = unsafe { device.GetImmediateContext()? };
     let vctx: ID3D11VideoContext = ctx.cast()?;
 
-    // Video processor
-    let cdesc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
-        InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-        InputWidth: w,
-        InputHeight: h,
-        OutputWidth: w,
-        OutputHeight: h,
-        Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
-        ..Default::default()
-    };
-    // windows-rs 0.58: Create* methods return the COM object directly
-    let vp_enum = unsafe { vdev.CreateVideoProcessorEnumerator(&cdesc)? };
-    let processor = unsafe { vdev.CreateVideoProcessor(&vp_enum, 0)? };
+    let mut processor = None;
+    let mut vp_enum = None;
+
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(ref c) = *guard {
+            if c.width == w && c.height == h {
+                processor = Some(c.processor.clone());
+                vp_enum = Some(c.enumerator.clone());
+            }
+        }
+
+        if processor.is_none() {
+            // Video processor
+            let cdesc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
+                InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+                InputWidth: w,
+                InputHeight: h,
+                OutputWidth: w,
+                OutputHeight: h,
+                Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+                ..Default::default()
+            };
+            // windows-rs 0.58: Create* methods return the COM object directly
+            let enum_new = unsafe { vdev.CreateVideoProcessorEnumerator(&cdesc)? };
+            let proc_new = unsafe { vdev.CreateVideoProcessor(&enum_new, 0)? };
+            processor = Some(proc_new.clone());
+            vp_enum = Some(enum_new.clone());
+            *guard = Some(VideoProcessorCache {
+                width: w,
+                height: h,
+                processor: proc_new,
+                enumerator: enum_new,
+            });
+        }
+    }
+
+    let processor = processor.unwrap();
+    let vp_enum = vp_enum.unwrap();
 
     // Input view (BGRA source)
     let iv_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {

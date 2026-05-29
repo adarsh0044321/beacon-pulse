@@ -174,7 +174,7 @@ fn run_tray_loop(
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if msg == WM_NCCREATE {
+    if msg == WM_NCCREATE || msg == WM_CREATE {
         let createstruct = lparam.0 as *const CREATESTRUCTW;
         if !createstruct.is_null() {
             let lp_param = (*createstruct).lpCreateParams;
@@ -197,7 +197,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
     match msg {
         WM_TRAYICON => {
-            let event = lparam.0 as u32;
+            let event = (lparam.0 & 0xffff) as u32;
             if event == WM_LBUTTONDBLCLK {
                 // Double-click triggers changing the shared window
                 info!("Tray double-click — relaunching in visible console");
@@ -230,10 +230,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if choice.0 == 1 {
                     info!("Tray menu — Change Shared Window: relaunching in visible console");
                     relaunch_visible();
-                    let _ = state.shutdown_tx.send(());
+                    std::process::exit(0);
                 } else if choice.0 == 2 {
-                    info!("Tray menu — Exit Sharing");
-                    let _ = state.shutdown_tx.send(());
+                    info!("Tray menu — Exit Sharing: killing watchdog and exiting");
+                    use std::os::windows::process::CommandExt;
+                    const EXIT_CREATE_NO_WINDOW: u32 = 0x08000000;
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/IM", "beacon-watchdog.exe"])
+                        .creation_flags(EXIT_CREATE_NO_WINDOW)
+                        .output();
+                    std::process::exit(0);
                 }
             }
             LRESULT(0)
@@ -246,14 +252,39 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
-/// Relaunch the application in a brand-new visible console window.
-/// Uses `cmd /c start` so the child gets its own terminal regardless of
-/// the current process having `CREATE_NO_WINDOW`.
 fn relaunch_visible() {
-    if let Ok(exe_path) = std::env::current_exe() {
-        let exe_str = exe_path.to_string_lossy().to_string();
-        let _ = std::process::Command::new("cmd")
-            .args(["/c", "start", "", &exe_str])
-            .spawn();
-    }
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let exe_path = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    info!("relaunch_visible: spawning detached cleanup script, then exiting");
+
+    // Spawn a detached PowerShell script that:
+    //   1. Kills ALL beacon-watchdog.exe processes
+    //   2. Kills ALL beacon.exe processes (including the current one!)
+    //   3. Waits 3 seconds for TCP port 45101 to fully release from TIME_WAIT
+    //   4. Launches a fresh beacon.exe in a new console window
+    //
+    // Because PowerShell is a separate process, it survives even after
+    // our own process is killed in step 2. This guarantees a clean restart.
+    let script = format!(
+        "Start-Sleep -Milliseconds 300; \
+         Stop-Process -Name 'beacon-watchdog' -Force -ErrorAction SilentlyContinue; \
+         Stop-Process -Name 'beacon' -Force -ErrorAction SilentlyContinue; \
+         Start-Sleep -Seconds 3; \
+         Start-Process -FilePath '{}'",
+        exe_path.to_string_lossy().replace('\'', "''")
+    );
+
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+
+    // Give PowerShell a moment to spawn before we exit
+    std::thread::sleep(std::time::Duration::from_millis(200));
 }

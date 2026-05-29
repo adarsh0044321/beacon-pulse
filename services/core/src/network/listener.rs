@@ -13,7 +13,11 @@ use crate::AppState;
 pub async fn run(state: Arc<AppState>, control_port: u16) -> Result<()> {
     let addr = format!("0.0.0.0:{}", control_port);
     let listener = TcpListener::bind(&addr).await?;
-    info!("Network listener ready on {}", addr);
+    run_with_listener(state, listener).await
+}
+
+pub async fn run_with_listener(state: Arc<AppState>, listener: TcpListener) -> Result<()> {
+    info!("Network listener ready on {:?}", listener.local_addr());
 
     loop {
         match listener.accept().await {
@@ -45,6 +49,26 @@ async fn handle_client(
 
     // Tracks the authenticated session so we can clean up on disconnect.
     let mut session_id = String::new();
+
+    struct KeyboardCleanupGuard {
+        pressed_keys: std::collections::HashSet<(u16, u16, bool)>,
+    }
+    impl Drop for KeyboardCleanupGuard {
+        fn drop(&mut self) {
+            if !self.pressed_keys.is_empty() {
+                info!(
+                    "Releasing {} stuck keys on connection cleanup",
+                    self.pressed_keys.len()
+                );
+                for (vk, scan, is_extended) in &self.pressed_keys {
+                    crate::input::inject_key_release(*vk, *scan, *is_extended).ok();
+                }
+            }
+        }
+    }
+    let mut cleanup_guard = KeyboardCleanupGuard {
+        pressed_keys: std::collections::HashSet::new(),
+    };
 
     while let Some(line) = lines.next_line().await? {
         let msg: ControlMessage = serde_json::from_str(&line)?;
@@ -195,6 +219,27 @@ async fn handle_client(
                 let control_enabled =
                     crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
                 if control_enabled {
+                    if let crate::network::InputMsg::KeyPress {
+                        vk_code,
+                        scan_code,
+                        pressed,
+                        is_extended,
+                    } = event
+                    {
+                        if pressed {
+                            cleanup_guard.pressed_keys.insert((
+                                vk_code as u16,
+                                scan_code as u16,
+                                is_extended,
+                            ));
+                        } else {
+                            cleanup_guard.pressed_keys.remove(&(
+                                vk_code as u16,
+                                scan_code as u16,
+                                is_extended,
+                            ));
+                        }
+                    }
                     let target = { state.active_target.lock().await.clone() };
                     crate::input::dispatch_input(event, target).ok();
                 }

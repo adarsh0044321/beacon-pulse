@@ -6,10 +6,10 @@ use anyhow::Result;
 
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
-    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
-    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    MOUSEEVENTF_WHEEL, MOUSEINPUT,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT,
 };
 
 /// Dispatch a received input event to the system.
@@ -38,7 +38,8 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
             vk_code,
             scan_code,
             pressed,
-        } => inject_key(vk_code as u16, scan_code as u16, pressed),
+            is_extended,
+        } => inject_key(vk_code as u16, scan_code as u16, pressed, is_extended),
     }
 }
 
@@ -229,24 +230,87 @@ fn inject_mouse_scroll(delta: f32) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn inject_key(vk: u16, scan: u16, pressed: bool) -> Result<()> {
-    let flags = if pressed {
+fn inject_key(vk: u16, scan: u16, pressed: bool, is_extended: bool) -> Result<()> {
+    let mut flags = if pressed {
         Default::default()
     } else {
         KEYEVENTF_KEYUP
     };
-    let input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
-                wScan: scan,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
+    if is_extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    let input = if scan != 0 {
+        flags |= KEYEVENTF_SCANCODE;
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0),
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0xBEAC0D,
+                },
             },
-        },
+        }
+    } else {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
+                    wScan: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0xBEAC0D,
+                },
+            },
+        }
     };
+
+    unsafe {
+        SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn inject_key_release(vk: u16, scan: u16, is_extended: bool) -> Result<()> {
+    let mut flags = KEYEVENTF_KEYUP;
+    if is_extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    let input = if scan != 0 {
+        flags |= KEYEVENTF_SCANCODE;
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0),
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0xBEAC0D,
+                },
+            },
+        }
+    } else {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
+                    wScan: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0xBEAC0D,
+                },
+            },
+        }
+    };
+
     unsafe {
         SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
     }
@@ -280,6 +344,10 @@ fn inject_mouse_scroll(_d: f32) -> Result<()> {
     Ok(())
 }
 #[cfg(not(windows))]
-fn inject_key(_vk: u16, _scan: u16, _pressed: bool) -> Result<()> {
+fn inject_key(_vk: u16, _scan: u16, _pressed: bool, _is_extended: bool) -> Result<()> {
+    Ok(())
+}
+#[cfg(not(windows))]
+pub fn inject_key_release(_vk: u16, _scan: u16, _is_extended: bool) -> Result<()> {
     Ok(())
 }

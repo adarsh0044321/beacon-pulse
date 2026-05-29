@@ -171,14 +171,11 @@ fn main() {
                             .unwrap_or("service-event")
                             .to_string();
 
-                        // Emit the inner payload for typed listeners.
+                        // Emit as a typed event — each event name gets its own
+                        // Tauri listener (e.g. listen('stats', …)), avoiding
+                        // the double-processing bug from the old generic fallback.
                         let typed_payload = ev.get("payload").unwrap_or(&ev);
                         let _ = handle.emit(&event_name, typed_payload);
-
-                        // Generic fallback — Client.tsx listen('service-event', …)
-                        if let Ok(raw) = serde_json::to_string(&ev) {
-                            let _ = handle.emit("service-event", raw);
-                        }
                     }
                 }
             });

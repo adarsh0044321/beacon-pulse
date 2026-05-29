@@ -245,8 +245,8 @@ fn main() {
     // Kill any stale target_bin bg-service instances before we start
     kill_stale_hosts(&log_path, &target_bin);
 
-    // Small boot delay to let Windows settle
-    thread::sleep(Duration::from_secs(5));
+    // Small boot delay to let Windows settle (give console launcher time to exit)
+    thread::sleep(Duration::from_secs(1));
 
     let host_exe = host_exe_path(&target_bin);
     if !host_exe.exists() {
@@ -260,6 +260,9 @@ fn main() {
     let mut backoff_ms = RESTART_DELAY_MS;
 
     loop {
+        // Clean up any stale instances before starting a new one to free up ports
+        kill_stale_hosts(&log_path, &target_bin);
+
         let mut cmd = Command::new(&host_exe);
         cmd.creation_flags(CREATE_NO_WINDOW);
 
@@ -270,33 +273,79 @@ fn main() {
                 &format!("Launching player service: {}", target_bin),
             );
         } else {
-            // Read last shared window from registry for Host
-            let window_proc = match reg_read_string("LastWindowProcess") {
-                Some(p) if !p.is_empty() => Some(p),
-                _ => None,
-            };
+            cmd.arg("host");
+            cmd.arg("--bg-service");
+
+            // Read settings from registry
+            let sharing_mode =
+                reg_read_string("LastSharingMode").unwrap_or_else(|| "window".to_string());
+            let sharing_target = reg_read_string("LastSharingTarget")
+                .or_else(|| reg_read_string("LastWindowProcess")); // fallback to legacy
 
             let unattended = reg_read_dword("Unattended").unwrap_or(0) == 1;
 
-            if let Some(proc) = window_proc {
-                cmd.arg("host");
-                cmd.arg("--bg-service");
-                cmd.arg("--window");
-                cmd.arg(&proc);
-
+            if let Some(t) = sharing_target {
+                match sharing_mode.as_str() {
+                    "display" => {
+                        cmd.arg("--display");
+                        cmd.arg(&t);
+                    }
+                    "multi" => {
+                        cmd.arg("--multi-window");
+                        cmd.arg(&t);
+                    }
+                    "dual" => {
+                        cmd.arg("--dual-window");
+                        cmd.arg(&t);
+                    }
+                    _ => {
+                        cmd.arg("--window");
+                        cmd.arg(&t);
+                    }
+                }
                 log(
                     &log_path,
-                    &format!(
-                        "Launching host: --bg-service --window \"{}\" (unattended={})",
-                        proc, unattended
-                    ),
+                    &format!("Launching host: --bg-service --{} \"{}\"", sharing_mode, t),
                 );
             } else {
-                cmd.arg("bg-service");
                 log(
                     &log_path,
-                    "No LastWindowProcess in registry — launching bg-service in idle mode",
+                    "No LastSharingTarget in registry — launching in idle bg-service mode",
                 );
+            }
+
+            // Append other optional configuration options from registry
+            if let Some(port) = reg_read_dword("Port") {
+                cmd.arg("--port");
+                cmd.arg(port.to_string());
+            }
+            if let Some(cp) = reg_read_dword("ControlPort") {
+                cmd.arg("--control-port");
+                cmd.arg(cp.to_string());
+            }
+            if let Some(q) = reg_read_dword("Quality") {
+                cmd.arg("--quality");
+                cmd.arg(q.to_string());
+            }
+            if let Some(fps) = reg_read_dword("Fps") {
+                cmd.arg("--fps");
+                cmd.arg(fps.to_string());
+            }
+            if let Some(audio) = reg_read_dword("Audio") {
+                cmd.arg("--audio");
+                cmd.arg(if audio == 1 { "true" } else { "false" });
+            }
+            if let Some(cb) = reg_read_dword("Clipboard") {
+                cmd.arg("--clipboard");
+                cmd.arg(if cb == 1 { "true" } else { "false" });
+            }
+            if !unattended {
+                if let Some(code) = reg_read_string("PairingCode") {
+                    if !code.is_empty() {
+                        cmd.arg("--code");
+                        cmd.arg(code);
+                    }
+                }
             }
         }
 

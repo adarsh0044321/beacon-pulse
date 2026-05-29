@@ -273,6 +273,32 @@ pub fn delete_startup() -> bool {
     }
 }
 
+#[cfg(windows)]
+pub fn delete_value(name: &str) -> bool {
+    unsafe {
+        let mut hkey: isize = 0;
+        let subkey_w = to_wide(SUBKEY);
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey_w.as_ptr(),
+            0,
+            KEY_WRITE,
+            &mut hkey,
+        ) != ERROR_SUCCESS
+        {
+            return false;
+        }
+        let name_w = to_wide(name);
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn RegDeleteValueW(hkey: isize, lpvaluename: *const u16) -> i32;
+        }
+        let res = RegDeleteValueW(hkey, name_w.as_ptr());
+        RegCloseKey(hkey);
+        res == ERROR_SUCCESS
+    }
+}
+
 // Fallbacks for non-Windows targets
 #[cfg(not(windows))]
 pub fn read_dword(_name: &str) -> Option<u32> {
@@ -296,5 +322,9 @@ pub fn write_startup(_exe_path: &str, _args: &str) -> bool {
 }
 #[cfg(not(windows))]
 pub fn delete_startup() -> bool {
+    false
+}
+#[cfg(not(windows))]
+pub fn delete_value(_name: &str) -> bool {
     false
 }

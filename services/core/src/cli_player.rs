@@ -595,9 +595,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             LRESULT(0)
         }
         WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
+            // Check if the event was injected by our own service to prevent loopback feedback loops
+            let extra_info =
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetMessageExtraInfo() };
+            if extra_info.0 == 0xBEAC0D {
+                return LRESULT(0);
+            }
+
             let pressed = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
             let vk_code = wparam.0 as u32;
             let scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
+            let is_extended = ((lparam.0 >> 24) & 1) == 1;
 
             let s = state.lock();
             if let Some(ref tx) = s.input_tx {
@@ -606,6 +614,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         vk_code,
                         scan_code,
                         pressed,
+                        is_extended,
                     },
                 });
             }

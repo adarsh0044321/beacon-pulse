@@ -19,9 +19,9 @@ use super::{
     compatibility::preferred_backend, dda::DdaCapture, wgc::WgcCapture, AppKind, CaptureBackend,
     CaptureEvent, CapturedFrame, WindowCapture, WindowInfo,
 };
+use crate::capture::window_list::list_visible_windows;
 #[cfg(windows)]
 use crate::encoder::gpu_device::SharedGpuDeviceArc;
-use crate::capture::window_list::list_visible_windows;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -68,6 +68,7 @@ struct ActiveCapture {
     last_frame_time: Instant,
     stale_notified: bool,
     consecutive_failures: u32,
+    last_recovery_attempt: Option<Instant>,
 }
 
 pub struct CaptureManager {
@@ -101,6 +102,12 @@ impl CaptureManager {
         self.gpu_device = Some(dev);
     }
 
+    /// Disable the shared GPU device for this capture manager (CPU fallback).
+    #[cfg(windows)]
+    pub fn disable_gpu_device(&mut self) {
+        self.gpu_device = None;
+    }
+
     fn get_window_info(&self, hwnd: isize) -> Result<WindowInfo> {
         let found = match list_visible_windows() {
             Ok(wins) => wins.into_iter().find(|w| w.hwnd == hwnd),
@@ -115,9 +122,18 @@ impl CaptureManager {
             use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFOEXW};
             let mut mi = MONITORINFOEXW::default();
             mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-            if unsafe { GetMonitorInfoW(HMONITOR(hmonitor as *mut _), &mut mi.monitorInfo as *mut _ as *mut _) }.as_bool() {
-                let w = (mi.monitorInfo.rcMonitor.right - mi.monitorInfo.rcMonitor.left).abs() as u32;
-                let h = (mi.monitorInfo.rcMonitor.bottom - mi.monitorInfo.rcMonitor.top).abs() as u32;
+            if unsafe {
+                GetMonitorInfoW(
+                    HMONITOR(hmonitor as *mut _),
+                    &mut mi.monitorInfo as *mut _ as *mut _,
+                )
+            }
+            .as_bool()
+            {
+                let w =
+                    (mi.monitorInfo.rcMonitor.right - mi.monitorInfo.rcMonitor.left).abs() as u32;
+                let h =
+                    (mi.monitorInfo.rcMonitor.bottom - mi.monitorInfo.rcMonitor.top).abs() as u32;
                 return Ok(WindowInfo {
                     hwnd: 0,
                     title: format!("Display {}", hmonitor),
@@ -166,30 +182,35 @@ impl CaptureManager {
             _ => {}
         }
 
-        let create_active = |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
-            let win_info = match &t {
-                crate::CaptureTarget::Window(hwnd) => mgr.get_window_info(*hwnd)?,
-                crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
-                _ => return Err(anyhow!("Unsupported target variant")),
+        let create_active =
+            |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
+                let win_info = match &t {
+                    crate::CaptureTarget::Window(hwnd) => mgr.get_window_info(*hwnd)?,
+                    crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
+                    _ => return Err(anyhow!("Unsupported target variant")),
+                };
+                let backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
+                Ok(ActiveCapture {
+                    target: t,
+                    info: win_info,
+                    backend,
+                    last_frame: None,
+                    last_frame_time: Instant::now(),
+                    stale_notified: false,
+                    consecutive_failures: 0,
+                    last_recovery_attempt: None,
+                })
             };
-            let backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
-            Ok(ActiveCapture {
-                target: t,
-                info: win_info,
-                backend,
-                last_frame: None,
-                last_frame_time: Instant::now(),
-                stale_notified: false,
-                consecutive_failures: 0,
-            })
-        };
 
         match target {
             crate::CaptureTarget::Window(hwnd) => {
                 new_actives.push(create_active(crate::CaptureTarget::Window(hwnd), self)?);
             }
             crate::CaptureTarget::Display(hmonitor) => {
-                new_actives.push(create_active(crate::CaptureTarget::Display(hmonitor), self)?);
+                new_actives.push(create_active(
+                    crate::CaptureTarget::Display(hmonitor),
+                    self,
+                )?);
             }
             crate::CaptureTarget::MultiWindow(hwnds) => {
                 for hwnd in hwnds {
@@ -272,13 +293,23 @@ impl CaptureManager {
 
             let failures = self.actives[idx].consecutive_failures;
             if failures >= 3 {
-                self.attempt_backend_recovery_for_idx(idx);
+                let now = Instant::now();
+                let should_recover = match self.actives[idx].last_recovery_attempt {
+                    Some(last) => now.duration_since(last) >= Duration::from_secs(2),
+                    None => true,
+                };
+                if should_recover {
+                    self.actives[idx].last_recovery_attempt = Some(now);
+                    self.actives[idx].consecutive_failures = 0; // Reset immediately to prevent recovery storm
+                    self.attempt_backend_recovery_for_idx(idx);
+                }
             }
 
             {
                 let active = &mut self.actives[idx];
                 let stall = active.last_frame_time.elapsed();
-                let stall_too_long = stall > Duration::from_millis(self.config.stale_frame_notify_ms)
+                let stall_too_long = stall
+                    > Duration::from_millis(self.config.stale_frame_notify_ms)
                     && !active.stale_notified;
 
                 if stall_too_long && active.info.suspends_render_when_minimized {
@@ -291,10 +322,7 @@ impl CaptureManager {
 
             if emit_suspended {
                 if let crate::CaptureTarget::Window(hwnd) = target_val {
-                    self.emit(CaptureEvent::RenderSuspended {
-                        hwnd,
-                        app_kind,
-                    });
+                    self.emit(CaptureEvent::RenderSuspended { hwnd, app_kind });
                     if self.config.prevent_render_suspend {
                         Self::poke_window_render(hwnd);
                     }
@@ -359,9 +387,16 @@ impl CaptureManager {
                     let y_offset = rect_y + (half_h - fit_h) / 2;
 
                     scale_and_blit_bgra(
-                        src_data, src_w, src_h,
-                        &mut composite_data, dst_w, dst_h,
-                        x_offset, y_offset, fit_w, fit_h,
+                        src_data,
+                        src_w,
+                        src_h,
+                        &mut composite_data,
+                        dst_w,
+                        dst_h,
+                        x_offset,
+                        y_offset,
+                        fit_w,
+                        fit_h,
                     );
                 }
             }
@@ -389,9 +424,16 @@ impl CaptureManager {
                     let y_offset = rect_y + (cell_h - fit_h) / 2;
 
                     scale_and_blit_bgra(
-                        src_data, src_w, src_h,
-                        &mut composite_data, dst_w, dst_h,
-                        x_offset, y_offset, fit_w, fit_h,
+                        src_data,
+                        src_w,
+                        src_h,
+                        &mut composite_data,
+                        dst_w,
+                        dst_h,
+                        x_offset,
+                        y_offset,
+                        fit_w,
+                        fit_h,
                     );
                 }
             }
@@ -450,8 +492,10 @@ impl CaptureManager {
                         let hmonitor = HMONITOR(hmonitor_val as *mut _);
                         let mut info = MONITORINFOEXW::default();
                         info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-                        if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo as *mut _ as *mut _) }
-                            .as_bool()
+                        if unsafe {
+                            GetMonitorInfoW(hmonitor, &mut info.monitorInfo as *mut _ as *mut _)
+                        }
+                        .as_bool()
                         {
                             let w = (info.monitorInfo.rcMonitor.right
                                 - info.monitorInfo.rcMonitor.left)
@@ -512,7 +556,11 @@ impl CaptureManager {
 
     fn switch_to_best_backend_idx(&mut self, idx: usize) {
         let (_target, kind, minimized) = match self.actives.get(idx) {
-            Some(c) => (c.target.clone(), c.info.app_kind.clone(), c.info.is_minimized),
+            Some(c) => (
+                c.target.clone(),
+                c.info.app_kind.clone(),
+                c.info.is_minimized,
+            ),
             None => return,
         };
         let preferred = preferred_backend(&kind, minimized);
@@ -600,7 +648,10 @@ impl CaptureManager {
                     reason: "All capture backends failed".to_string(),
                 });
             }
-            error!("All capture backends exhausted for target {:?}", active.target);
+            error!(
+                "All capture backends exhausted for target {:?}",
+                active.target
+            );
         }
     }
 
@@ -718,9 +769,16 @@ fn fit_rect(src_w: u32, src_h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
 }
 
 fn scale_and_blit_bgra(
-    src: &[u8], src_w: u32, src_h: u32,
-    dst: &mut [u8], dst_w: u32, dst_h: u32,
-    rect_x: u32, rect_y: u32, rect_w: u32, rect_h: u32,
+    src: &[u8],
+    src_w: u32,
+    src_h: u32,
+    dst: &mut [u8],
+    dst_w: u32,
+    dst_h: u32,
+    rect_x: u32,
+    rect_y: u32,
+    rect_w: u32,
+    rect_h: u32,
 ) {
     if src.is_empty() || src_w == 0 || src_h == 0 || rect_w == 0 || rect_h == 0 {
         return;

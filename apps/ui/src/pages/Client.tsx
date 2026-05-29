@@ -202,40 +202,43 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     };
   }, [discoverHosts]);
 
-  // Listen for IPC push events from service
+  // Client-specific typed event listeners
   useEffect(() => {
-    const unlisten = listen<string>('service-event', (event) => {
-      try {
-        const ev = typeof event.payload === 'string'
-          ? JSON.parse(event.payload)
-          : event.payload;
-        
-        switch (ev.event) {
-          case 'video_chunk':
-            feedChunk(ev.data, ev.timestamp_us, ev.is_keyframe, ev.width, ev.height);
-            break;
-          case 'stream_connected':
-            setStreamConnected(true);
-            setTab('stream');
-            setError(null);
-            addToast('Stream Connected', 'Established direct connection with remote host.', 'success');
-            break;
-          case 'stream_disconnected':
-            setStreamConnected(false);
-            setTab('join');
-            closeDecoder();
-            addToast('Stream Disconnected', 'Connection with host terminated.', 'info');
-            break;
-          case 'error':
-            setError(ev.message);
-            addToast('Connection Error', ev.message, 'error');
-            break;
-        }
-      } catch (e) {
-        console.error('[IPC] Event parse error:', e);
-      }
+    const unlistenVideoChunk = listen<{
+      data: string;
+      timestamp_us: number;
+      is_keyframe: boolean;
+      width: number;
+      height: number;
+    }>('video_chunk', (event) => {
+      feedChunk(
+        event.payload.data,
+        event.payload.timestamp_us,
+        event.payload.is_keyframe,
+        event.payload.width,
+        event.payload.height,
+      );
     });
-    return () => { unlisten.then(f => f()); };
+
+    const unlistenConnected = listen<{ host_addr: string; recv_port: number }>('stream_connected', () => {
+      setStreamConnected(true);
+      setTab('stream');
+      setError(null);
+      addToast('Stream Connected', 'Established direct connection with remote host.', 'success');
+    });
+
+    const unlistenDisconnected = listen<{ reason: string }>('stream_disconnected', () => {
+      setStreamConnected(false);
+      setTab('join');
+      closeDecoder();
+      addToast('Stream Disconnected', 'Connection with host terminated.', 'info');
+    });
+
+    return () => {
+      unlistenVideoChunk.then(f => f());
+      unlistenConnected.then(f => f());
+      unlistenDisconnected.then(f => f());
+    };
   }, [feedChunk, closeDecoder, addToast]);
 
   // Logs polling
@@ -249,10 +252,11 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   }, [logType]);
 
   useEffect(() => {
+    if (tab !== 'logs') return;
     fetchLogs();
     const iv = setInterval(fetchLogs, 1500);
     return () => clearInterval(iv);
-  }, [fetchLogs]);
+  }, [fetchLogs, tab]);
 
   // Scroll logs to bottom
   useEffect(() => {
@@ -434,6 +438,13 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     };
   }, [streamConnected]);
 
+  // Cleanup decoder on unmount to prevent WebCodecs resource leak
+  useEffect(() => {
+    return () => {
+      closeDecoder();
+    };
+  }, [closeDecoder]);
+
   // Fullscreen toggle
   const toggleFullscreen = () => {
     const el = canvasRef.current?.parentElement;
@@ -445,7 +456,6 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     }
   };
 
-  // Connection trigger
   const handleConnect = async (host: DiscoveredHost, skipPairingCheck = false) => {
     if (!skipPairingCheck && pairingInput && pairingInput.length !== 6) {
       setError('Pairing code must be exactly 6 digits.');
@@ -456,11 +466,10 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
     try {
       await connectToHost(host, pairingInput);
-      setStreamConnected(true);
-      setTab('stream');
-      setError(null);
-      addToast('Stream Connected', 'Established direct connection with remote host.', 'success');
+      // State transitions (streamConnected, tab switch) are handled by
+      // the stream_connected event listener — no optimistic setting.
     } catch {
+      setStreamConnected(false);
       setError('Connection refused. Please confirm code expiration.');
       addToast('Connection Failed', 'Unable to reach the host session.', 'error');
     }

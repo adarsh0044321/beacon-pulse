@@ -1,9 +1,9 @@
 [package]
 name = "lanshare-service"
-version = "0.1.0"
+version = "1.0.3"
 edition = "2021"
-authors = ["LANShare Window"]
-description = "Core streaming service for LANShare Window"
+authors = ["adarsh0044321"]
+description = "Low-latency, hardware-accelerated LAN remote desktop streaming service"
 
 [lib]
 name = "lanshare_service"

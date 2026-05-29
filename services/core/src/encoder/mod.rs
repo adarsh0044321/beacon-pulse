@@ -72,39 +72,118 @@ pub trait VideoEncoder: Send {
     fn codec(&self) -> VideoCodec;
 }
 
-/// Create the best available encoder for the current hardware.
-/// Priority: NVENC → AMF → QSV → Software (OpenH264)
-pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>> {
-    // Try hardware first (Windows MF — no vendor SDK needed)
-    #[cfg(windows)]
-    {
-        match hardware::MfHardwareEncoder::new(config.clone()) {
-            Ok(enc) => {
-                tracing::info!(
-                    vendor = ?enc.vendor(),
-                    name = %enc.name(),
-                    "Hardware encoder selected"
-                );
-                // Update metrics: 1=NVENC, 2=AMF, 3=QSV
-                let hw_id = match enc.vendor() {
-                    hardware::HwVendor::Nvidia => 1,
-                    hardware::HwVendor::Amd => 2,
-                    hardware::HwVendor::Intel => 3,
-                };
-                crate::logging::metrics::METRICS
-                    .hw_encoder_active
-                    .store(hw_id, std::sync::atomic::Ordering::Relaxed);
-                return Ok(Box::new(enc));
+pub struct FallbackEncoder {
+    inner: Box<dyn VideoEncoder>,
+    config: EncoderConfig,
+    is_software: bool,
+}
+
+impl FallbackEncoder {
+    pub fn new(config: EncoderConfig) -> Self {
+        #[cfg(windows)]
+        {
+            match hardware::MfHardwareEncoder::new(config.clone()) {
+                Ok(enc) => {
+                    tracing::info!(
+                        vendor = ?enc.vendor(),
+                        name = %enc.name(),
+                        "FallbackEncoder: Hardware encoder selected initially"
+                    );
+                    // Update metrics: 1=NVENC, 2=AMF, 3=QSV
+                    let hw_id = match enc.vendor() {
+                        hardware::HwVendor::Nvidia => 1,
+                        hardware::HwVendor::Amd => 2,
+                        hardware::HwVendor::Intel => 3,
+                    };
+                    crate::logging::metrics::METRICS
+                        .hw_encoder_active
+                        .store(hw_id, std::sync::atomic::Ordering::Relaxed);
+                    return Self {
+                        inner: Box::new(enc),
+                        config,
+                        is_software: false,
+                    };
+                }
+                Err(e) => {
+                    tracing::warn!("FallbackEncoder: No hardware encoder available: {}. Using software fallback.", e);
+                }
             }
+        }
+
+        crate::logging::metrics::METRICS
+            .hw_encoder_active
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let software_enc = software::SoftwareEncoder::new(config.clone()).unwrap();
+        Self {
+            inner: Box::new(software_enc),
+            config,
+            is_software: true,
+        }
+    }
+}
+
+impl VideoEncoder for FallbackEncoder {
+    fn encode_bgra(
+        &mut self,
+        bgra: &[u8],
+        width: u32,
+        height: u32,
+        timestamp_us: u64,
+    ) -> Result<Option<EncodedPacket>> {
+        if self.is_software {
+            return self.inner.encode_bgra(bgra, width, height, timestamp_us);
+        }
+
+        // Try hardware encoding
+        match self.inner.encode_bgra(bgra, width, height, timestamp_us) {
+            Ok(pkt) => Ok(pkt),
             Err(e) => {
-                tracing::info!(reason = %e, "No hardware encoder — using software (OpenH264)");
+                tracing::error!(
+                    "Hardware encode failed: {:?}. Switching to software encoder fallback...",
+                    e
+                );
+                // Create a software encoder
+                let mut sw_config = self.config.clone();
+                sw_config.width = width;
+                sw_config.height = height;
+                match software::SoftwareEncoder::new(sw_config) {
+                    Ok(mut sw_enc) => {
+                        self.is_software = true;
+                        // Set metrics to 0 (software active)
+                        crate::logging::metrics::METRICS
+                            .hw_encoder_active
+                            .store(0, std::sync::atomic::Ordering::Relaxed);
+                        // Request a keyframe immediately to recover
+                        sw_enc.request_keyframe();
+                        let res = sw_enc.encode_bgra(bgra, width, height, timestamp_us);
+                        self.inner = Box::new(sw_enc);
+                        res
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to create software encoder fallback: {:?}", err);
+                        Err(e) // return original hardware error
+                    }
+                }
             }
         }
     }
 
-    // Software fallback
-    crate::logging::metrics::METRICS
-        .hw_encoder_active
-        .store(0, std::sync::atomic::Ordering::Relaxed);
-    Ok(Box::new(software::SoftwareEncoder::new(config)?))
+    fn request_keyframe(&mut self) {
+        self.inner.request_keyframe();
+    }
+
+    fn set_bitrate(&mut self, bps: u32) {
+        self.config.bitrate_bps = bps;
+        self.inner.set_bitrate(bps);
+    }
+
+    fn codec(&self) -> VideoCodec {
+        self.inner.codec()
+    }
+}
+
+/// Create the best available encoder for the current hardware.
+/// Priority: NVENC → AMF → QSV → Software (OpenH264)
+pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>> {
+    Ok(Box::new(FallbackEncoder::new(config)))
 }

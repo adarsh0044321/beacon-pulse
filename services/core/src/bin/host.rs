@@ -146,10 +146,23 @@ mod run {
         let ipc_handle = tokio::spawn(async move { ipc_server.run().await });
 
         // Start network listener (TCP control channel for client connections)
+        // Bind TCP listener first to verify port is free and service is healthy!
+        let addr = format!("0.0.0.0:{}", network::CONTROL_PORT);
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(
+                    "Network listener FAILED to bind to {} — port may be in use: {}",
+                    addr, e
+                );
+                std::process::exit(5); // Exit with code 5 so watchdog knows it failed
+            }
+        };
+
         let net_state = Arc::clone(&state);
         let net_handle = tokio::spawn(async move {
-            if let Err(e) = network::listener::run(net_state, network::CONTROL_PORT).await {
-                error!(error = %e, "Network listener FAILED — port {} may be in use by another instance", network::CONTROL_PORT);
+            if let Err(e) = network::listener::run_with_listener(net_state, listener).await {
+                error!(error = %e, "Network listener failed at runtime");
             }
         });
 
@@ -183,6 +196,18 @@ mod run {
         net_handle.abort();
 
         info!("Beacon stopped");
+
+        // Hard exit to avoid DLL/driver/COM detach deadlocks on worker thread joins.
+        // Bypasses graceful drop of tokio runtime which can block indefinitely.
+        let is_service = std::env::args()
+            .nth(1)
+            .map(|s| s == "service")
+            .unwrap_or(false);
+        if !is_service {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::process::exit(0);
+        }
+
         Ok(())
     }
 

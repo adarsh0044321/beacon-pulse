@@ -108,5 +108,7 @@ pub enum InputMsg {
         vk_code: u32,
         scan_code: u32,
         pressed: bool,
+        #[serde(default)]
+        is_extended: bool,
     },
 }

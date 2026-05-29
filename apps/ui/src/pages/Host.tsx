@@ -134,44 +134,9 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     return () => { unlisten.then(f => f()); };
   }, [addToast]);
 
-  // IPC push events router
-  useEffect(() => {
-    const unlisten = listen<string>('service-event', (event) => {
-      try {
-        const ev = typeof event.payload === 'string' 
-          ? JSON.parse(event.payload) 
-          : event.payload;
-        switch (ev.event) {
-          case 'stats':
-            updateStats({
-              fps: ev.fps ?? 0,
-              encode_ms: ev.encode_ms ?? 0,
-              latency_ms: ev.latency_ms ?? 0,
-              bitrate_kbps: ev.bitrate_kbps ?? 0,
-              client_count: ev.client_count ?? 0,
-              gpu_path_active: ev.gpu_path_active ?? false,
-            });
-            break;
-          case 'pairing_code':
-            useSessionStore.setState({
-              pairingCode: ev.code,
-              pairingExpiresIn: ev.expires_in ?? 120,
-            });
-            break;
-          case 'encoder_ready':
-            setEncoderInfo({
-              encoder_name: ev.encoder_name,
-              vendor: ev.vendor,
-              hw_accelerated: ev.hw_accelerated,
-            });
-            break;
-        }
-      } catch {
-        // ignore
-      }
-    });
-    return () => { unlisten.then(f => f()); };
-  }, [updateStats, setEncoderInfo]);
+  // NOTE: Stats, encoder_ready, pairing_code, client_connected/disconnected,
+  // share_started/stopped are all handled globally by useGlobalIpcEvents() in App.tsx.
+  // Host-specific events (capture_backend_switched) are handled above.
 
   // Expiry Timer countdown
   useEffect(() => {
@@ -197,10 +162,11 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   }, [logType]);
 
   useEffect(() => {
+    if (tab !== 'logs') return;
     fetchLogs();
     const iv = setInterval(fetchLogs, 1500);
     return () => clearInterval(iv);
-  }, [fetchLogs]);
+  }, [fetchLogs, tab]);
 
   // Scroll to bottom of logs console
   useEffect(() => {
@@ -342,39 +308,6 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     return '🖥️';
   };
 
-  // Window list search query
-  const filteredWindows = availableWindows.filter(win => 
-    win.title.toLowerCase().includes(windowSearch.toLowerCase()) ||
-    win.process_name.toLowerCase().includes(windowSearch.toLowerCase())
-  );
-
-  return (
-    <div className="dashboard-container">
-      {/* Sidebar Navigation */}
-      <div className="sidebar">
-        <div className="sidebar-header">
-          <Monitor size={22} style={{ color: 'var(--accent)' }} />
-          <h2>Beacon Host</h2>
-        </div>
-
-        <div className="sidebar-nav">
-          <div className={`sidebar-item ${tab === 'share' ? 'active' : ''}`} onClick={() => setTab('share')}>
-            <Play size={16} />
-            <span>Share Screen</span>
-          </div>
-          
-          <div className={`sidebar-item ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
-            <Users size={16} />
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
-              Devices
-              {connectedClients.length > 0 && (
-                <span className="badge badge-active" style={{ marginLeft: 'auto', padding: '1px 6px', fontSize: '0.68rem' }}>
-                  {connectedClients.length}
-                </span>
-              )}
-            </span>
-          </div>
-
   const toggleHwnd = (hwnd: number) => {
     setSelectedHwnds(prev =>
       prev.includes(hwnd) ? prev.filter(h => h !== hwnd) : [...prev, hwnd]
@@ -392,6 +325,12 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
       return [...prev, hwnd];
     });
   };
+
+  // Window list search query
+  const filteredWindows = availableWindows.filter(win => 
+    win.title.toLowerCase().includes(windowSearch.toLowerCase()) ||
+    win.process_name.toLowerCase().includes(windowSearch.toLowerCase())
+  );
 
   return (
     <div className="dashboard-container">

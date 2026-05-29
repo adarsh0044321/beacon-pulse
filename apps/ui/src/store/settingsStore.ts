@@ -69,8 +69,20 @@ export const useSettingsStore = create<Settings>((set, get) => ({
 
   load: async () => {
     try {
-      const settings = await invoke<Partial<Settings>>('load_settings');
-      set(settings as any);
+      const raw = await invoke<Record<string, unknown>>('load_settings');
+      // Only pick known data keys — never overwrite store action methods.
+      const safeKeys = [
+        'bitrate_kbps', 'fps', 'encoder', 'audio_enabled',
+        'clipboard_enabled', 'allow_input_control', 'start_with_windows',
+        'unattended_mode', 'unattended_pin', 'indicator_mode',
+      ] as const;
+      const safe: Record<string, unknown> = {};
+      for (const key of safeKeys) {
+        if (key in raw && raw[key] !== undefined) {
+          safe[key] = raw[key];
+        }
+      }
+      set(safe as Partial<Settings>);
     } catch (e) {
       console.warn('No saved settings found, using defaults');
     }

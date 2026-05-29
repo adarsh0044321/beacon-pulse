@@ -233,32 +233,28 @@ async fn capture_encode_loop(
                 suspends_render_when_minimized: false,
             }
         }
-        crate::CaptureTarget::MultiWindow(hwnds) => {
-            WindowInfo {
-                hwnd: 0,
-                title: format!("MultiWindow {:?}", hwnds),
-                process_name: "MultiWindow".to_string(),
-                process_id: 0,
-                width: 1920,
-                height: 1080,
-                is_minimized: false,
-                app_kind: AppKind::Unknown,
-                suspends_render_when_minimized: false,
-            }
-        }
-        crate::CaptureTarget::DualWindow(h1, h2) => {
-            WindowInfo {
-                hwnd: 0,
-                title: format!("DualWindow {}, {}", h1, h2),
-                process_name: "DualWindow".to_string(),
-                process_id: 0,
-                width: 1920,
-                height: 1080,
-                is_minimized: false,
-                app_kind: AppKind::Unknown,
-                suspends_render_when_minimized: false,
-            }
-        }
+        crate::CaptureTarget::MultiWindow(hwnds) => WindowInfo {
+            hwnd: 0,
+            title: format!("MultiWindow {:?}", hwnds),
+            process_name: "MultiWindow".to_string(),
+            process_id: 0,
+            width: 1920,
+            height: 1080,
+            is_minimized: false,
+            app_kind: AppKind::Unknown,
+            suspends_render_when_minimized: false,
+        },
+        crate::CaptureTarget::DualWindow(h1, h2) => WindowInfo {
+            hwnd: 0,
+            title: format!("DualWindow {}, {}", h1, h2),
+            process_name: "DualWindow".to_string(),
+            process_id: 0,
+            width: 1920,
+            height: 1080,
+            is_minimized: false,
+            app_kind: AppKind::Unknown,
+            suspends_render_when_minimized: false,
+        },
     };
     // Create encoder configuration — allow override from env (set by CLI flags)
     let enc_cfg = {
@@ -492,26 +488,25 @@ async fn capture_encode_loop(
                         r
                     }
                     Err(e) => {
-                        // GPU path failed (e.g. D3D manager not set yet) — use CPU if possible
-                        warn!(error = %e, "GPU-texture encode failed; trying CPU fallback");
+                        warn!(error = %e, "GPU-texture encode failed; self-healing: restarting capture manager in CPU staging mode");
                         METRICS.inc_gpu_errors();
-                        if raw.data.is_empty() {
-                            METRICS.inc_dropped_enc();
-                            continue;
+
+                        // Disable GPU encoder
+                        hw_enc = None;
+
+                        // Stop active captures, clear the GPU device on CaptureManager, and restart in CPU mode
+                        cap.stop_capture();
+                        cap.disable_gpu_device();
+                        if let Err(err) = cap.start_capture(target_val.clone(), info.clone()) {
+                            error!(error = %err, "Failed to restart CaptureManager in CPU mode");
                         }
-                        match encoder.encode_bgra(
-                            &raw.data,
-                            raw.width,
-                            raw.height,
-                            raw.timestamp_us,
-                        ) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                warn!(error=%e, "Encode error");
-                                METRICS.inc_dropped_enc();
-                                continue;
-                            }
-                        }
+
+                        // Force keyframe for the new CPU stream
+                        force_keyframe = true;
+
+                        // Drop this single frame; subsequent frames will be captured via CPU staging!
+                        METRICS.inc_dropped_enc();
+                        continue;
                     }
                 }
             } else if raw.data.is_empty() {

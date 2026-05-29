@@ -88,35 +88,9 @@ pub struct AppState {
 /// Runs silently — failure is non-fatal (elevated rights may not be available).
 #[cfg(windows)]
 pub fn add_firewall_rules() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    let rules: &[(&str, &str, &str)] = &[
-        ("Beacon-UDP-Stream", "UDP", "45100"),
-        ("Beacon-TCP-Control", "TCP", "45101"),
-        ("Pulse-UDP-ClientRecv", "UDP", "45102"),
-        ("Beacon-Pulse-UDP-Discovery", "UDP", "45199"),
-    ];
-
-    for (name, proto, port) in rules {
-        // Add rule if not already present (netsh is idempotent for name+dir).
-        let _ = std::process::Command::new("netsh")
-            .args([
-                "advfirewall",
-                "firewall",
-                "add",
-                "rule",
-                &format!("name={}", name),
-                "dir=in",
-                "action=allow",
-                &format!("protocol={}", proto),
-                &format!("localport={}", port),
-                "enable=yes",
-                "profile=any",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
+    // Firewall rules are now pre-configured during the standalone installation phase with proper Administrator privileges.
+    // Dynamic runtime invocation of administrative tools (like netsh) is disabled to avoid triggering machine-learning heuristics
+    // false-positives (such as Trojan:Win32/Wacatac.C!ml) in Windows Defender.
 }
 
 #[cfg(not(windows))]

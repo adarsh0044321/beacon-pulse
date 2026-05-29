@@ -175,7 +175,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   stopShare: async () => {
     try {
       await invoke('stop_share');
-      set({ isSharing: false, activeHwnd: null, connectedClients: [] });
+      set({
+        isSharing: false,
+        activeHwnd: null,
+        activeTarget: null,
+        connectedClients: [],
+        pairingCode: null,
+        encoderInfo: null,
+      });
     } catch (e) {
       console.error('Failed to stop share:', e);
     }
