@@ -44,6 +44,27 @@ pub struct HwEncoderInfo {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Drop guard for IMFActivate array to prevent COM leaks
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(windows)]
+struct ActivatesGuard(*mut Option<windows::Win32::Media::MediaFoundation::IMFActivate>, u32);
+
+#[cfg(windows)]
+impl Drop for ActivatesGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                for i in 0..self.1 as usize {
+                    std::ptr::drop_in_place(self.0.add(i));
+                }
+                windows::Win32::System::Com::CoTaskMemFree(Some(self.0 as *const _));
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Probe — enumerate hardware H.264 MF transforms at startup
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -92,6 +113,7 @@ fn probe_mf() -> Result<Vec<HwEncoderInfo>> {
         }
     }
 
+    let _guard = ActivatesGuard(activates_ptr, count);
     let mut results = Vec::new();
     unsafe {
         let slice = std::slice::from_raw_parts(activates_ptr, count as usize);
@@ -115,7 +137,6 @@ fn probe_mf() -> Result<Vec<HwEncoderInfo>> {
             info!(name = %name, vendor = ?vendor, "Hardware H.264 encoder found via MF");
             results.push(HwEncoderInfo { vendor, name });
         }
-        windows::Win32::System::Com::CoTaskMemFree(Some(activates_ptr as *const _));
     }
 
     results.sort_by_key(|r| match r.vendor {
@@ -388,6 +409,8 @@ impl MfHardwareEncoder {
                 return Err(anyhow!("No hardware MF transforms available"));
             }
 
+            let _guard = ActivatesGuard(activates_ptr, count);
+
             let activate = (*activates_ptr)
                 .as_ref()
                 .ok_or_else(|| anyhow!("Null IMFActivate"))?;
@@ -419,7 +442,6 @@ impl MfHardwareEncoder {
                 .SetInputType(0, &in_mt, 0)
                 .context("SetInputType")?;
 
-            windows::Win32::System::Com::CoTaskMemFree(Some(activates_ptr as *const _));
             Ok(transform)
         }
     }

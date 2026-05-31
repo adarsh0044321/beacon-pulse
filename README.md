@@ -293,6 +293,19 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 
 ## 📋 Changelog
 
+### v1.0.4 (2026-05-31)
+
+**Bug Fixes**
+- **Fixed Windows Media Foundation COM leaks** — introduced an RAII `ActivatesGuard` drop guard to release `IMFActivate` objects on function exit and prevent COM handle leaks.
+- **Fixed frame latency spikes** — updated ring buffer queue to drop the oldest frame when full, avoiding stale frame build-up.
+- **Fixed client session leaks** — handled read loop errors gracefully in the listener thread to ensure connection clean-up always occurs.
+- **Fixed keyboard layouts and extended keys** — added JS `KeyboardEvent.code` lookup table in the Tauri UI client to ensure correct scan codes and extended key flags (`is_extended`) are sent.
+- **Fixed mouse aspect-ratio coordinates** — corrected mouse clicks and movements on the client canvas by dynamically discounting letterbox/pillarbox margins.
+
+**Improvements**
+- **Registry Synchronization** — connected Tauri settings directly to the Windows registry configuration, enabling UI changes to persist across background services.
+- **Automated Verification** — implemented ring buffer dropping verification unit tests.
+
 ### v1.0.3 (2026-05-29)
 
 **Bug Fixes**

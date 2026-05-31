@@ -341,13 +341,59 @@ async fn send_input(event: Value, state: State<'_, AppData>) -> Result<Value, St
 #[tauri::command]
 async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<(), String> {
     // Settings are persisted locally in the Tauri layer (the service has no
-    // save_settings command). Write to %APPDATA%\LANShare\settings.json.
+    // save_settings command). Write to settings.json.
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    std::fs::write(&path, &json).map_err(|e| e.to_string())?;
+
+    // Also write to Windows Registry under HKEY_CURRENT_USER\Software\Beacon
+    #[cfg(windows)]
+    {
+        if let Some(bitrate) = settings.get("bitrate_kbps").and_then(Value::as_u64) {
+            lanshare_service::registry::write_dword("Quality", (bitrate / 1000) as u32);
+        }
+        if let Some(fps) = settings.get("fps").and_then(Value::as_u64) {
+            lanshare_service::registry::write_dword("Fps", fps as u32);
+        }
+        if let Some(audio) = settings.get("audio_enabled").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("Audio", if audio { 1 } else { 0 });
+        }
+        if let Some(cb) = settings.get("clipboard_enabled").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("Clipboard", if cb { 1 } else { 0 });
+        }
+        if let Some(control) = settings.get("allow_input_control").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("ControlEnabled", if control { 1 } else { 0 });
+        }
+        if let Some(unattended) = settings.get("unattended_mode").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("Unattended", if unattended { 1 } else { 0 });
+        }
+        if let Some(start_with_windows) = settings.get("start_with_windows").and_then(Value::as_bool) {
+            if start_with_windows {
+                if let Ok(exe_path) = std::env::current_exe() {
+                    let mut watchdog_path = exe_path.clone();
+                    watchdog_path.pop();
+                    watchdog_path.push("beacon-watchdog.exe");
+                    let startup_exe = if watchdog_path.exists() {
+                        watchdog_path
+                    } else {
+                        exe_path
+                    };
+                    let path_str = startup_exe.to_string_lossy();
+                    if lanshare_service::registry::write_startup(&path_str, "") {
+                        lanshare_service::registry::write_dword("StartupEnabled", 1);
+                    }
+                }
+            } else {
+                lanshare_service::registry::delete_startup();
+                lanshare_service::registry::write_dword("StartupEnabled", 0);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

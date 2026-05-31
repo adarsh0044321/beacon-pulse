@@ -135,6 +135,116 @@ function useWebCodecsDecoder(canvasRef: React.RefObject<HTMLCanvasElement>) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Key mapping from KeyboardEvent.code to Windows Scan Code and Extended Key Flag
+// ─────────────────────────────────────────────────────────────────────────────
+const KEY_MAP: Record<string, { scan: number; extended?: boolean }> = {
+  Escape: { scan: 0x01 },
+  Digit1: { scan: 0x02 },
+  Digit2: { scan: 0x03 },
+  Digit3: { scan: 0x04 },
+  Digit4: { scan: 0x05 },
+  Digit5: { scan: 0x06 },
+  Digit6: { scan: 0x07 },
+  Digit7: { scan: 0x08 },
+  Digit8: { scan: 0x09 },
+  Digit9: { scan: 0x0A },
+  Digit0: { scan: 0x0B },
+  Minus: { scan: 0x0C },
+  Equal: { scan: 0x0D },
+  Backspace: { scan: 0x0E },
+  Tab: { scan: 0x0F },
+  KeyQ: { scan: 0x10 },
+  KeyW: { scan: 0x11 },
+  KeyE: { scan: 0x12 },
+  KeyR: { scan: 0x13 },
+  KeyT: { scan: 0x14 },
+  KeyY: { scan: 0x15 },
+  KeyU: { scan: 0x16 },
+  KeyI: { scan: 0x17 },
+  KeyO: { scan: 0x18 },
+  KeyP: { scan: 0x19 },
+  BracketLeft: { scan: 0x1A },
+  BracketRight: { scan: 0x1B },
+  Enter: { scan: 0x1C },
+  ControlLeft: { scan: 0x1D },
+  KeyA: { scan: 0x1E },
+  KeyS: { scan: 0x1F },
+  KeyD: { scan: 0x20 },
+  KeyF: { scan: 0x21 },
+  KeyG: { scan: 0x22 },
+  KeyH: { scan: 0x23 },
+  KeyJ: { scan: 0x24 },
+  KeyK: { scan: 0x25 },
+  KeyL: { scan: 0x26 },
+  Semicolon: { scan: 0x27 },
+  Quote: { scan: 0x28 },
+  Backquote: { scan: 0x29 },
+  ShiftLeft: { scan: 0x2A },
+  Backslash: { scan: 0x2B },
+  KeyZ: { scan: 0x2C },
+  KeyX: { scan: 0x2D },
+  KeyC: { scan: 0x2E },
+  KeyV: { scan: 0x2F },
+  KeyB: { scan: 0x30 },
+  KeyN: { scan: 0x31 },
+  KeyM: { scan: 0x32 },
+  Comma: { scan: 0x33 },
+  Period: { scan: 0x34 },
+  Slash: { scan: 0x35 },
+  ShiftRight: { scan: 0x36 },
+  NumpadMultiply: { scan: 0x37 },
+  AltLeft: { scan: 0x38 },
+  Space: { scan: 0x39 },
+  CapsLock: { scan: 0x3A },
+  F1: { scan: 0x3B },
+  F2: { scan: 0x3C },
+  F3: { scan: 0x3D },
+  F4: { scan: 0x3E },
+  F5: { scan: 0x3F },
+  F6: { scan: 0x40 },
+  F7: { scan: 0x41 },
+  F8: { scan: 0x42 },
+  F9: { scan: 0x43 },
+  F10: { scan: 0x44 },
+  NumLock: { scan: 0x45 },
+  ScrollLock: { scan: 0x46 },
+  Numpad7: { scan: 0x47 },
+  Numpad8: { scan: 0x48 },
+  Numpad9: { scan: 0x49 },
+  NumpadSubtract: { scan: 0x4A },
+  Numpad4: { scan: 0x4B },
+  Numpad5: { scan: 0x4C },
+  Numpad6: { scan: 0x4D },
+  NumpadAdd: { scan: 0x4E },
+  Numpad1: { scan: 0x4F },
+  Numpad2: { scan: 0x50 },
+  Numpad3: { scan: 0x51 },
+  Numpad0: { scan: 0x52 },
+  NumpadDecimal: { scan: 0x53 },
+  F11: { scan: 0x57 },
+  F12: { scan: 0x58 },
+
+  // Extended Keys
+  NumpadEnter: { scan: 0x1C, extended: true },
+  ControlRight: { scan: 0x1D, extended: true },
+  NumpadDivide: { scan: 0x35, extended: true },
+  AltRight: { scan: 0x38, extended: true },
+  Home: { scan: 0x47, extended: true },
+  ArrowUp: { scan: 0x48, extended: true },
+  PageUp: { scan: 0x49, extended: true },
+  ArrowLeft: { scan: 0x4B, extended: true },
+  ArrowRight: { scan: 0x4D, extended: true },
+  End: { scan: 0x4F, extended: true },
+  ArrowDown: { scan: 0x50, extended: true },
+  PageDown: { scan: 0x51, extended: true },
+  Insert: { scan: 0x52, extended: true },
+  Delete: { scan: 0x53, extended: true },
+  MetaLeft: { scan: 0x5B, extended: true },
+  MetaRight: { scan: 0x5C, extended: true },
+  ContextMenu: { scan: 0x5D, extended: true },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -337,31 +447,66 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   }, [statsHistory]);
 
   // Input Forwarding event handlers
+  const getRelativeMouseCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+
+    const videoWidth = canvas.width;
+    const videoHeight = canvas.height;
+    if (videoWidth === 0 || videoHeight === 0) return null;
+
+    const videoRatio = videoWidth / videoHeight;
+    const displayRatio = rect.width / rect.height;
+
+    let renderedWidth = rect.width;
+    let renderedHeight = rect.height;
+    let leftOffset = 0;
+    let topOffset = 0;
+
+    if (displayRatio > videoRatio) {
+      // Height-constrained (pillarbox, black bars on left/right)
+      renderedWidth = rect.height * videoRatio;
+      leftOffset = (rect.width - renderedWidth) / 2;
+    } else {
+      // Width-constrained (letterbox, black bars on top/bottom)
+      renderedHeight = rect.width / videoRatio;
+      topOffset = (rect.height - renderedHeight) / 2;
+    }
+
+    const xCanvas = e.clientX - rect.left;
+    const yCanvas = e.clientY - rect.top;
+
+    const xVideo = Math.max(0, Math.min(renderedWidth, xCanvas - leftOffset));
+    const yVideo = Math.max(0, Math.min(renderedHeight, yCanvas - topOffset));
+
+    return {
+      x: xVideo,
+      y: yVideo,
+      w: Math.round(renderedWidth),
+      h: Math.round(renderedHeight),
+    };
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!streamConnected) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const coords = getRelativeMouseCoords(e);
+    if (!coords) return;
     invoke('send_input', {
       event: {
         kind: 'mouse_move',
-        x,
-        y,
-        viewport_w: Math.round(rect.width),
-        viewport_h: Math.round(rect.height)
+        x: coords.x,
+        y: coords.y,
+        viewport_w: coords.w,
+        viewport_h: coords.h
       }
     }).catch(console.error);
   };
 
   const handleMouseButton = (e: React.MouseEvent<HTMLCanvasElement>, pressed: boolean) => {
     if (!streamConnected) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const coords = getRelativeMouseCoords(e);
+    if (!coords) return;
 
     let btn = 0;
     if (e.button === 0) btn = 0;
@@ -374,10 +519,10 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         kind: 'mouse_button',
         button: btn,
         pressed,
-        x,
-        y,
-        viewport_w: Math.round(rect.width),
-        viewport_h: Math.round(rect.height)
+        x: coords.x,
+        y: coords.y,
+        viewport_w: coords.w,
+        viewport_h: coords.h
       }
     }).catch(console.error);
   };
@@ -404,12 +549,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         e.preventDefault();
       }
 
+      const keyInfo = KEY_MAP[e.code] || { scan: 0, extended: false };
+
       invoke('send_input', {
         event: {
           kind: 'key_press',
           vk_code: e.keyCode,
-          scan_code: 0,
-          pressed: true
+          scan_code: keyInfo.scan,
+          pressed: true,
+          is_extended: keyInfo.extended || false
         }
       }).catch(console.error);
     };
@@ -420,12 +568,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         e.preventDefault();
       }
 
+      const keyInfo = KEY_MAP[e.code] || { scan: 0, extended: false };
+
       invoke('send_input', {
         event: {
           kind: 'key_press',
           vk_code: e.keyCode,
-          scan_code: 0,
-          pressed: false
+          scan_code: keyInfo.scan,
+          pressed: false,
+          is_extended: keyInfo.extended || false
         }
       }).catch(console.error);
     };

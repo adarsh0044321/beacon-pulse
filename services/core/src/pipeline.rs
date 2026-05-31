@@ -73,20 +73,31 @@ impl Pipeline {
 /// so the capture thread never blocks.
 ///
 /// Returns the number of dropped frames (0 or 1).
-pub fn push_raw_frame(tx: &Sender<RawFrame>, frame: RawFrame) -> u64 {
-    match tx.try_send(frame) {
-        Ok(_) => 0,
-        Err(TrySendError::Full(dropped)) => {
-            // The encoder is running behind — drop this frame
-            debug!(
-                "Pipeline full: dropping frame {} (stale={})",
-                dropped.meta.frame_id, dropped.frame.is_stale
-            );
-            1
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            warn!("Pipeline raw_tx disconnected");
-            0
+pub fn push_raw_frame(tx: &Sender<RawFrame>, rx: &Receiver<RawFrame>, mut frame: RawFrame) -> u64 {
+    loop {
+        match tx.try_send(frame) {
+            Ok(_) => return 0,
+            Err(TrySendError::Full(f)) => {
+                // The encoder is running behind — try to drop the oldest frame to make space
+                if let Ok(oldest) = rx.try_recv() {
+                    debug!(
+                        "Pipeline full: dropping oldest frame {} (stale={})",
+                        oldest.meta.frame_id, oldest.frame.is_stale
+                    );
+                    frame = f; // try to send the new frame again
+                } else {
+                    // Could not pop (channel emptied?), drop current frame
+                    debug!(
+                        "Pipeline full: dropping newest frame {} (stale={})",
+                        f.meta.frame_id, f.frame.is_stale
+                    );
+                    return 1;
+                }
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                warn!("Pipeline raw_tx disconnected");
+                return 0;
+            }
         }
     }
 }
@@ -155,4 +166,68 @@ pub async fn encoder_thread(
         }
     }
     tracing::info!("Encoder thread exiting");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::{CapturedFrame, CaptureBackend};
+    use crate::telemetry::FrameMetadata;
+
+    #[test]
+    fn test_push_raw_frame_drops_oldest() {
+        let (tx, rx) = bounded(2);
+        
+        let frame1 = RawFrame {
+            frame: CapturedFrame {
+                data: vec![1],
+                width: 1,
+                height: 1,
+                is_stale: false,
+                source: CaptureBackend::WGC,
+                timestamp_us: 100,
+                gpu_texture: None,
+            },
+            meta: FrameMetadata::new(1),
+        };
+        let frame2 = RawFrame {
+            frame: CapturedFrame {
+                data: vec![2],
+                width: 1,
+                height: 1,
+                is_stale: false,
+                source: CaptureBackend::WGC,
+                timestamp_us: 200,
+                gpu_texture: None,
+            },
+            meta: FrameMetadata::new(2),
+        };
+        let frame3 = RawFrame {
+            frame: CapturedFrame {
+                data: vec![3],
+                width: 1,
+                height: 1,
+                is_stale: false,
+                source: CaptureBackend::WGC,
+                timestamp_us: 300,
+                gpu_texture: None,
+            },
+            meta: FrameMetadata::new(3),
+        };
+
+        // Channel capacity is 2.
+        assert_eq!(push_raw_frame(&tx, &rx, frame1), 0);
+        assert_eq!(push_raw_frame(&tx, &rx, frame2), 0);
+        
+        // Channel is now full (contains frame1 and frame2).
+        // Pushing frame3 should drop the oldest (frame1).
+        assert_eq!(push_raw_frame(&tx, &rx, frame3), 0);
+
+        // The channel should now contain frame2 (oldest remaining) and frame3.
+        let first = rx.recv().unwrap();
+        assert_eq!(first.meta.frame_id, 2);
+        let second = rx.recv().unwrap();
+        assert_eq!(second.meta.frame_id, 3);
+        assert!(rx.try_recv().is_err());
+    }
 }
