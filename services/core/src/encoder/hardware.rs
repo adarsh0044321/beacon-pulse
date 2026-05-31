@@ -48,7 +48,10 @@ pub struct HwEncoderInfo {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(windows)]
-struct ActivatesGuard(*mut Option<windows::Win32::Media::MediaFoundation::IMFActivate>, u32);
+struct ActivatesGuard(
+    *mut Option<windows::Win32::Media::MediaFoundation::IMFActivate>,
+    u32,
+);
 
 #[cfg(windows)]
 impl Drop for ActivatesGuard {

@@ -171,13 +171,13 @@ pub async fn encoder_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::{CapturedFrame, CaptureBackend};
+    use crate::capture::{CaptureBackend, CapturedFrame};
     use crate::telemetry::FrameMetadata;
 
     #[test]
     fn test_push_raw_frame_drops_oldest() {
         let (tx, rx) = bounded(2);
-        
+
         let frame1 = RawFrame {
             frame: CapturedFrame {
                 data: vec![1],
@@ -218,7 +218,7 @@ mod tests {
         // Channel capacity is 2.
         assert_eq!(push_raw_frame(&tx, &rx, frame1), 0);
         assert_eq!(push_raw_frame(&tx, &rx, frame2), 0);
-        
+
         // Channel is now full (contains frame1 and frame2).
         // Pushing frame3 should drop the oldest (frame1).
         assert_eq!(push_raw_frame(&tx, &rx, frame3), 0);
