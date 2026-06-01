@@ -142,6 +142,7 @@ h1 {
   letter-spacing: -0.025em;
   background: linear-gradient(135deg, #fff 30%, #94a3b8 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 h2 { font-size: 1.3rem; font-weight: 600; color: #fff; letter-spacing: -0.02em; }
@@ -362,6 +363,7 @@ p  { line-height: 1.6; color: var(--text-secondary); font-size: 0.9rem; }
   font-weight: 700;
   background: linear-gradient(135deg, #fff 0%, var(--accent-purple) 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
