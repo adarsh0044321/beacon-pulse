@@ -198,6 +198,11 @@ fn main() {
             request_keyframe,
             send_input,
             read_recent_logs,
+            send_wol_packet,
+            get_active_clients,
+            send_file_start,
+            send_file_chunk,
+            send_file_end,
         ])
         // ── Graceful shutdown on window close ─────────────────────────────
         // Kill watchdog + service when the user closes the last window.
@@ -298,6 +303,7 @@ async fn connect_to_host(
     address: String,
     port: u16,
     code: String,
+    tls: Option<bool>,
     state: State<'_, AppData>,
 ) -> Result<Value, String> {
     // recv_port: the local UDP port this client will listen on for video frames.
@@ -315,6 +321,7 @@ async fn connect_to_host(
             "stream_port":  port,          // discovered port = CONTROL_PORT (45101)
             "recv_port":    CLIENT_RECV_PORT,
             "pairing_code": pairing_code,
+            "tls":          tls,
         }),
     )
 }
@@ -369,6 +376,20 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
         }
         if let Some(unattended) = settings.get("unattended_mode").and_then(Value::as_bool) {
             lanshare_service::registry::write_dword("Unattended", if unattended { 1 } else { 0 });
+        }
+        if let Some(tls) = settings.get("tls_enabled").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("TlsEnabled", if tls { 1 } else { 0 });
+        }
+        if let Some(ab) = settings.get("adaptive_bitrate_enabled").and_then(Value::as_bool) {
+            lanshare_service::registry::write_dword("AdaptiveBitrate", if ab { 1 } else { 0 });
+        }
+        let use_static = settings.get("use_static_code").and_then(Value::as_bool).unwrap_or(false);
+        if use_static {
+            if let Some(code) = settings.get("static_code").and_then(Value::as_str) {
+                lanshare_service::registry::write_string("PairingCode", code);
+            }
+        } else {
+            lanshare_service::registry::delete_value("PairingCode");
         }
         if let Some(start_with_windows) = settings.get("start_with_windows").and_then(Value::as_bool) {
             if start_with_windows {
@@ -486,3 +507,74 @@ fn ipc_send(state: &State<'_, AppData>, cmd: Value) -> Result<Value, String> {
         .send_command(cmd)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+async fn send_wol_packet(mac: String) -> Result<(), String> {
+    let cleaned = mac.replace("-", "").replace(":", "");
+    if cleaned.len() != 12 {
+        return Err("MAC address must be 12 hexadecimal characters".to_string());
+    }
+    let mut mac_bytes = [0u8; 6];
+    for i in 0..6 {
+        mac_bytes[i] = u8::from_str_radix(&cleaned[i*2..i*2+2], 16)
+            .map_err(|e| format!("Invalid MAC byte: {}", e))?;
+    }
+
+    let mut packet = [0u8; 102];
+    for i in 0..6 {
+        packet[i] = 0xFF;
+    }
+    for i in 0..16 {
+        let offset = 6 + i * 6;
+        packet[offset..offset+6].copy_from_slice(&mac_bytes);
+    }
+
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    socket.set_broadcast(true).map_err(|e| e.to_string())?;
+    socket.send_to(&packet, "255.255.255.255:9").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_active_clients(state: State<'_, AppData>) -> Result<Value, String> {
+    let resp = ipc_send(&state, serde_json::json!({ "cmd": "get_active_clients" }))?;
+    Ok(resp
+        .get("clients")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![])))
+}
+
+#[tauri::command]
+async fn send_file_start(name: String, size: u64, state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(
+        &state,
+        serde_json::json!({
+            "cmd": "send_file_start",
+            "name": name,
+            "size": size,
+        }),
+    )
+}
+
+#[tauri::command]
+async fn send_file_chunk(data: String, state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(
+        &state,
+        serde_json::json!({
+            "cmd": "send_file_chunk",
+            "data": data,
+        }),
+    )
+}
+
+#[tauri::command]
+async fn send_file_end(state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(
+        &state,
+        serde_json::json!({
+            "cmd": "send_file_end",
+        }),
+    )
+}
+

@@ -21,6 +21,65 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::info;
 
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, Error, SignatureScheme};
+
+#[derive(Debug)]
+struct SkipServerVerification(Arc<CryptoProvider>);
+
+impl SkipServerVerification {
+    fn new() -> Arc<Self> {
+        Arc::new(Self(Arc::new(rustls::crypto::ring::default_provider())))
+    }
+}
+
+impl ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
 use crate::network::receiver::{ReceivedFrame, UdpReceiver};
 use crate::network::ControlMessage;
 
@@ -48,6 +107,9 @@ pub enum ClientEvent {
     RecvStats {
         fps: f32,
         packet_loss_pct: f32,
+    },
+    CursorChanged {
+        shape: String,
     },
 }
 
@@ -108,6 +170,7 @@ pub async fn start(
     recv_port: u16,
     host_addr: SocketAddr,
     pairing_code: Option<String>,
+    tls: bool,
     event_tx: mpsc::UnboundedSender<ClientEvent>,
 ) -> Result<ClientSessionHandle> {
     // ── Step 1: Bind UDP recv socket first ───────────────────────────────────
@@ -139,7 +202,37 @@ pub async fn start(
         .await
         .with_context(|| format!("TCP connect to {} failed", control_addr))?;
     let _ = stream.set_nodelay(true);
-    let (reader, mut writer) = stream.into_split();
+
+    let (reader, writer) = if tls {
+        let provider = rustls::crypto::ring::default_provider();
+        let client_config =
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
+                .with_safe_default_protocol_versions()
+                .expect("Default protocols should be supported")
+                .dangerous()
+                .with_custom_certificate_verifier(SkipServerVerification::new())
+                .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client_config));
+        let domain = rustls::pki_types::ServerName::try_from("localhost")
+            .map_err(|e| anyhow!("Invalid DNS name: {}", e))?
+            .to_owned();
+        let tls_stream = connector
+            .connect(domain, stream)
+            .await
+            .context("TLS handshake with host failed")?;
+        let (r, w) = tokio::io::split(tls_stream);
+        (
+            Box::new(r) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+            Box::new(w) as Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+        )
+    } else {
+        let (r, w) = tokio::io::split(stream);
+        (
+            Box::new(r) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+            Box::new(w) as Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+        )
+    };
+    let mut writer = writer;
     let mut lines = TokioBufReader::new(reader).lines();
 
     // ── Step 3: Send JoinRequest ──────────────────────────────────────────────
@@ -219,9 +312,12 @@ pub async fn start(
         })
         .context("Failed to spawn recv thread")?;
 
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ControlMessage>();
+
     // Tokio task: forward frames → IPC events
     let running_for_fwd = Arc::clone(&running);
     let fwd_event_tx = event_tx.clone();
+    let input_tx_clone = input_tx.clone();
     tokio::spawn(async move {
         forward_frames(
             frame_rx,
@@ -229,11 +325,10 @@ pub async fn start(
             host_addr,
             actual_udp_port,
             running_for_fwd,
+            input_tx_clone,
         )
         .await;
     });
-
-    let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ControlMessage>();
 
     // Keep TCP alive in background and handle writing inputs / reading host messages
     let fwd_event_tx_loop = event_tx.clone();
@@ -245,7 +340,7 @@ pub async fn start(
                 line_res = lines.next_line() => {
                     match line_res {
                         Ok(Some(line)) => {
-                            if let Ok(msg) = serde_json::from_str::<ControlMessage>(&line) {
+                             if let Ok(msg) = serde_json::from_str::<ControlMessage>(&line) {
                                 match msg {
                                     ControlMessage::StreamStopped { reason } => {
                                         info!(reason = %reason, "Host stopped the stream");
@@ -256,6 +351,9 @@ pub async fn start(
                                         info!(reason = %reason, "Host disconnected client");
                                         let _ = fwd_event_tx_loop.send(ClientEvent::Disconnected { reason });
                                         break;
+                                    }
+                                    ControlMessage::CursorChanged { shape } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::CursorChanged { shape });
                                     }
                                     _ => {}
                                 }
@@ -305,6 +403,7 @@ async fn forward_frames(
     _host_addr: SocketAddr,
     _recv_port: u16,
     running: Arc<AtomicBool>,
+    input_tx: mpsc::UnboundedSender<ControlMessage>,
 ) {
     let mut frames = 0u32;
     let mut last_stats = std::time::Instant::now();
@@ -347,7 +446,12 @@ async fn forward_frames(
             let fps = frames as f32 / last_stats.elapsed().as_secs_f32();
             let _ = event_tx.send(ClientEvent::RecvStats {
                 fps,
-                packet_loss_pct: 0.0,
+                packet_loss_pct: frame.packet_loss_pct,
+            });
+            let _ = input_tx.send(ControlMessage::BitrateReport {
+                recv_kbps: 0,
+                packet_loss_percent: frame.packet_loss_pct,
+                rtt_ms: 0,
             });
             frames = 0;
             last_stats = std::time::Instant::now();

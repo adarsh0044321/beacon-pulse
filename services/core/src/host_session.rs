@@ -67,6 +67,7 @@ impl HostSessionHandle {
             &self.clients,
             StreamClient {
                 session_id: session_id.clone(),
+                display_name: display_name.clone(),
                 addr,
             },
         );
@@ -124,7 +125,12 @@ pub fn start(
         .with_context(|| format!("Cannot bind UDP stream port {}", stream_port))?;
     tokio::spawn(streamer.run());
 
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running_clone = Arc::clone(&running);
+    tokio::spawn(cursor_polling_loop(running_clone));
+
     // Spawn the capture + encode loop
+    let running_capture = Arc::clone(&running);
     tokio::spawn(capture_encode_loop(
         target.clone(),
         stream_port,
@@ -132,6 +138,7 @@ pub fn start(
         event_tx.clone(),
         cmd_rx,
         Arc::clone(&clients),
+        running_capture,
     ));
 
     let handle = HostSessionHandle {
@@ -195,6 +202,7 @@ async fn capture_encode_loop(
     event_tx: mpsc::UnboundedSender<HostEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<SessionCmd>,
     cap_clients: Arc<RwLock<HashMap<String, StreamClient>>>,
+    running: Arc<std::sync::atomic::AtomicBool>,
 ) {
     // Initialise capture manager
     let (cap_event_tx, _cap_event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -609,5 +617,83 @@ async fn capture_encode_loop(
     }
 
     cap.stop_capture();
+    running.store(false, std::sync::atomic::Ordering::Relaxed);
     info!("Capture-encode loop exited");
+}
+
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorInfo, LoadCursorW, CURSORINFO, CURSOR_SHOWING, HCURSOR, IDC_APPSTARTING, IDC_ARROW,
+    IDC_CROSS, IDC_HAND, IDC_HELP, IDC_IBEAM, IDC_NO, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
+    IDC_SIZENWSE, IDC_SIZEWE, IDC_WAIT,
+};
+
+fn get_cursor_shape() -> String {
+    #[cfg(windows)]
+    unsafe {
+        let mut info = CURSORINFO::default();
+        info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        if GetCursorInfo(&mut info).is_ok() {
+            if info.flags.0 & CURSOR_SHOWING.0 != 0 {
+                let h = info.hCursor;
+                if h == LoadCursorW(None, IDC_ARROW).unwrap_or(HCURSOR::default()) {
+                    return "default".to_string();
+                }
+                if h == LoadCursorW(None, IDC_HAND).unwrap_or(HCURSOR::default()) {
+                    return "pointer".to_string();
+                }
+                if h == LoadCursorW(None, IDC_IBEAM).unwrap_or(HCURSOR::default()) {
+                    return "text".to_string();
+                }
+                if h == LoadCursorW(None, IDC_NO).unwrap_or(HCURSOR::default()) {
+                    return "not-allowed".to_string();
+                }
+                if h == LoadCursorW(None, IDC_SIZEALL).unwrap_or(HCURSOR::default()) {
+                    return "move".to_string();
+                }
+                if h == LoadCursorW(None, IDC_SIZENESW).unwrap_or(HCURSOR::default()) {
+                    return "nesw-resize".to_string();
+                }
+                if h == LoadCursorW(None, IDC_SIZENS).unwrap_or(HCURSOR::default()) {
+                    return "ns-resize".to_string();
+                }
+                if h == LoadCursorW(None, IDC_SIZENWSE).unwrap_or(HCURSOR::default()) {
+                    return "nwse-resize".to_string();
+                }
+                if h == LoadCursorW(None, IDC_SIZEWE).unwrap_or(HCURSOR::default()) {
+                    return "ew-resize".to_string();
+                }
+                if h == LoadCursorW(None, IDC_WAIT).unwrap_or(HCURSOR::default()) {
+                    return "wait".to_string();
+                }
+                if h == LoadCursorW(None, IDC_CROSS).unwrap_or(HCURSOR::default()) {
+                    return "crosshair".to_string();
+                }
+                if h == LoadCursorW(None, IDC_APPSTARTING).unwrap_or(HCURSOR::default()) {
+                    return "progress".to_string();
+                }
+                if h == LoadCursorW(None, IDC_HELP).unwrap_or(HCURSOR::default()) {
+                    return "help".to_string();
+                }
+                return "default".to_string();
+            } else {
+                return "none".to_string();
+            }
+        }
+    }
+    "default".to_string()
+}
+
+async fn cursor_polling_loop(running: Arc<std::sync::atomic::AtomicBool>) {
+    let mut last_shape = String::new();
+    let mut interval = tokio::time::interval(Duration::from_millis(150));
+    while running.load(std::sync::atomic::Ordering::Relaxed) {
+        interval.tick().await;
+        let shape = get_cursor_shape();
+        if shape != last_shape {
+            last_shape = shape.clone();
+            let msg = crate::network::ControlMessage::CursorChanged { shape };
+            let _ = crate::network::listener::CURSOR_CHANNEL.send(msg);
+        }
+    }
 }

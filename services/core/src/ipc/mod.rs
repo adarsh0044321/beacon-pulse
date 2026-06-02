@@ -45,6 +45,7 @@ pub enum UiCommand {
         stream_port: u16,
         recv_port: u16,
         pairing_code: Option<String>,
+        tls: Option<bool>,
     },
     #[cfg(feature = "player")]
     LeaveStream,
@@ -60,6 +61,8 @@ pub enum UiCommand {
     KickClient {
         client_id: String,
     },
+    #[cfg(feature = "host")]
+    GetActiveClients,
     #[cfg(feature = "player")]
     DiscoverHosts,
     #[cfg(feature = "host")]
@@ -74,6 +77,17 @@ pub enum UiCommand {
     SendInput {
         event: crate::network::InputMsg,
     },
+    #[cfg(feature = "player")]
+    SendFileStart {
+        name: String,
+        size: u64,
+    },
+    #[cfg(feature = "player")]
+    SendFileChunk {
+        data: String,
+    },
+    #[cfg(feature = "player")]
+    SendFileEnd,
 }
 
 /// Messages sent from Service → UI
@@ -183,6 +197,10 @@ pub enum ServiceEvent {
         fps: f32,
         packet_loss_pct: f32,
     },
+    #[cfg(feature = "player")]
+    CursorChanged {
+        shape: String,
+    },
 
     /// Phase 3: sent immediately after hardware encoder activates
     #[cfg(feature = "host")]
@@ -191,6 +209,22 @@ pub enum ServiceEvent {
         vendor: String,
         hw_accelerated: bool,
     },
+    #[cfg(feature = "host")]
+    MetricsUpdate {
+        #[serde(flatten)]
+        metrics: crate::logging::metrics::MetricsSnapshot,
+    },
+    #[cfg(feature = "host")]
+    ActiveClients {
+        clients: Vec<ActiveClientInfo>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ActiveClientInfo {
+    pub client_id: String,
+    pub addr: String,
+    pub display_name: String,
 }
 
 pub struct IpcServer {
@@ -246,6 +280,27 @@ async fn handle_pipe_client(
 
     // Channel for pushing events back to UI (host events, client video chunks, etc.)
     let (push_tx, mut push_rx) = tokio::sync::mpsc::unbounded_channel::<ServiceEvent>();
+
+    #[cfg(feature = "host")]
+    {
+        let mut metrics_rx = crate::logging::metrics::METRICS_CHANNEL.subscribe();
+        let push_tx_metrics = push_tx.clone();
+        let mut metrics_shutdown = state.shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Ok(snap) = metrics_rx.recv() => {
+                        if push_tx_metrics.send(ServiceEvent::MetricsUpdate { metrics: snap }).is_err() {
+                            break;
+                        }
+                    }
+                    _ = metrics_shutdown.recv() => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     loop {
         tokio::select! {
@@ -435,6 +490,7 @@ async fn dispatch_cmd(
             stream_port,
             recv_port,
             pairing_code,
+            tls,
         } => {
             let host_addr: std::net::SocketAddr =
                 match format!("{}:{}", host_ip, stream_port).parse() {
@@ -460,7 +516,10 @@ async fn dispatch_cmd(
             });
 
             // client_session::start() now does full TCP handshake before UDP recv
-            match client_session::start(recv_port, host_addr, pairing_code, client_ev_tx).await {
+            let use_tls = tls.unwrap_or(false);
+            match client_session::start(recv_port, host_addr, pairing_code, use_tls, client_ev_tx)
+                .await
+            {
                 Ok(handle) => {
                     let mut cs = state.client_session.lock().await;
                     *cs = Some(handle);
@@ -508,6 +567,23 @@ async fn dispatch_cmd(
                 h.remove_client(&client_id);
             }
             ServiceEvent::ClientDisconnected { client_id }
+        }
+
+        // ── Get active clients ────────────────────────────────────────────────
+        #[cfg(feature = "host")]
+        UiCommand::GetActiveClients => {
+            let mut list = Vec::new();
+            if let Some(h) = state.host_session.lock().await.as_ref() {
+                let clients = h.clients.read().unwrap();
+                for (id, client) in clients.iter() {
+                    list.push(ActiveClientInfo {
+                        client_id: id.clone(),
+                        addr: client.addr.to_string(),
+                        display_name: client.display_name.clone(),
+                    });
+                }
+            }
+            ServiceEvent::ActiveClients { clients: list }
         }
 
         // ── Request keyframe ─────────────────────────────────────────────────
@@ -634,6 +710,61 @@ async fn dispatch_cmd(
                 packet_loss_pct: 0.0,
             }
         }
+
+        #[cfg(feature = "player")]
+        UiCommand::SendFileStart { name, size } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::FileStart { name, size })
+                {
+                    error!(error = %e, "Failed to send FileStart to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::SendFileChunk { data } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::FileChunk { data })
+                {
+                    error!(error = %e, "Failed to send FileChunk to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::SendFileEnd => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::FileEnd) {
+                    error!(error = %e, "Failed to send FileEnd to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+            }
+        }
     }
 }
 
@@ -736,6 +867,9 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
             fps,
             packet_loss_pct,
         },
+        client_session::ClientEvent::CursorChanged { shape } => {
+            ServiceEvent::CursorChanged { shape }
+        }
     }
 }
 
@@ -804,6 +938,8 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
                 address: ip_str,
                 port: control_port,
                 version: None,
+                mac: None,
+                tls: None,
             });
         }
 

@@ -150,6 +150,10 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
   }, [s, sess]);
 
   const handleSave = async () => {
+    if (s.use_static_code && s.static_code.length !== 6) {
+      addToast('Validation Error', 'Static Pairing Code must be exactly 6 digits.', 'error');
+      return;
+    }
     try {
       await s.save();
       addToast('Settings Saved', 'System configurations successfully written to local disk.', 'success');
@@ -259,6 +263,49 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
           </div>
         </div>
 
+        {/* Static Pairing Code (PIN) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Static Pairing Code (PIN)</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Configure a static 6-digit PIN to bypass random code generation when sharing.
+          </p>
+          <ToggleRow 
+            id="toggle-static-code" 
+            label="Use Static Pairing Code" 
+            description="Allows connecting with a permanent security PIN" 
+            checked={s.use_static_code} 
+            onChange={s.toggleUseStaticCode} 
+          />
+          {s.use_static_code && (
+            <div style={{ marginTop: '10px' }}>
+              <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+                6-Digit Security PIN
+              </label>
+              <input
+                id="input-static-code"
+                type="text"
+                placeholder="e.g. 123456"
+                maxLength={6}
+                value={s.static_code}
+                onChange={e => s.setStaticCode(e.target.value.replace(/\D/g, ''))}
+                style={{ fontSize: '1.2rem', letterSpacing: '0.15em', fontFamily: 'monospace', maxWidth: '200px' }}
+              />
+              {s.static_code.length > 0 && s.static_code.length !== 6 && (
+                <p style={{ color: 'var(--danger)', fontSize: '0.75rem', marginTop: '6px' }}>
+                  PIN must be exactly 6 digits.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Security & Encryption */}
+        <div className="card">
+          <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px', marginBottom: '10px' }}>Security & Encryption</h3>
+          <ToggleRow id="toggle-tls" label="Local TLS Encryption" description="Encrypt the TCP control channel over shared subnets" checked={s.tls_enabled} onChange={s.toggleTls} />
+          <ToggleRow id="toggle-adaptive-bitrate" label="Adaptive Bitrate" description="Dynamically adapt video streaming bitrate to fit local network conditions" checked={s.adaptive_bitrate_enabled} onChange={s.toggleAdaptiveBitrate} />
+        </div>
+
         {/* Permissions */}
         <div className="card">
           <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px', marginBottom: '10px' }}>Host Access Permissions</h3>
@@ -271,7 +318,7 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
         <div className="card">
           <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px', marginBottom: '10px' }}>Startup Configuration</h3>
           <ToggleRow id="toggle-startup"    label="Start with Windows Boot"     description="Launches Beacon background service automatically at user login" checked={s.start_with_windows} onChange={s.toggleStartWithWindows} />
-          <ToggleRow id="toggle-unattended" label="Unattended Service Mode"     description="Maintains connection accessibility when lock screen is active" checked={s.unattended_mode} onChange={() => {}} />
+          <ToggleRow id="toggle-unattended" label="Unattended Service Mode"     description="Maintains connection accessibility when lock screen is active" checked={s.unattended_mode} onChange={s.toggleUnattendedMode} />
         </div>
 
         {/* Sharing Indicator */}

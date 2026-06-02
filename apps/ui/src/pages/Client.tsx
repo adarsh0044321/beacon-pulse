@@ -5,6 +5,7 @@ import { useSessionStore, type DiscoveredHost } from '../store/sessionStore';
 import { useToastStore } from '../store/toastStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { DebugOverlay } from '../components/DebugOverlay';
 
 interface ClientProps { onNavigate: (p: Page) => void; }
 
@@ -268,6 +269,12 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [fullscreen, setFullscreen] = useState(false);
   const [manualIp, setManualIp] = useState('');
   const [streamConnected, setStreamConnected] = useState(false);
+  const [cursorShape, setCursorShape] = useState('default');
+  const [fileTransferring, setFileTransferring] = useState<string | null>(null);
+  const [fileProgress, setFileProgress] = useState(0);
+  const [wolMac, setWolMac] = useState(() => localStorage.getItem('lanshare_last_mac') || '');
+  const [wolSending, setWolSending] = useState(false);
+  const [wolStatus, setWolStatus] = useState('');
 
   // Real-time client logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -344,10 +351,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       addToast('Stream Disconnected', 'Connection with host terminated.', 'info');
     });
 
+    const unlistenCursorChanged = listen<{ shape: string }>('cursor_changed', (event) => {
+      setCursorShape(event.payload.shape);
+    });
+
     return () => {
       unlistenVideoChunk.then(f => f());
       unlistenConnected.then(f => f());
       unlistenDisconnected.then(f => f());
+      unlistenCursorChanged.then(f => f());
     };
   }, [feedChunk, closeDecoder, addToast]);
 
@@ -607,7 +619,28 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleSendWol = async () => {
+    if (!wolMac) return;
+    setWolSending(true);
+    setWolStatus('');
+    try {
+      await invoke('send_wol_packet', { mac: wolMac });
+      localStorage.setItem('lanshare_last_mac', wolMac);
+      setWolStatus('Wake magic packet sent!');
+      addToast('Wake magic packet sent successfully!', 'success');
+    } catch (e: any) {
+      setWolStatus(`Error: ${e}`);
+      addToast(`Failed to send wake packet: ${e}`, 'error');
+    } finally {
+      setWolSending(false);
+    }
+  };
+
   const handleConnect = async (host: DiscoveredHost, skipPairingCheck = false) => {
+    if (host.mac) {
+      setWolMac(host.mac);
+      localStorage.setItem('lanshare_last_mac', host.mac);
+    }
     if (!skipPairingCheck && pairingInput && pairingInput.length !== 6) {
       setError('Pairing code must be exactly 6 digits.');
       return;
@@ -639,6 +672,53 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     const [ip, portStr] = manualIp.split(':');
     const port = parseInt(portStr || '45101');
     handleConnect({ name: ip, address: ip, port }, true);
+  };
+
+  const sendFile = async (file: File) => {
+    setFileTransferring(file.name);
+    setFileProgress(0);
+    try {
+      await invoke('send_file_start', { name: file.name, size: file.size });
+      
+      const chunkSize = 64 * 1024; // 64 KB chunks
+      let offset = 0;
+      
+      while (offset < file.size) {
+        const slice = file.slice(offset, offset + chunkSize);
+        const arrayBuffer = await slice.arrayBuffer();
+        
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Data = btoa(binary);
+        
+        await invoke('send_file_chunk', { data: base64Data });
+        offset += chunkSize;
+        setFileProgress(Math.min(100, Math.round((offset / file.size) * 100)));
+      }
+      
+      await invoke('send_file_end');
+      addToast('File Sent', `Successfully transferred ${file.name} to host Downloads.`, 'success');
+    } catch (e) {
+      console.error('File transfer failed:', e);
+      addToast('File Transfer Failed', `Error sending ${file.name}: ${e}`, 'error');
+    } finally {
+      setFileTransferring(null);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      sendFile(file);
+    }
   };
 
   const parseLogLine = (line: string): ParsedLog => {
@@ -790,6 +870,29 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 {error && <p style={{ color: 'var(--danger)', fontSize: '0.8rem' }}>{error}</p>}
               </div>
 
+              {/* Wake-on-LAN (WoL) */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <h3>Wake-on-LAN (WoL)</h3>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    id="wol-mac-input"
+                    placeholder="MAC Address (e.g. 00:11:22:33:44:55)"
+                    value={wolMac}
+                    onChange={e => setWolMac(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    id="btn-send-wol"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleSendWol}
+                    disabled={wolSending}
+                  >
+                    {wolSending ? 'Sending...' : 'Wake'}
+                  </button>
+                </div>
+                {wolStatus && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{wolStatus}</p>}
+              </div>
+
               {/* Manual Direct-IP Connect */}
               <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <h3>Manual Connect By IP</h3>
@@ -814,13 +917,41 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
               <canvas
                 ref={canvasRef}
                 id="stream-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', cursor: 'none' }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', cursor: cursorShape }}
                 onMouseMove={handleMouseMove}
                 onMouseDown={(e) => handleMouseButton(e, true)}
                 onMouseUp={(e) => handleMouseButton(e, false)}
                 onWheel={handleWheel}
                 onContextMenu={(e) => e.preventDefault()}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
               />
+
+              {/* File Transfer Progress Overlay */}
+              {fileTransferring && (
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(10, 8, 20, 0.75)', backdropFilter: 'blur(8px)',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+                  color: '#fff', gap: '16px', zIndex: 20
+                }}>
+                  <div className="card" style={{ width: '320px', padding: '24px', textAlign: 'center', border: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '8px' }}>
+                      Transferring File...
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {fileTransferring}
+                    </div>
+                    {/* Progress Bar */}
+                    <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px', overflow: 'hidden', marginBottom: '8px' }}>
+                      <div style={{ width: `${fileProgress}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent) 0%, var(--accent-purple) 100%)', transition: 'width 0.1s ease-out' }} />
+                    </div>
+                    <div style={{ fontSize: '0.78rem', fontFamily: 'monospace', color: 'var(--accent)' }}>
+                      {fileProgress}%
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Floating Overlay HUD telemetry bar */}
               <div style={{
@@ -992,6 +1123,14 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
         </div>
       </div>
+
+      {/* Debug Overlay listener trigger */}
+      {streamConnected && (
+        <DebugOverlay 
+          backend="WebCodecs" 
+          sessionId={connectedHost ? connectedHost.name : "Pulse"} 
+        />
+      )}
     </div>
   );
 };

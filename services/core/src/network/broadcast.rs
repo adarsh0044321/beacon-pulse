@@ -167,6 +167,8 @@ pub async fn browse_via_broadcast() -> Vec<DiscoveredHost> {
                             address: addr,
                             port: pkt.port,
                             version: Some(pkt.version),
+                            mac: None,
+                            tls: None,
                         });
                     }
                 }

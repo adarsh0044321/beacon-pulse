@@ -308,6 +308,7 @@ fn is_push_event_legacy(val: &Value) -> bool {
         val.get("event").and_then(Value::as_str),
         Some(
             "stats"
+                | "metrics_update"
                 | "capture_backend_switched"
                 | "render_suspended"
                 | "render_resumed"

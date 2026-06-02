@@ -15,6 +15,10 @@ interface Settings {
   unattended_mode: boolean;
   unattended_pin: string;
   indicator_mode: IndicatorMode;
+  use_static_code: boolean;
+  static_code: string;
+  tls_enabled: boolean;
+  adaptive_bitrate_enabled: boolean;
 
   // Actions
   setBitrate: (kbps: number) => void;
@@ -24,7 +28,12 @@ interface Settings {
   toggleClipboard: () => void;
   toggleInputControl: () => void;
   toggleStartWithWindows: () => void;
+  toggleUnattendedMode: () => void;
+  toggleUseStaticCode: () => void;
+  setStaticCode: (code: string) => void;
   setIndicatorMode: (mode: IndicatorMode) => void;
+  toggleTls: () => void;
+  toggleAdaptiveBitrate: () => void;
   save: () => Promise<void>;
   load: () => Promise<void>;
 }
@@ -40,6 +49,10 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   unattended_mode: false,
   unattended_pin: '',
   indicator_mode: 'always_show',
+  use_static_code: false,
+  static_code: '',
+  tls_enabled: false,
+  adaptive_bitrate_enabled: true,
 
   setBitrate: (kbps) => set({ bitrate_kbps: kbps }),
   setFps: (fps) => set({ fps }),
@@ -48,7 +61,12 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   toggleClipboard: () => set(s => ({ clipboard_enabled: !s.clipboard_enabled })),
   toggleInputControl: () => set(s => ({ allow_input_control: !s.allow_input_control })),
   toggleStartWithWindows: () => set(s => ({ start_with_windows: !s.start_with_windows })),
+  toggleUnattendedMode: () => set(s => ({ unattended_mode: !s.unattended_mode })),
+  toggleUseStaticCode: () => set(s => ({ use_static_code: !s.use_static_code })),
+  setStaticCode: (code) => set({ static_code: code }),
   setIndicatorMode: (mode) => set({ indicator_mode: mode }),
+  toggleTls: () => set(s => ({ tls_enabled: !s.tls_enabled })),
+  toggleAdaptiveBitrate: () => set(s => ({ adaptive_bitrate_enabled: !s.adaptive_bitrate_enabled })),
 
   save: async () => {
     const s = get();
@@ -63,6 +81,10 @@ export const useSettingsStore = create<Settings>((set, get) => ({
         start_with_windows: s.start_with_windows,
         unattended_mode: s.unattended_mode,
         indicator_mode: s.indicator_mode,
+        use_static_code: s.use_static_code,
+        static_code: s.static_code,
+        tls_enabled: s.tls_enabled,
+        adaptive_bitrate_enabled: s.adaptive_bitrate_enabled,
       }
     });
   },
@@ -75,6 +97,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
         'bitrate_kbps', 'fps', 'encoder', 'audio_enabled',
         'clipboard_enabled', 'allow_input_control', 'start_with_windows',
         'unattended_mode', 'unattended_pin', 'indicator_mode',
+        'use_static_code', 'static_code', 'tls_enabled', 'adaptive_bitrate_enabled',
       ] as const;
       const safe: Record<string, unknown> = {};
       for (const key of safeKeys) {

@@ -193,7 +193,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
         // Connect using default client receive port 45102 or custom port if specified
         let recv_port = player_args.recv_port.unwrap_or(45102);
-        let session_handle = client_session::start(recv_port, host_addr, pairing_code, event_tx).await?;
+        let tls_enabled = crate::registry::read_dword("TlsEnabled").unwrap_or(0) == 1;
+        let session_handle = client_session::start(recv_port, host_addr, pairing_code, tls_enabled, event_tx).await?;
 
         // Store input channel in Window State
         win_state.lock().input_tx = Some(session_handle.input_tx.clone());
@@ -240,6 +241,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             print!("\r[Stats] Incoming FPS: {:.1} fps", fps);
                             std::io::stdout().flush().ok();
                         }
+                        ClientEvent::CursorChanged { .. } => {}
                         ClientEvent::VideoChunk { data, .. } => {
                             if let Ok(nal_bytes) = B64.decode(&data) {
                                 match decoder.decode(&nal_bytes) {

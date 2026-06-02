@@ -46,6 +46,14 @@ pub enum ControlMessage {
     Disconnect {
         reason: String,
     },
+    FileStart {
+        name: String,
+        size: u64,
+    },
+    FileChunk {
+        data: String,
+    },
+    FileEnd,
 
     // Host → Client
     JoinAccepted {
@@ -73,6 +81,9 @@ pub enum ControlMessage {
     },
     PermissionsUpdated {
         permissions: Permissions,
+    },
+    CursorChanged {
+        shape: String,
     },
 }
 

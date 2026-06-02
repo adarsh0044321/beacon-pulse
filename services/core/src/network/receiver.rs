@@ -27,6 +27,7 @@ pub struct ReceivedFrame {
     pub is_keyframe: bool,
     pub width: u16,
     pub height: u16,
+    pub packet_loss_pct: f32,
     #[allow(dead_code)]
     pub received_at: Instant,
 }
@@ -43,6 +44,9 @@ pub struct UdpReceiver {
     bytes_received: u64,
     parse_errors: u64,
     fec_recoveries: u64,
+    last_seq: Option<u16>,
+    packets_lost: u64,
+    packets_expected: u64,
 }
 
 impl UdpReceiver {
@@ -73,6 +77,9 @@ impl UdpReceiver {
                 bytes_received: 0,
                 parse_errors: 0,
                 fec_recoveries: 0,
+                last_seq: None,
+                packets_lost: 0,
+                packets_expected: 0,
             },
             frame_rx,
         ))
@@ -130,6 +137,21 @@ impl UdpReceiver {
                 }
             };
 
+            let seq = pkt.seq;
+            if let Some(last) = self.last_seq {
+                let diff = seq.wrapping_sub(last);
+                if diff > 1 && diff < 30000 {
+                    let lost = (diff - 1) as u64;
+                    self.packets_lost += lost;
+                    self.packets_expected += lost + 1;
+                } else {
+                    self.packets_expected += 1;
+                }
+            } else {
+                self.packets_expected += 1;
+            }
+            self.last_seq = Some(seq);
+
             let width = pkt.width;
             let height = pkt.height;
             let is_parity = pkt.flags & super::rtp::FLAG_PARITY != 0;
@@ -141,12 +163,18 @@ impl UdpReceiver {
                     self.fec_recoveries += 1;
                     debug!(ts, "FEC parity triggered frame completion / recovery");
                 }
+                let loss_pct = if self.packets_expected > 0 {
+                    (self.packets_lost as f32 / self.packets_expected as f32) * 100.0
+                } else {
+                    0.0
+                };
                 let frame = ReceivedFrame {
                     nal_data,
                     timestamp_us: ts,
                     is_keyframe,
                     width,
                     height,
+                    packet_loss_pct: loss_pct,
                     received_at: Instant::now(),
                 };
                 self.frames_received += 1;
@@ -175,6 +203,8 @@ impl UdpReceiver {
                 self.bytes_received = 0;
                 self.parse_errors = 0;
                 self.fec_recoveries = 0;
+                self.packets_lost = 0;
+                self.packets_expected = 0;
                 self.last_stats = Instant::now();
             }
         }

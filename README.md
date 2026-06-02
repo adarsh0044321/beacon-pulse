@@ -57,7 +57,7 @@ Run `beacon.exe` (or launch via `BeaconSetup.exe`):
 
 ```
   ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.0.3                   ║
+  ║         Beacon  v1.0.4                   ║
   ╚══════════════════════════════════════════╝
 
     [1] Start Sharing Session (Window, Display, Multi, Dual)

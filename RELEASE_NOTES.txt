@@ -1,24 +1,18 @@
-📡 Beacon & Pulse v1.0.3 - Release Notes
+📡 Beacon & Pulse v1.0.4 - Release Notes
 =======================================
 
 Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
 
-What's New in v1.0.3
+What's New in v1.0.4
 -------------------
 
-🚀 New Sharing Modes (Multi-Target Grid & Split Screen)
-- Display Sharing Mode: Share an entire monitor instead of just a single window.
-- Multi-Window Grid Mode: Select multiple windows to share simultaneously, composited in a clean grid.
-- Dual-Window Side-by-Side: Select exactly 2 windows to share side-by-side in split-screen format.
+🛠️ Core Latency, Memory, and Stability Fixes
+- Windows Media Foundation COM Leak Fix: Implemented an RAII `ActivatesGuard` drop guard to release `IMFActivate` COM handles on exit. This prevents COM leaks on the host during startup or reconfiguration.
+- Ring-Buffer Latency Correction: Updated the queue to discard the oldest frame when full instead of the newest, preventing stale frames from creating temporary latency spikes.
+- Client Connection Cleanup: Wrapped the client loop in an async block to guarantee that abrupt network drops or reset errors trigger client session deregistration.
 
-⌨️ Keyboard & Input Robustness Upgrades
-- Win32 SendInput Layout Independence: Key events are now injected using hardware scan codes (KEYEVENTF_SCANCODE), resolving input lag and preventing lock status LEDs (Caps Lock, NumLock) from flashing.
-- Extended Key Flag Support: Added proper handling for Arrow keys, Page Up/Down, Home, End, Delete, Insert, NumPad Enter, Right Ctrl, and Right Alt.
-- Automatic Stuck Keys Release: Implemented an active KeyboardCleanupGuard that automatically releases all held keys (like Shift, Ctrl, Alt, Win) when the client disconnects or connection drops.
-- Loopback Feedback Isolation: Tagged injected keystrokes with a unique signature (0xBEAC0D) to ignore loopback feedback loops when testing locally on the same PC.
-
-🛠️ Core Stability & Self-Healing Capture
-- H.264 Software Fallback: If hardware encoding (NVENC/AMF/QSV) fails or driver device loss occurs, it dynamically falls back to OpenH264 software encoding.
-- D3D11 Video Processor Caching: Caches blitters and video processors in the WGC backend, reducing allocation overhead and driver crashes under high resolutions (2K/4K).
-- Watchdog Recovery: Robust background monitoring service with exponential back-off and registry-driven launch parameters.
-- Standalone Installers: Self-extracting setup wizards (BeaconSetup.exe and PulseSetup.exe) that automatically configure firewall rules.
+🖥️ Front-End & Input Synchronization
+- Settings Registry Synchronization: Connected Tauri front-end settings directly to the Windows Registry (`HKCU\Software\Beacon`). Setting changes (bitrate, FPS, control permissions, and startup rules) are immediately visible to the background core service and watchdog.
+- Mouse Aspect-Ratio Calibration: Calculated the active video viewport within the player canvas to discard letterbox/pillarbox margins, scaling mouse coordinates correctly relative to actual video bounds.
+- Layout-Independent Keyboard Lookup: Mapped JS `KeyboardEvent.code` directly to Windows scan codes and extended key flags (`is_extended`) to handle non-US layouts and arrow/navigation keys.
+- Verification Testing: Added automated unit tests verifying the lock-free ring-buffer queue behavior.

@@ -315,6 +315,12 @@ pub enum PerformanceWarning {
 /// Global singleton metrics instance — use from any thread with Relaxed ordering.
 pub static METRICS: PipelineMetrics = PipelineMetrics::new();
 
+pub static METRICS_CHANNEL: once_cell::sync::Lazy<tokio::sync::broadcast::Sender<MetricsSnapshot>> =
+    once_cell::sync::Lazy::new(|| {
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        tx
+    });
+
 /// Background task: emits metrics log every 500ms and generates warnings.
 pub async fn metrics_loop(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
     let mut ticker = interval(Duration::from_millis(500));
@@ -324,6 +330,7 @@ pub async fn metrics_loop(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
         tokio::select! {
             _ = ticker.tick() => {
                 let snap = METRICS.snapshot();
+                let _ = METRICS_CHANNEL.send(snap.clone());
                 let warnings = snap.has_warnings();
 
                 // Structured metrics log entry

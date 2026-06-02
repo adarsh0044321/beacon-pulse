@@ -1,12 +1,43 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 use tracing::{error, info, warn};
 
 use super::ControlMessage;
+
+pub static CURSOR_CHANNEL: Lazy<tokio::sync::broadcast::Sender<ControlMessage>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(16);
+    tx
+});
 use crate::AppState;
+
+fn generate_tls_config() -> Result<rustls::ServerConfig> {
+    let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+    let cert_key = rcgen::generate_simple_self_signed(subject_alt_names)
+        .map_err(|e| anyhow::anyhow!("rcgen error: {}", e))?;
+
+    let cert_der = cert_key.cert.der().to_vec();
+    let key_der = cert_key.key_pair.serialize_der();
+
+    let certs = vec![rustls::pki_types::CertificateDer::from(cert_der)];
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+        key_der,
+    ));
+
+    let provider = rustls::crypto::ring::default_provider();
+    let server_config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(provider))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| anyhow::anyhow!("protocol version error: {}", e))?
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| anyhow::anyhow!("rustls config error: {}", e))?;
+
+    Ok(server_config)
+}
 
 /// Listens for incoming client TCP connections on control_port.
 /// Each accepted connection runs its own task with the full auth + session lifecycle.
@@ -19,15 +50,48 @@ pub async fn run(state: Arc<AppState>, control_port: u16) -> Result<()> {
 pub async fn run_with_listener(state: Arc<AppState>, listener: TcpListener) -> Result<()> {
     info!("Network listener ready on {:?}", listener.local_addr());
 
+    let tls_enabled = crate::registry::read_dword("TlsEnabled").unwrap_or(0) == 1;
+    let tls_acceptor = if tls_enabled {
+        match generate_tls_config() {
+            Ok(cfg) => {
+                info!("TLS encryption configured for control channel");
+                Some(TlsAcceptor::from(Arc::new(cfg)))
+            }
+            Err(e) => {
+                error!(
+                    "Failed to generate TLS configuration: {}. Falling back to plain TCP.",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     loop {
         match listener.accept().await {
             Ok((stream, peer_addr)) => {
                 info!("Incoming connection from {}", peer_addr);
                 let _ = stream.set_nodelay(true);
                 let state = Arc::clone(&state);
+                let tls_acceptor = tls_acceptor.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(stream, peer_addr, state).await {
-                        warn!("Client {} disconnected with error: {}", peer_addr, e);
+                    if let Some(acceptor) = tls_acceptor {
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => {
+                                if let Err(e) = handle_client(tls_stream, peer_addr, state).await {
+                                    warn!("Client {} disconnected with error: {}", peer_addr, e);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("TLS handshake failed for {}: {}", peer_addr, e);
+                            }
+                        }
+                    } else {
+                        if let Err(e) = handle_client(stream, peer_addr, state).await {
+                            warn!("Client {} disconnected with error: {}", peer_addr, e);
+                        }
                     }
                 });
             }
@@ -38,14 +102,35 @@ pub async fn run_with_listener(state: Arc<AppState>, listener: TcpListener) -> R
     }
 }
 
-async fn handle_client(
-    stream: tokio::net::TcpStream,
-    peer_addr: SocketAddr,
-    state: Arc<AppState>,
-) -> Result<()> {
-    let (reader, mut writer) = stream.into_split();
+async fn handle_client<S>(stream: S, peer_addr: SocketAddr, state: Arc<AppState>) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (reader, writer) = tokio::io::split(stream);
+    let writer_shared = Arc::new(tokio::sync::Mutex::new(writer));
     let mut lines = BufReader::new(reader).lines();
     let peer_ip = peer_addr.ip();
+
+    let mut cursor_rx = CURSOR_CHANNEL.subscribe();
+    let writer_clone = Arc::clone(&writer_shared);
+    let mut session_cleanup_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                Ok(cursor_msg) = cursor_rx.recv() => {
+                    if let Ok(json) = serde_json::to_string(&cursor_msg) {
+                        let mut w = writer_clone.lock().await;
+                        if w.write_all((json + "\n").as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                _ = session_cleanup_rx.recv() => {
+                    break;
+                }
+            }
+        }
+    });
 
     // Tracks the authenticated session so we can clean up on disconnect.
     let mut session_id = String::new();
@@ -69,6 +154,9 @@ async fn handle_client(
     let mut cleanup_guard = KeyboardCleanupGuard {
         pressed_keys: std::collections::HashSet::new(),
     };
+
+    let mut current_file: Option<(String, std::fs::File)> = None;
+    let mut current_bitrate_bps = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
 
     let result = async {
         while let Some(line) = lines.next_line().await? {
@@ -102,7 +190,7 @@ async fn handle_client(
                         let json =
                             serde_json::to_string(&ControlMessage::PairingRequired { challenge })?
                                 + "\n";
-                        writer.write_all(json.as_bytes()).await?;
+                        writer_shared.lock().await.write_all(json.as_bytes()).await?;
 
                         // Receive HMAC response
                         let Some(resp_line) = lines.next_line().await? else {
@@ -120,7 +208,7 @@ async fn handle_client(
                                 reason: "Invalid pairing code".to_string(),
                             };
                             let json = serde_json::to_string(&reject)? + "\n";
-                            writer.write_all(json.as_bytes()).await?;
+                            writer_shared.lock().await.write_all(json.as_bytes()).await?;
                             info!("Client {} rejected (bad pairing code)", peer_addr);
                             return Ok(());
                         }
@@ -147,12 +235,8 @@ async fn handle_client(
                     let permissions = {
                         let input_control =
                             crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
-                        let audio = std::env::var("BEACON_SHARE_AUDIO")
-                            .map(|v| v.to_lowercase() == "true")
-                            .unwrap_or(false);
-                        let clipboard = std::env::var("BEACON_SYNC_CLIPBOARD")
-                            .map(|v| v.to_lowercase() == "true")
-                            .unwrap_or(true);
+                        let audio = crate::registry::read_dword("Audio").unwrap_or(0) == 1;
+                        let clipboard = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
                         super::Permissions {
                             input_control,
                             clipboard,
@@ -165,7 +249,7 @@ async fn handle_client(
                         permissions,
                     };
                     let json = serde_json::to_string(&accept)? + "\n";
-                    writer.write_all(json.as_bytes()).await?;
+                    writer_shared.lock().await.write_all(json.as_bytes()).await?;
 
                     info!(
                         session_id = %session_id,
@@ -202,6 +286,50 @@ async fn handle_client(
                         "BitrateReport from client"
                     );
                     crate::logging::metrics::METRICS.set_rtt_us(rtt_ms as u64 * 1_000);
+
+                    let adaptive_enabled =
+                        crate::registry::read_dword("AdaptiveBitrate").unwrap_or(1) == 1;
+
+                    if adaptive_enabled {
+                        let max_bitrate_bps = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
+                        let min_bitrate_bps = 500 * 1000; // 500 kbps floor
+                        let mut new_bitrate = current_bitrate_bps;
+
+                        if packet_loss_percent > 2.0 {
+                            new_bitrate = (current_bitrate_bps as f64 * 0.75) as u32;
+                            if new_bitrate < min_bitrate_bps {
+                                new_bitrate = min_bitrate_bps;
+                            }
+                            warn!(
+                                packet_loss_percent,
+                                old_bitrate = current_bitrate_bps,
+                                new_bitrate,
+                                "Adaptive Bitrate: dropping bitrate due to packet loss"
+                            );
+                        } else if packet_loss_percent < 0.5 {
+                            let increase = std::cmp::max(200 * 1000, (current_bitrate_bps as f64 * 0.10) as u32);
+                            new_bitrate = current_bitrate_bps.saturating_add(increase);
+                            if new_bitrate > max_bitrate_bps {
+                                new_bitrate = max_bitrate_bps;
+                            }
+                            if new_bitrate > current_bitrate_bps {
+                                info!(
+                                    packet_loss_percent,
+                                    old_bitrate = current_bitrate_bps,
+                                    new_bitrate,
+                                    "Adaptive Bitrate: increasing bitrate"
+                                );
+                            }
+                        }
+
+                        if new_bitrate != current_bitrate_bps {
+                            current_bitrate_bps = new_bitrate;
+                            let hs = state.host_session.lock().await;
+                            if let Some(ref handle) = *hs {
+                                handle.set_bitrate(new_bitrate);
+                            }
+                        }
+                    }
 
                     if packet_loss_percent > 5.0 {
                         warn!(
@@ -250,6 +378,56 @@ async fn handle_client(
                 ControlMessage::Disconnect { reason } => {
                     info!(peer = %peer_addr, session_id = %session_id, reason = %reason, "Client disconnecting");
                     return Ok(());
+                }
+
+                ControlMessage::FileStart { name, size } => {
+                    info!("File transfer started: {}, size: {}", name, size);
+                    let path = std::path::Path::new(&name);
+                    let file_name = path.file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("received_file");
+
+                    let mut dest_path = dirs_next::download_dir()
+                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+                    dest_path.push(file_name);
+
+                    match std::fs::File::create(&dest_path) {
+                        Ok(file) => {
+                            info!("Creating file at {:?}", dest_path);
+                            current_file = Some((file_name.to_string(), file));
+                        }
+                        Err(e) => {
+                            error!("Failed to create file at {:?}: {}", dest_path, e);
+                            current_file = None;
+                        }
+                    }
+                }
+
+                ControlMessage::FileChunk { data } => {
+                    if let Some((ref name, ref mut file)) = current_file {
+                        use base64::prelude::*;
+                        if let Ok(bytes) = BASE64_STANDARD.decode(&data) {
+                            use std::io::Write;
+                            if let Err(e) = file.write_all(&bytes) {
+                                error!("Failed to write chunk to file {}: {}", name, e);
+                            }
+                        } else {
+                            error!("Failed to decode base64 chunk for {}", name);
+                        }
+                    } else {
+                        warn!("Received FileChunk but no file was started");
+                    }
+                }
+
+                ControlMessage::FileEnd => {
+                    if let Some((name, mut file)) = current_file.take() {
+                        use std::io::Write;
+                        let _ = file.flush();
+                        info!("File transfer completed successfully: {}", name);
+                    } else {
+                        warn!("Received FileEnd but no file was active");
+                    }
                 }
 
                 _ => {}

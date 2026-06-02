@@ -35,6 +35,8 @@ export interface DiscoveredHost {
   port: number;
   /** Protocol version from mDNS TXT record. Undefined for older hosts. */
   version?: string;
+  mac?: string;
+  tls?: boolean;
   lastSeen?: number;
 }
 
@@ -95,6 +97,7 @@ interface SessionState {
   stopShare: () => Promise<void>;
   generatePairingCode: () => Promise<void>;
   kickClient: (clientId: string) => Promise<void>;
+  fetchActiveClients: () => Promise<void>;
   discoverHosts: () => Promise<void>;
   connectToHost: (host: DiscoveredHost, code: string) => Promise<void>;
   disconnectFromHost: () => void;
@@ -208,6 +211,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  fetchActiveClients: async () => {
+    try {
+      const clients = await invoke<{ client_id: string; addr: string; display_name: string }[]>('get_active_clients');
+      set({
+        connectedClients: clients.map(c => ({
+          client_id: c.client_id,
+          display_name: c.display_name,
+          addr: c.addr,
+          permissions: { input_control: true, clipboard: true, audio: true },
+          stats: { fps: 60, latency_ms: 0, bitrate_kbps: 0 }
+        }))
+      });
+    } catch (e) {
+      console.error('Failed to fetch active clients:', e);
+    }
+  },
+
   discoverHosts: async () => {
     set({ hostsLoading: true });
     try {
@@ -248,7 +268,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   connectToHost: async (host: DiscoveredHost, code: string) => {
     try {
-      await invoke('connect_to_host', { address: host.address, port: host.port, code });
+      await invoke('connect_to_host', { address: host.address, port: host.port, code, tls: host.tls });
       set({ connectedHost: host });
     } catch (e) {
       console.error('Failed to connect:', e);

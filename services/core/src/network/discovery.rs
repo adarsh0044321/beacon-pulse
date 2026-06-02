@@ -8,6 +8,74 @@ use tracing::info;
 
 use super::MDNS_SERVICE_TYPE;
 
+#[repr(C)]
+struct IP_ADAPTER_ADDRESSES_LH {
+    alignment: u64,
+    next: *mut IP_ADAPTER_ADDRESSES_LH,
+    adapter_name: *mut u8,
+    first_unicast_address: *mut u8,
+    first_anycast_address: *mut u8,
+    first_multicast_address: *mut u8,
+    first_dns_server_address: *mut u8,
+    dns_suffix: *mut u16,
+    description: *mut u16,
+    friendly_name: *mut u16,
+    physical_address: [u8; 8],
+    physical_address_length: u32,
+}
+
+#[link(name = "iphlpapi")]
+extern "system" {
+    fn GetAdaptersAddresses(
+        family: u32,
+        flags: u32,
+        reserved: *mut std::ffi::c_void,
+        addresses: *mut IP_ADAPTER_ADDRESSES_LH,
+        size: *mut u32,
+    ) -> u32;
+}
+
+fn get_local_mac_address() -> Option<String> {
+    unsafe {
+        let mut size: u32 = 15000;
+        let mut buf = vec![0u8; size as usize];
+        let mut res = GetAdaptersAddresses(
+            0,
+            0,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut _,
+            &mut size,
+        );
+        if res == 111 {
+            buf.resize(size as usize, 0);
+            res = GetAdaptersAddresses(
+                0,
+                0,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut _,
+                &mut size,
+            );
+        }
+        if res == 0 {
+            let mut curr = buf.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+            while !curr.is_null() {
+                let addr_len = (*curr).physical_address_length;
+                if addr_len == 6 {
+                    let mac = (*curr).physical_address;
+                    if mac[0..6] != [0, 0, 0, 0, 0, 0] {
+                        return Some(format!(
+                            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+                        ));
+                    }
+                }
+                curr = (*curr).next;
+            }
+        }
+    }
+    None
+}
+
 static GLOBAL_DAEMON: Lazy<Option<ServiceDaemon>> = Lazy::new(|| ServiceDaemon::new().ok());
 
 // ── Advertiser ────────────────────────────────────────────────────────────────
@@ -38,6 +106,18 @@ impl MdnsAdvertiser {
         // TXT properties — clients verify `version` for protocol compatibility.
         let mut props = std::collections::HashMap::new();
         props.insert("version".to_owned(), env!("CARGO_PKG_VERSION").to_owned());
+        if let Some(mac) = get_local_mac_address() {
+            props.insert("mac".to_owned(), mac);
+        }
+        let tls_enabled = crate::registry::read_dword("TlsEnabled").unwrap_or(0) == 1;
+        props.insert(
+            "tls".to_owned(),
+            if tls_enabled {
+                "1".to_owned()
+            } else {
+                "0".to_owned()
+            },
+        );
 
         let service_info = ServiceInfo::new(
             MDNS_SERVICE_TYPE,
@@ -118,6 +198,8 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
                                 version: info
                                     .get_property_val_str("version")
                                     .map(|v| v.to_string()),
+                                mac: info.get_property_val_str("mac").map(|v| v.to_string()),
+                                tls: info.get_property_val_str("tls").map(|v| v == "1"),
                             });
                         }
                     }
@@ -153,4 +235,6 @@ pub struct DiscoveredHost {
     pub port: u16,
     /// Protocol version from TXT record. `None` if host is an older build.
     pub version: Option<String>,
+    pub mac: Option<String>,
+    pub tls: Option<bool>,
 }

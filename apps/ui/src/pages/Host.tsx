@@ -26,7 +26,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     availableMonitors, monitorsLoading, fetchMonitors,
     isSharing, activeHwnd, activeTarget, startShare, stopShare,
     pairingCode, pairingExpiresIn, generatePairingCode,
-    connectedClients, kickClient,
+    connectedClients, kickClient, fetchActiveClients,
     stats, updateStats,
     encoderInfo, setEncoderInfo,
   } = useSessionStore();
@@ -167,6 +167,14 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     const iv = setInterval(fetchLogs, 1500);
     return () => clearInterval(iv);
   }, [fetchLogs, tab]);
+
+  // Active Clients polling when on the devices tab
+  useEffect(() => {
+    if (tab !== 'devices') return;
+    fetchActiveClients();
+    const iv = setInterval(fetchActiveClients, 2000);
+    return () => clearInterval(iv);
+  }, [fetchActiveClients, tab]);
 
   // Scroll to bottom of logs console
   useEffect(() => {

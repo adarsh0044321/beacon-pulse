@@ -38,6 +38,7 @@ pub const STREAM_QUEUE_CAP: usize = 32;
 #[derive(Debug, Clone)]
 pub struct StreamClient {
     pub session_id: String,
+    pub display_name: String,
     pub addr: SocketAddr,
 }
 
