@@ -1,9 +1,9 @@
-📡 Beacon & Pulse v1.0.4 - Release Notes
+📡 Beacon & Pulse v1.0.5 - Release Notes
 =======================================
 
 Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
 
-What's New in v1.0.4
+What's New in v1.0.5
 -------------------
 
 🛠️ Core Latency, Memory, and Stability Fixes

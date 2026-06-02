@@ -22,11 +22,11 @@ class PulseSetup {
 
   static void Header() {
     Console.Clear();
-    Console.Title = "Pulse Player Setup v1.0.4";
+    Console.Title = "Pulse Player Setup v1.0.5";
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine();
     Console.WriteLine("  ╔══════════════════════════════════════╗");
-    Console.WriteLine("  ║     Pulse Player Setup  v1.0.4       ║");
+    Console.WriteLine("  ║     Pulse Player Setup  v1.0.5       ║");
     Console.WriteLine("  ║     LAN Screen Sharing Receiver      ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();

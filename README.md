@@ -57,7 +57,7 @@ Run `beacon.exe` (or launch via `BeaconSetup.exe`):
 
 ```
   ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.0.4                   ║
+  ║         Beacon  v1.0.5                   ║
   ╚══════════════════════════════════════════╝
 
     [1] Start Sharing Session (Window, Display, Multi, Dual)
@@ -292,6 +292,13 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 ---
 
 ## 📋 Changelog
+
+### v1.0.5 (2026-06-02)
+
+**Bug Fixes & Security**
+- **TLS Control Channel Security** — secured command connections over TLS 1.3 with automated self-signed certificate generation.
+- **Dynamic Adaptive Bitrate** — implemented a dynamic rate-adaptation loop that decreases bitrate on packet loss and ramps it up on clean transmission, preventing network congestion.
+- **Secure Remote File Transfer** — added ability to transfer files from the viewer client directly to the host's download folder with block-by-block integrity check.
 
 ### v1.0.4 (2026-05-31)
 

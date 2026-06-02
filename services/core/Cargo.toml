@@ -1,6 +1,6 @@
 [package]
 name = "lanshare-service"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
 authors = ["adarsh0044321"]
 description = "Low-latency, hardware-accelerated LAN remote desktop streaming service"

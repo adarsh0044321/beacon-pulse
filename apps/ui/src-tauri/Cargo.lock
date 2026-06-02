@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "lanshare-service"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "anyhow",
  "atomic",
