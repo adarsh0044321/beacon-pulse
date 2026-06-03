@@ -1,6 +1,6 @@
 [package]
 name = "lanshare-service"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 authors = ["adarsh0044321"]
 description = "Low-latency, hardware-accelerated LAN remote desktop streaming service"
@@ -64,6 +64,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Com",
     # Phase 3: Toolhelp32 snapshot for crash-handler thread count
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
 ] }
 windows-service = "0.7"
 

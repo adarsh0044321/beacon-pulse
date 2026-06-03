@@ -80,6 +80,7 @@ fn reg_read_string(name: &str) -> Option<String> {
             std::ptr::null_mut(),
             &mut size,
         );
+
         if res != ERROR_SUCCESS || vtype != REG_SZ {
             RegCloseKey(hkey);
             return None;
@@ -95,8 +96,12 @@ fn reg_read_string(name: &str) -> Option<String> {
         );
         RegCloseKey(hkey);
         if res == ERROR_SUCCESS {
-            let len = (size as usize / 2).saturating_sub(1);
-            Some(String::from_utf16_lossy(&buf[..len]))
+            let wide_chars = &buf[..size as usize / 2];
+            let len = wide_chars
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(wide_chars.len());
+            Some(String::from_utf16_lossy(&wide_chars[..len]))
         } else {
             None
         }
@@ -187,6 +192,14 @@ fn hide_console_window() {}
 fn main() {
     hide_console_window();
 
+    let args: Vec<String> = std::env::args().collect();
+    let parent_pid: Option<u32> = args.get(1).and_then(|s| s.parse().ok());
+    let target_bin = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "beacon.exe".to_string());
+    let is_player = target_bin.contains("player") || target_bin.contains("pulse");
+
     // ── Single-instance guard ──────────────────────────────────────────────
     #[cfg(windows)]
     let _mutex_guard = {
@@ -195,21 +208,14 @@ fn main() {
             fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut u8;
             fn GetLastError() -> u32;
         }
-        let name: Vec<u16> = "Local\\BeaconWatchdog\0".encode_utf16().collect();
+        let mutex_name = format!("Local\\Watchdog_{}\0", target_bin.replace(".exe", ""));
+        let name: Vec<u16> = mutex_name.encode_utf16().collect();
         let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
         if h.is_null() || unsafe { GetLastError() } == 183 {
-            return; // Another watchdog already running
+            return; // Another watchdog already running for this target
         }
         h
     };
-
-    let args: Vec<String> = std::env::args().collect();
-    let parent_pid: Option<u32> = args.get(1).and_then(|s| s.parse().ok());
-    let target_bin = args
-        .get(2)
-        .cloned()
-        .unwrap_or_else(|| "beacon.exe".to_string());
-    let is_player = target_bin.contains("player") || target_bin.contains("pulse");
 
     let log_path = log_file_path();
     let _ = std::fs::create_dir_all(log_path.parent().unwrap());
@@ -243,7 +249,7 @@ fn main() {
     }
 
     // Kill any stale target_bin bg-service instances before we start
-    kill_stale_hosts(&log_path, &target_bin);
+    kill_stale_hosts(&log_path, &target_bin, parent_pid);
 
     // Small boot delay to let Windows settle (give console launcher time to exit)
     thread::sleep(Duration::from_secs(1));
@@ -261,7 +267,7 @@ fn main() {
 
     loop {
         // Clean up any stale instances before starting a new one to free up ports
-        kill_stale_hosts(&log_path, &target_bin);
+        kill_stale_hosts(&log_path, &target_bin, parent_pid);
 
         let mut cmd = Command::new(&host_exe);
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -403,11 +409,17 @@ fn main() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Kill any existing target processes so we start fresh.
-fn kill_stale_hosts(log_path: &PathBuf, target_bin: &str) {
-    let result = Command::new("taskkill")
-        .args(["/F", "/IM", target_bin])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+fn kill_stale_hosts(log_path: &PathBuf, target_bin: &str, parent_pid: Option<u32>) {
+    let mut cmd = Command::new("taskkill");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.arg("/F");
+    if let Some(ppid) = parent_pid {
+        cmd.arg("/FI");
+        cmd.arg(format!("PID ne {}", ppid));
+    }
+    cmd.arg("/IM");
+    cmd.arg(target_bin);
+    let result = cmd.output();
     match result {
         Ok(out) => {
             if out.status.success() {

@@ -351,3 +351,104 @@ fn inject_key(_vk: u16, _scan: u16, _pressed: bool, _is_extended: bool) -> Resul
 pub fn inject_key_release(_vk: u16, _scan: u16, _is_extended: bool) -> Result<()> {
     Ok(())
 }
+
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+pub static LAST_WRITTEN_CLIPBOARD: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
+
+#[cfg(windows)]
+pub fn read_clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::{HGLOBAL, HWND};
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+
+    unsafe {
+        if OpenClipboard(HWND::default()).is_err() {
+            return None;
+        }
+
+        let mut result = None;
+        // CF_UNICODETEXT = 13
+        if let Ok(handle) = GetClipboardData(13) {
+            if !handle.is_invalid() {
+                let hglobal = HGLOBAL(handle.0);
+                let ptr = GlobalLock(hglobal);
+                if !ptr.is_null() {
+                    let wide_ptr = ptr as *const u16;
+                    let mut len = 0;
+                    while *wide_ptr.add(len) != 0 {
+                        len += 1;
+                    }
+                    let slice = std::slice::from_raw_parts(wide_ptr, len);
+                    result = Some(String::from_utf16_lossy(slice));
+                    let _ = GlobalUnlock(hglobal);
+                }
+            }
+        }
+
+        let _ = CloseClipboard();
+        result
+    }
+}
+
+#[cfg(windows)]
+pub fn write_clipboard_text(text: &str) -> bool {
+    use windows::Win32::Foundation::{HANDLE, HWND};
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let size = wide.len() * 2;
+
+    unsafe {
+        if OpenClipboard(HWND::default()).is_err() {
+            return false;
+        }
+
+        let mut success = false;
+        if EmptyClipboard().is_ok() {
+            if let Ok(hglobal) = GlobalAlloc(GMEM_MOVEABLE, size) {
+                if !hglobal.is_invalid() {
+                    let ptr = GlobalLock(hglobal);
+                    if !ptr.is_null() {
+                        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr as *mut u16, wide.len());
+                        let _ = GlobalUnlock(hglobal);
+                        let handle = HANDLE(hglobal.0);
+                        if SetClipboardData(13, handle).is_ok() {
+                            success = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = CloseClipboard();
+        success
+    }
+}
+
+#[cfg(not(windows))]
+pub fn read_clipboard_text() -> Option<String> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn write_clipboard_text(_text: &str) -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn test_clipboard_read_write() {
+        let test_str = "LANShare_Test_String_123";
+        assert!(write_clipboard_text(test_str));
+        assert_eq!(read_clipboard_text(), Some(test_str.to_string()));
+    }
+}

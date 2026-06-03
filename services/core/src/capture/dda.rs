@@ -73,7 +73,6 @@ impl DdaCapture {
     #[cfg(windows)]
     fn try_init_dxgi(target: crate::CaptureTarget, w: u32, h: u32) -> Result<Option<DxgiState>> {
         use windows::core::Interface;
-        use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
         use windows::Win32::Graphics::Direct3D11::{
             D3D11CreateDevice, D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG,
@@ -83,16 +82,17 @@ impl DdaCapture {
         use windows::Win32::Graphics::Dxgi::{
             IDXGIAdapter, IDXGIDevice, IDXGIOutput1, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
         };
-        use windows::Win32::Graphics::Gdi::{
-            MonitorFromWindow, HMONITOR, MONITOR_DEFAULTTONEAREST,
-        };
+        use windows::Win32::Graphics::Gdi::HMONITOR;
 
         unsafe {
+            // Restrict DXGI OutputDuplication to Display targets only.
+            // Window targets should fall back directly to PrintWindow.
+            if !matches!(target, crate::CaptureTarget::Display(_)) {
+                return Ok(None);
+            }
+
             // Find which monitor we are duplicating
             let monitor = match target {
-                crate::CaptureTarget::Window(hwnd) => {
-                    MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONEAREST)
-                }
                 crate::CaptureTarget::Display(hmonitor) => HMONITOR(hmonitor as *mut _),
                 _ => HMONITOR(std::ptr::null_mut()),
             };
@@ -470,7 +470,18 @@ impl DdaCapture {
             }
 
             let hdc_mem = CreateCompatibleDC(hdc_window);
+            if hdc_mem.is_invalid() {
+                ReleaseDC(hwnd, hdc_window);
+                return Err(anyhow!("CreateCompatibleDC failed"));
+            }
+
             let hbm = CreateCompatibleBitmap(hdc_window, w, h);
+            if hbm.is_invalid() {
+                let _ = DeleteDC(hdc_mem);
+                ReleaseDC(hwnd, hdc_window);
+                return Err(anyhow!("CreateCompatibleBitmap failed"));
+            }
+
             let old_obj = SelectObject(hdc_mem, hbm);
 
             // PrintWindow captures occluded and minimised content.

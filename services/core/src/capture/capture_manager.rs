@@ -19,7 +19,7 @@ use super::{
     compatibility::preferred_backend, dda::DdaCapture, wgc::WgcCapture, AppKind, CaptureBackend,
     CaptureEvent, CapturedFrame, WindowCapture, WindowInfo,
 };
-use crate::capture::window_list::list_visible_windows;
+use crate::capture::window_list::{is_window_valid, list_visible_windows};
 #[cfg(windows)]
 use crate::encoder::gpu_device::SharedGpuDeviceArc;
 use anyhow::{anyhow, Result};
@@ -67,6 +67,7 @@ struct ActiveCapture {
     last_frame: Option<CapturedFrame>,
     last_frame_time: Instant,
     stale_notified: bool,
+    window_lost_notified: bool,
     consecutive_failures: u32,
     last_recovery_attempt: Option<Instant>,
 }
@@ -185,7 +186,24 @@ impl CaptureManager {
         let create_active =
             |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
                 let win_info = match &t {
-                    crate::CaptureTarget::Window(hwnd) => mgr.get_window_info(*hwnd)?,
+                    crate::CaptureTarget::Window(hwnd) => {
+                        #[cfg(windows)]
+                        {
+                            use windows::Win32::Foundation::HWND;
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                IsIconic, ShowWindow, SW_RESTORE,
+                            };
+                            let win_hwnd = HWND(*hwnd as *mut _);
+                            if unsafe { IsIconic(win_hwnd) }.as_bool() {
+                                debug!("Auto-restoring minimized target window HWND=0x{:x}", hwnd);
+                                unsafe {
+                                    let _ = ShowWindow(win_hwnd, SW_RESTORE);
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(150));
+                            }
+                        }
+                        mgr.get_window_info(*hwnd)?
+                    }
                     crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
                     _ => return Err(anyhow!("Unsupported target variant")),
                 };
@@ -197,6 +215,7 @@ impl CaptureManager {
                     last_frame: None,
                     last_frame_time: Instant::now(),
                     stale_notified: false,
+                    window_lost_notified: false,
                     consecutive_failures: 0,
                     last_recovery_attempt: None,
                 })
@@ -254,6 +273,30 @@ impl CaptureManager {
         let is_multi_target = self.actives.len() > 1;
 
         for idx in 0..self.actives.len() {
+            // Check if window is valid first
+            let mut is_lost = false;
+            let mut hwnd_val = 0;
+            if let Some(active) = self.actives.get(idx) {
+                if let crate::CaptureTarget::Window(hwnd) = active.target {
+                    hwnd_val = hwnd;
+                    if !is_window_valid(hwnd) {
+                        is_lost = true;
+                    }
+                }
+            }
+
+            if is_lost {
+                let active = &mut self.actives[idx];
+                if !active.window_lost_notified {
+                    active.window_lost_notified = true;
+                    self.emit(CaptureEvent::CaptureLost {
+                        hwnd: hwnd_val,
+                        reason: "Shared window was closed".to_string(),
+                    });
+                }
+                continue; // Skip polling and recovery attempts for this closed window
+            }
+
             self.update_active_window_state(idx);
 
             let mut emit_suspended = false;
@@ -266,7 +309,13 @@ impl CaptureManager {
                     None => continue,
                 };
 
-                let frame_result = active.backend.next_frame();
+                let frame_result = if active.info.is_minimized {
+                    // Do not poll the backend if the window is minimized.
+                    // This freezes the stream on the last un-minimized frame cleanly.
+                    Ok(None)
+                } else {
+                    active.backend.next_frame()
+                };
 
                 match frame_result {
                     Ok(Some(frame)) => {
@@ -477,7 +526,7 @@ impl CaptureManager {
                         }
 
                         let mut rect = RECT::default();
-                        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+                        if !minimized && unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
                             let w = (rect.right - rect.left).max(0) as u32;
                             let h = (rect.bottom - rect.top).max(0) as u32;
                             if w != active.info.width || h != active.info.height {

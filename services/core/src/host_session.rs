@@ -128,6 +128,8 @@ pub fn start(
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let running_clone = Arc::clone(&running);
     tokio::spawn(cursor_polling_loop(running_clone));
+    let running_clipboard = Arc::clone(&running);
+    tokio::spawn(clipboard_polling_loop(running_clipboard));
 
     // Spawn the capture + encode loop
     let running_capture = Arc::clone(&running);
@@ -168,6 +170,18 @@ pub enum HostEvent {
     },
     CaptureLost {
         target: crate::CaptureTarget,
+        reason: String,
+    },
+    CaptureRecovered {
+        target: crate::CaptureTarget,
+        backend: crate::capture::CaptureBackend,
+    },
+    RenderSuspended {
+        target: crate::CaptureTarget,
+        app_kind: crate::capture::AppKind,
+    },
+    RenderResumed {
+        target: crate::CaptureTarget,
     },
     BackendSwitched {
         from: String,
@@ -205,7 +219,7 @@ async fn capture_encode_loop(
     running: Arc<std::sync::atomic::AtomicBool>,
 ) {
     // Initialise capture manager
-    let (cap_event_tx, _cap_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (cap_event_tx, mut cap_event_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut cap = CaptureManager::new(PersistentCaptureConfig::default(), cap_event_tx);
 
     // Find the WindowInfo for this target
@@ -436,6 +450,46 @@ async fn capture_encode_loop(
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Drain capture events (non-blocking) and forward them to the UI/IPC
+        while let Ok(event) = cap_event_rx.try_recv() {
+            match event {
+                crate::capture::CaptureEvent::BackendSwitched {
+                    from,
+                    to,
+                    reason: _,
+                } => {
+                    let _ = event_tx.send(HostEvent::BackendSwitched {
+                        from: format!("{:?}", from),
+                        to: format!("{:?}", to),
+                    });
+                }
+                crate::capture::CaptureEvent::CaptureLost { hwnd, reason } => {
+                    let _ = event_tx.send(HostEvent::CaptureLost {
+                        target: crate::CaptureTarget::Window(hwnd),
+                        reason,
+                    });
+                }
+                crate::capture::CaptureEvent::CaptureRecovered { hwnd, backend } => {
+                    let _ = event_tx.send(HostEvent::CaptureRecovered {
+                        target: crate::CaptureTarget::Window(hwnd),
+                        backend,
+                    });
+                }
+                crate::capture::CaptureEvent::RenderSuspended { hwnd, app_kind } => {
+                    let _ = event_tx.send(HostEvent::RenderSuspended {
+                        target: crate::CaptureTarget::Window(hwnd),
+                        app_kind,
+                    });
+                }
+                crate::capture::CaptureEvent::RenderResumed { hwnd } => {
+                    let _ = event_tx.send(HostEvent::RenderResumed {
+                        target: crate::CaptureTarget::Window(hwnd),
+                    });
+                }
+                _ => {} // WindowMinimized, WindowRestored, WindowMoved
             }
         }
 
@@ -694,6 +748,26 @@ async fn cursor_polling_loop(running: Arc<std::sync::atomic::AtomicBool>) {
             last_shape = shape.clone();
             let msg = crate::network::ControlMessage::CursorChanged { shape };
             let _ = crate::network::listener::CURSOR_CHANNEL.send(msg);
+        }
+    }
+}
+
+async fn clipboard_polling_loop(running: Arc<std::sync::atomic::AtomicBool>) {
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    while running.load(std::sync::atomic::Ordering::Relaxed) {
+        interval.tick().await;
+        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+        if clipboard_enabled {
+            if let Some(text) = crate::input::read_clipboard_text() {
+                if !text.is_empty() && text.len() <= 512 * 1024 {
+                    let mut last_written = crate::input::LAST_WRITTEN_CLIPBOARD.lock().unwrap();
+                    if text != *last_written {
+                        *last_written = text.clone();
+                        let msg = crate::network::ControlMessage::ClipboardSync { text };
+                        let _ = crate::network::listener::CLIPBOARD_CHANNEL.send(msg);
+                    }
+                }
+            }
         }
     }
 }

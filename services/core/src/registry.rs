@@ -173,8 +173,12 @@ pub fn read_string(name: &str) -> Option<String> {
         );
         RegCloseKey(hkey);
         if res == ERROR_SUCCESS {
-            let len = (data_size as usize / 2).saturating_sub(1);
-            Some(String::from_utf16_lossy(&buf[..len]))
+            let wide_chars = &buf[..data_size as usize / 2];
+            let len = wide_chars
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(wide_chars.len());
+            Some(String::from_utf16_lossy(&wide_chars[..len]))
         } else {
             None
         }

@@ -13,6 +13,12 @@ pub static CURSOR_CHANNEL: Lazy<tokio::sync::broadcast::Sender<ControlMessage>> 
     let (tx, _) = tokio::sync::broadcast::channel(16);
     tx
 });
+
+pub static CLIPBOARD_CHANNEL: Lazy<tokio::sync::broadcast::Sender<ControlMessage>> =
+    Lazy::new(|| {
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        tx
+    });
 use crate::AppState;
 
 fn generate_tls_config() -> Result<rustls::ServerConfig> {
@@ -112,6 +118,7 @@ where
     let peer_ip = peer_addr.ip();
 
     let mut cursor_rx = CURSOR_CHANNEL.subscribe();
+    let mut clipboard_rx = CLIPBOARD_CHANNEL.subscribe();
     let writer_clone = Arc::clone(&writer_shared);
     let mut session_cleanup_rx = state.shutdown_tx.subscribe();
     tokio::spawn(async move {
@@ -122,6 +129,17 @@ where
                         let mut w = writer_clone.lock().await;
                         if w.write_all((json + "\n").as_bytes()).await.is_err() {
                             break;
+                        }
+                    }
+                }
+                Ok(clipboard_msg) = clipboard_rx.recv() => {
+                    let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+                    if clipboard_enabled {
+                        if let Ok(json) = serde_json::to_string(&clipboard_msg) {
+                            let mut w = writer_clone.lock().await;
+                            if w.write_all((json + "\n").as_bytes()).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
@@ -427,6 +445,20 @@ where
                         info!("File transfer completed successfully: {}", name);
                     } else {
                         warn!("Received FileEnd but no file was active");
+                    }
+                }
+
+                ControlMessage::ClipboardSync { text } => {
+                    let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+                    if clipboard_enabled {
+                        if !text.is_empty() && text.len() <= 512 * 1024 {
+                            {
+                                let mut last_written = crate::input::LAST_WRITTEN_CLIPBOARD.lock().unwrap();
+                                *last_written = text.clone();
+                            }
+                            crate::input::write_clipboard_text(&text);
+                            let _ = CLIPBOARD_CHANNEL.send(ControlMessage::ClipboardSync { text });
+                        }
                     }
                 }
 

@@ -85,6 +85,9 @@ pub enum ControlMessage {
     CursorChanged {
         shape: String,
     },
+    ClipboardSync {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

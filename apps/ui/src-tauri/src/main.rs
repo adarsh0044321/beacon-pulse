@@ -59,8 +59,9 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
+        let our_pid = std::process::id();
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", target_bin])
+            .args(["/F", "/FI", &format!("PID ne {}", our_pid), "/IM", target_bin])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
@@ -212,13 +213,13 @@ fn main() {
                 {
                     use std::os::windows::process::CommandExt;
                     let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
-                    // Best-effort: signal processes to exit.
+                    let our_pid = std::process::id();
                     let _ = std::process::Command::new("taskkill")
                         .args(["/F", "/IM", "beacon-watchdog.exe"])
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
                     let _ = std::process::Command::new("taskkill")
-                        .args(["/F", "/IM", target_bin])
+                        .args(["/F", "/FI", &format!("PID ne {}", our_pid), "/IM", target_bin])
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
                 }

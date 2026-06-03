@@ -314,6 +314,13 @@ pub async fn start(
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ControlMessage>();
 
+    let running_clipboard = Arc::clone(&running);
+    let input_tx_clipboard = input_tx.clone();
+    tokio::spawn(client_clipboard_polling_loop(
+        running_clipboard,
+        input_tx_clipboard,
+    ));
+
     // Tokio task: forward frames → IPC events
     let running_for_fwd = Arc::clone(&running);
     let fwd_event_tx = event_tx.clone();
@@ -354,6 +361,18 @@ pub async fn start(
                                     }
                                     ControlMessage::CursorChanged { shape } => {
                                         let _ = fwd_event_tx_loop.send(ClientEvent::CursorChanged { shape });
+                                    }
+                                    ControlMessage::ClipboardSync { text } => {
+                                        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+                                        if clipboard_enabled {
+                                            if !text.is_empty() && text.len() <= 512 * 1024 {
+                                                {
+                                                    let mut last_written = crate::input::LAST_WRITTEN_CLIPBOARD.lock().unwrap();
+                                                    *last_written = text.clone();
+                                                }
+                                                crate::input::write_clipboard_text(&text);
+                                            }
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -459,4 +478,26 @@ async fn forward_frames(
     }
 
     info!("Frame forwarder stopped");
+}
+
+async fn client_clipboard_polling_loop(
+    running: Arc<AtomicBool>,
+    input_tx: mpsc::UnboundedSender<ControlMessage>,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+    while running.load(Ordering::Relaxed) {
+        interval.tick().await;
+        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+        if clipboard_enabled {
+            if let Some(text) = crate::input::read_clipboard_text() {
+                if !text.is_empty() && text.len() <= 512 * 1024 {
+                    let mut last_written = crate::input::LAST_WRITTEN_CLIPBOARD.lock().unwrap();
+                    if text != *last_written {
+                        *last_written = text.clone();
+                        let _ = input_tx.send(ControlMessage::ClipboardSync { text });
+                    }
+                }
+            }
+        }
+    }
 }

@@ -82,9 +82,19 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
     if GetWindowRect(hwnd, &mut rect).is_err() {
         return BOOL(1);
     }
-    let width = (rect.right - rect.left).max(0) as u32;
-    let height = (rect.bottom - rect.top).max(0) as u32;
-    if width < 50 || height < 50 {
+
+    let is_minimized = IsIconic(hwnd).as_bool();
+    let mut width = (rect.right - rect.left).max(0) as u32;
+    let mut height = (rect.bottom - rect.top).max(0) as u32;
+
+    if is_minimized {
+        // Minimized windows report a tiny placeholder size (e.g. 159x27).
+        // Bypass the size filter and use a logical default fallback size.
+        if width < 50 || height < 50 {
+            width = 1024;
+            height = 768;
+        }
+    } else if width < 50 || height < 50 {
         return BOOL(1);
     }
 
@@ -92,8 +102,6 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
     let mut process_id: u32 = 0;
     GetWindowThreadProcessId(hwnd, Some(&mut process_id));
     let process_name = get_process_name(process_id).unwrap_or_else(|| "Unknown".to_string());
-
-    let is_minimized = IsIconic(hwnd).as_bool();
 
     // Build partial info for compatibility detection
     let mut info = WindowInfo {

@@ -783,10 +783,16 @@ fn host_event_to_service(ev: host_session::HostEvent) -> ServiceEvent {
             stream_port: port,
         },
         host_session::HostEvent::StreamStopped { reason } => ServiceEvent::ShareStopped { reason },
-        host_session::HostEvent::CaptureLost { target } => ServiceEvent::CaptureLost {
-            target,
-            reason: "Capture lost".to_string(),
-        },
+        host_session::HostEvent::CaptureLost { target, reason } => {
+            ServiceEvent::CaptureLost { target, reason }
+        }
+        host_session::HostEvent::CaptureRecovered { target, backend } => {
+            ServiceEvent::CaptureRecovered { target, backend }
+        }
+        host_session::HostEvent::RenderSuspended { target, app_kind } => {
+            ServiceEvent::RenderSuspended { target, app_kind }
+        }
+        host_session::HostEvent::RenderResumed { target } => ServiceEvent::RenderResumed { target },
         // Fix: BackendSwitched was incorrectly mapped to ServiceEvent::Error.
         // Parse the backend name strings back to their enum variants.
         host_session::HostEvent::BackendSwitched { from, to } => {

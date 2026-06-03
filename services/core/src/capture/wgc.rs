@@ -652,13 +652,18 @@ fn blit_bgra_to_nv12(
 
     // Execute BGRA→NV12 conversion on GPU
     // pInputSurface requires ManuallyDrop in windows-rs 0.58 struct layout
-    let stream = D3D11_VIDEO_PROCESSOR_STREAM {
+    let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
         Enable: BOOL(1),
         pInputSurface: std::mem::ManuallyDrop::new(Some(input_view)),
         ..Default::default()
     };
     // VideoProcessorBlt takes a slice in windows-rs 0.58
-    unsafe { vctx.VideoProcessorBlt(&processor, &output_view, 0, std::slice::from_ref(&stream))? };
+    unsafe {
+        let res =
+            vctx.VideoProcessorBlt(&processor, &output_view, 0, std::slice::from_ref(&stream));
+        std::mem::ManuallyDrop::drop(&mut stream.pInputSurface);
+        res?;
+    };
 
     Ok(nv12)
 }
