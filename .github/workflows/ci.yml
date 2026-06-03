@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. nightly or v1.0.1)'
+        required: true
+        default: 'nightly'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Clippy Lints
+      run: cargo clippy --all-targets --all-features
+
+    - name: Build Host (Beacon)
+      run: cargo build --release -p lanshare-service --bin beacon --features host
+
+    - name: Build Player Backend (Pulse)
+      run: cargo build --release -p lanshare-service --bin pulse --features player
+
+    - name: Build Watchdog
+      run: cargo build --release -p beacon-watchdog
+
+  release:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build All Release Binaries
+      shell: bash
+      run: |
+        cargo build --release -p lanshare-service --bin beacon --features host
+        cargo build --release -p lanshare-service --bin pulse --features player
+        cargo build --release -p beacon-watchdog
+        
+    - name: Package Release
+      run: |
+        mkdir release
+        copy target\release\beacon.exe release\beacon-host.exe
+        copy target\release\pulse.exe release\pulse-client.exe
+        copy target\release\beacon-watchdog.exe release\beacon-watchdog.exe
+        copy RELEASE_NOTES.txt release\RELEASE_NOTES.txt
+        Compress-Archive -Path release\* -DestinationPath release-windows.zip
+        
+        copy target\release\beacon.exe installer\host\beacon.exe
+        copy target\release\beacon-watchdog.exe installer\host\beacon-watchdog.exe
+        copy target\release\pulse.exe installer\player\pulse.exe
+        C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe /out:installer\host\BeaconSetup.exe /resource:installer\host\beacon.exe,beacon.exe /resource:installer\host\beacon-watchdog.exe,beacon-watchdog.exe installer\BeaconSetup.cs
+        C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe /out:installer\player\PulseSetup.exe /resource:installer\player\pulse.exe,pulse.exe installer\player\PulseSetup.cs
+
+    - name: Publish Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release-windows.zip
+          installer/host/BeaconSetup.exe
+          installer/player/PulseSetup.exe
+        name: Release V1.0.3 Full Display/ Multi Window Sharing Features Added
+        body_path: RELEASE_NOTES.txt
+        tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+

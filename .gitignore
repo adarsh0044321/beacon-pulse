@@ -1,0 +1,55 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+ui/src-tauri/target/
+apps/ui/src-tauri/target/
+
+# Logs and Caches
+*.log
+logs/
+.temp/
+.cache/
+
+# Binaries and Installers
+*.exe
+!apps/ui/src-tauri/resources/*.exe
+*.msi
+*.dll
+*.pdb
+*.ilk
+installer/Output/
+release/
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Streaming caches
+*.tmp
+*.bak
+
+# Custom Tauri build folders
+dist-host/
+dist-player/
+apps/ui/dist-host/
+apps/ui/dist-player/
