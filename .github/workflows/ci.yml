@@ -91,7 +91,7 @@ jobs:
           release-windows.zip
           installer/host/BeaconSetup.exe
           installer/player/PulseSetup.exe
-        name: Release V1.0.3 Full Display/ Multi Window Sharing Features Added
+        name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
         body_path: RELEASE_NOTES.txt
         tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
 

@@ -1,18 +1,16 @@
-📡 Beacon & Pulse v1.0.5 - Release Notes
+📡 Beacon & Pulse v1.0.6 - Release Notes
 =======================================
 
 Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
 
-What's New in v1.0.5
+What's New in v1.0.6
 -------------------
 
-🛠️ Core Latency, Memory, and Stability Fixes
-- Windows Media Foundation COM Leak Fix: Implemented an RAII `ActivatesGuard` drop guard to release `IMFActivate` COM handles on exit. This prevents COM leaks on the host during startup or reconfiguration.
-- Ring-Buffer Latency Correction: Updated the queue to discard the oldest frame when full instead of the newest, preventing stale frames from creating temporary latency spikes.
-- Client Connection Cleanup: Wrapped the client loop in an async block to guarantee that abrupt network drops or reset errors trigger client session deregistration.
+🖥️ Minimized Window Active Sharing & Listing Fixes
+- Minimized Window Listing: Restructured window listing filter (`window_list.rs`) to detect minimized windows via `IsIconic` and assign a logical fallback size of `1024x768`. This allows minimized windows (like Chrome, File Explorer, and Antigravity IDE) to be visible and selectable in the console sharing picker across all modes (Single, Multi-Grid, and Dual-Window Side-by-Side).
+- Auto-Restoration on Startup: Added auto-restoration checks on startup using `ShowWindow(hwnd, SW_RESTORE)` when sharing a minimized target, ensuring that the window un-minimizes so the OS can render and share its contents.
+- Freeze Frame Preservation on Minimize: If a shared window is minimized during the session, the host automatically freezes the stream on the last active un-minimized frame cached in memory. It continues to update timestamps to keep the connection alive and smoothly unfreezes once the window is restored.
+- Resolution Collapse Bypass: Prevented `GetWindowRect` from updating captured frame dimensions to the tiny `159x27` minimized title-bar placeholder size when minimized, preserving the last restored resolution.
 
-🖥️ Front-End & Input Synchronization
-- Settings Registry Synchronization: Connected Tauri front-end settings directly to the Windows Registry (`HKCU\Software\Beacon`). Setting changes (bitrate, FPS, control permissions, and startup rules) are immediately visible to the background core service and watchdog.
-- Mouse Aspect-Ratio Calibration: Calculated the active video viewport within the player canvas to discard letterbox/pillarbox margins, scaling mouse coordinates correctly relative to actual video bounds.
-- Layout-Independent Keyboard Lookup: Mapped JS `KeyboardEvent.code` directly to Windows scan codes and extended key flags (`is_extended`) to handle non-US layouts and arrow/navigation keys.
-- Verification Testing: Added automated unit tests verifying the lock-free ring-buffer queue behavior.
+🛠️ Dynamic Workflows & Automation
+- Dynamic CI Release Titles: Configured GitHub Actions workflows (`ci.yml`) to automatically name releases using the git tag (e.g. `Release v1.0.6`) instead of hardcoding past release names.
