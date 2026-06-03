@@ -60,7 +60,7 @@ if (ambientCanvas) {
 
       ctx.beginPath();
       ctx.arc(p1.x, p1.y, p1.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(168, 85, 247, ${p1.alpha})`;
+      ctx.fillStyle = `rgba(245, 158, 11, ${p1.alpha})`;
       ctx.fill();
 
       for (let j = i + 1; j < maxParticles; j++) {
@@ -74,7 +74,7 @@ if (ambientCanvas) {
           ctx.moveTo(p1.x, p1.y);
           ctx.lineTo(p2.x, p2.y);
           const edgeAlpha = (1 - dist / 150) * 0.12;
-          ctx.strokeStyle = `rgba(6, 182, 212, ${edgeAlpha})`;
+          ctx.strokeStyle = `rgba(245, 158, 11, ${edgeAlpha})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -543,14 +543,14 @@ function startConnectedSimulators() {
         }
       });
       
-      ctx.strokeStyle = '#06b6d4';
+      ctx.strokeStyle = '#f59e0b';
       ctx.lineWidth = 1;
       ctx.stroke();
       
       ctx.lineTo(width, height);
       ctx.lineTo(0, height);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
       ctx.fill();
     };
 
@@ -581,7 +581,7 @@ function startConnectedSimulators() {
       frame++;
       
       // Wallpaper Background
-      ctx.fillStyle = '#060a16';
+      ctx.fillStyle = '#08080c';
       ctx.fillRect(0, 0, w, h);
       
       // Desktop Grid overlay lines
@@ -603,7 +603,7 @@ function startConnectedSimulators() {
 
       // Draw Desktop file icons shortcuts
       const drawIcon = (x: number, y: number, label: string) => {
-        ctx.fillStyle = 'rgba(6, 182, 212, 0.3)';
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
         ctx.fillRect(x, y, 12, 12);
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.font = '5px monospace';
@@ -619,7 +619,7 @@ function startConnectedSimulators() {
       if (windowY < 15 || windowY > h - 100) speedY *= -1;
       
       // Render window
-      ctx.fillStyle = '#020409';
+      ctx.fillStyle = '#040406';
       ctx.beginPath();
       ctx.roundRect(windowX, windowY, 120, 70, 6);
       ctx.fill();
@@ -627,7 +627,7 @@ function startConnectedSimulators() {
       ctx.stroke();
       
       // Window header tab
-      ctx.fillStyle = '#0d111c';
+      ctx.fillStyle = '#09090c';
       ctx.beginPath();
       ctx.roundRect(windowX, windowY, 120, 14, [6, 6, 0, 0]);
       ctx.fill();
@@ -637,9 +637,9 @@ function startConnectedSimulators() {
       ctx.fillText("Rust compile listener", windowX + 6, windowY + 9);
       
       // Code files inside window
-      ctx.fillStyle = '#a855f7';
+      ctx.fillStyle = '#f59e0b';
       ctx.fillText("fn render_loop() {", windowX + 8, windowY + 25);
-      ctx.fillStyle = '#06b6d4';
+      ctx.fillStyle = '#f59e0b';
       ctx.fillText("  let text = wgc::copy();", windowX + 8, windowY + 35);
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.fillText(`// frame: ${frame}`, windowX + 8, windowY + 45);
@@ -649,7 +649,7 @@ function startConnectedSimulators() {
       if (isFileUploading) {
         ctx.fillStyle = 'rgba(2, 4, 10, 0.95)';
         ctx.fillRect(w/2 - 50, h/2 - 20, 100, 35);
-        ctx.strokeStyle = '#06b6d4';
+        ctx.strokeStyle = '#f59e0b';
         ctx.strokeRect(w/2 - 50, h/2 - 20, 100, 35);
         
         ctx.fillStyle = '#fff';
@@ -658,15 +658,15 @@ function startConnectedSimulators() {
         
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.fillRect(w/2 - 42, h/2 - 4, 84, 3);
-        ctx.fillStyle = '#06b6d4';
+        ctx.fillStyle = '#f59e0b';
         ctx.fillRect(w/2 - 42, h/2 - 4, fileUploadProgress * 0.84, 3);
         
-        ctx.fillStyle = '#06b6d4';
+        ctx.fillStyle = '#f59e0b';
         ctx.fillText(`Progress: ${Math.round(fileUploadProgress)}%`, w/2 - 42, h/2 + 8);
       }
 
       // Windows OS Dock Taskbar
-      ctx.fillStyle = '#03050a';
+      ctx.fillStyle = '#050508';
       ctx.fillRect(0, h - 14, w, 14);
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.fillRect(6, h - 11, 8, 8);
