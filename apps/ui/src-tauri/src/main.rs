@@ -378,6 +378,9 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
         if let Some(unattended) = settings.get("unattended_mode").and_then(Value::as_bool) {
             lanshare_service::registry::write_dword("Unattended", if unattended { 1 } else { 0 });
         }
+        if let Some(pin) = settings.get("unattended_pin").and_then(Value::as_str) {
+            lanshare_service::registry::write_string("UnattendedPin", pin);
+        }
         if let Some(tls) = settings.get("tls_enabled").and_then(Value::as_bool) {
             lanshare_service::registry::write_dword("TlsEnabled", if tls { 1 } else { 0 });
         }

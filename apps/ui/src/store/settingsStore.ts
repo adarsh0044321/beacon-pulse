@@ -29,6 +29,7 @@ interface Settings {
   toggleInputControl: () => void;
   toggleStartWithWindows: () => void;
   toggleUnattendedMode: () => void;
+  setUnattendedPin: (pin: string) => void;
   toggleUseStaticCode: () => void;
   setStaticCode: (code: string) => void;
   setIndicatorMode: (mode: IndicatorMode) => void;
@@ -62,6 +63,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   toggleInputControl: () => set(s => ({ allow_input_control: !s.allow_input_control })),
   toggleStartWithWindows: () => set(s => ({ start_with_windows: !s.start_with_windows })),
   toggleUnattendedMode: () => set(s => ({ unattended_mode: !s.unattended_mode })),
+  setUnattendedPin: (pin) => set({ unattended_pin: pin }),
   toggleUseStaticCode: () => set(s => ({ use_static_code: !s.use_static_code })),
   setStaticCode: (code) => set({ static_code: code }),
   setIndicatorMode: (mode) => set({ indicator_mode: mode }),
@@ -80,6 +82,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
         allow_input_control: s.allow_input_control,
         start_with_windows: s.start_with_windows,
         unattended_mode: s.unattended_mode,
+        unattended_pin: s.unattended_pin,
         indicator_mode: s.indicator_mode,
         use_static_code: s.use_static_code,
         static_code: s.static_code,

@@ -641,8 +641,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       setWolMac(host.mac);
       localStorage.setItem('lanshare_last_mac', host.mac);
     }
-    if (!skipPairingCheck && pairingInput && pairingInput.length !== 6) {
-      setError('Pairing code must be exactly 6 digits.');
+    if (!skipPairingCheck && pairingInput && pairingInput.length < 6) {
+      setError('Pairing code or password must be at least 6 characters.');
       return;
     }
     setError(null);
@@ -861,10 +861,10 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 <input
                   id="pairing-code-input"
                   type="text"
-                  placeholder="Enter 6-digit security code"
-                  maxLength={6}
+                  placeholder="Enter pairing code or unattended password"
+                  maxLength={32}
                   value={pairingInput}
-                  onChange={e => setPairingInput(e.target.value.replace(/\D/g, ''))}
+                  onChange={e => setPairingInput(e.target.value)}
                   style={{ fontSize: '1.4rem', letterSpacing: '0.25em', textAlign: 'center', fontFamily: 'monospace' }}
                 />
                 {error && <p style={{ color: 'var(--danger)', fontSize: '0.8rem' }}>{error}</p>}

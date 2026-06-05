@@ -1106,9 +1106,18 @@ fn start_sharing_service(
 
         // Configure pairing code
         let code = if unattended {
-            // Unattended mode has no pairing code (returns None in PairingManager)
-            state.pairing_manager.write().await.invalidate();
-            None
+            if let Some(pin) = registry::read_string("UnattendedPin") {
+                if !pin.is_empty() {
+                    state.pairing_manager.write().await.set_code(pin.clone());
+                    Some(pin)
+                } else {
+                    state.pairing_manager.write().await.invalidate();
+                    None
+                }
+            } else {
+                state.pairing_manager.write().await.invalidate();
+                None
+            }
         } else if let Some(ref c) = host_args.code {
             state.pairing_manager.write().await.set_code(c.clone());
             Some(c.clone())

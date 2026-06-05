@@ -405,14 +405,38 @@ async fn dispatch_cmd(
                     // ── Auto-generate pairing code and push it to UI ─────────
                     // This ensures the pairing code always appears on the host
                     // screen immediately after "Start Sharing" is clicked.
+                    let unattended = crate::registry::read_dword("Unattended").unwrap_or(0) == 1;
                     let code = {
                         let mut pm = state.pairing_manager.write().await;
-                        pm.generate_code()
+                        if unattended {
+                            if let Some(pin) = crate::registry::read_string("UnattendedPin") {
+                                if !pin.is_empty() {
+                                    pm.set_code(pin.clone());
+                                    Some(pin)
+                                } else {
+                                    pm.invalidate();
+                                    None
+                                }
+                            } else {
+                                pm.invalidate();
+                                None
+                            }
+                        } else {
+                            let generated = pm.generate_code();
+                            Some(generated)
+                        }
                     };
-                    let _ = push_tx.send(ServiceEvent::PairingCode {
-                        code: code.clone(),
-                        expires_in: 120,
-                    });
+                    if let Some(c) = code {
+                        let _ = push_tx.send(ServiceEvent::PairingCode {
+                            code: if unattended { "********".to_string() } else { c.clone() },
+                            expires_in: if unattended { 999999 } else { 120 },
+                        });
+                    } else {
+                        let _ = push_tx.send(ServiceEvent::PairingCode {
+                            code: "None (Unsecured)".to_string(),
+                            expires_in: 0,
+                        });
+                    }
 
                     // ── Start UDP broadcast advertiser ───────────────────────
                     // Advertise the CONTROL_PORT (45101) so clients know the
@@ -552,11 +576,36 @@ async fn dispatch_cmd(
         // ── Pairing code ─────────────────────────────────────────────────────
         #[cfg(feature = "host")]
         UiCommand::GeneratePairingCode => {
+            let unattended = crate::registry::read_dword("Unattended").unwrap_or(0) == 1;
             let mut pm = state.pairing_manager.write().await;
-            let code = pm.generate_code();
-            ServiceEvent::PairingCode {
-                code,
-                expires_in: 120,
+            if unattended {
+                if let Some(pin) = crate::registry::read_string("UnattendedPin") {
+                    if !pin.is_empty() {
+                        pm.set_code(pin.clone());
+                        ServiceEvent::PairingCode {
+                            code: "********".to_string(),
+                            expires_in: 999999,
+                        }
+                    } else {
+                        pm.invalidate();
+                        ServiceEvent::PairingCode {
+                            code: "None (Unsecured)".to_string(),
+                            expires_in: 0,
+                        }
+                    }
+                } else {
+                    pm.invalidate();
+                    ServiceEvent::PairingCode {
+                        code: "None (Unsecured)".to_string(),
+                        expires_in: 0,
+                    }
+                }
+            } else {
+                let code = pm.generate_code();
+                ServiceEvent::PairingCode {
+                    code,
+                    expires_in: 120,
+                }
             }
         }
 

@@ -19,6 +19,63 @@ use tracing::{debug, info, warn};
 use super::rtp::{build_rtcp, parse_rtcp, Reassembler, RtpPacket, RTCP_TYPE_ACK, RTCP_TYPE_PROBE};
 use crate::logging::metrics::METRICS;
 
+#[derive(Debug, Clone)]
+pub struct SeqTracker {
+    max_seq: Option<u16>,
+    received_mask: u64,
+    pub packets_expected: u64,
+    pub packets_lost: u64,
+}
+
+impl SeqTracker {
+    pub fn new() -> Self {
+        Self {
+            max_seq: None,
+            received_mask: 0,
+            packets_expected: 0,
+            packets_lost: 0,
+        }
+    }
+
+    pub fn add(&mut self, seq: u16) {
+        if let Some(max) = self.max_seq {
+            let diff = seq.wrapping_sub(max) as i16;
+            if diff > 0 {
+                // seq is newer
+                self.packets_expected += diff as u64;
+                self.packets_lost += (diff - 1) as u64;
+                if diff < 64 {
+                    self.received_mask = (self.received_mask << diff) | 1;
+                } else {
+                    self.received_mask = 1;
+                }
+                self.max_seq = Some(seq);
+            } else if diff < 0 && diff >= -63 {
+                // out of order packet within tracking window
+                let bit_idx = (-diff) as u32;
+                let bit = 1u64 << bit_idx;
+                if (self.received_mask & bit) == 0 {
+                    self.received_mask |= bit;
+                    if self.packets_lost > 0 {
+                        self.packets_lost -= 1;
+                    }
+                }
+            }
+            // diff == 0 or diff < -63 is duplicate or too old, ignore
+        } else {
+            self.max_seq = Some(seq);
+            self.received_mask = 1;
+            self.packets_expected = 1;
+            self.packets_lost = 0;
+        }
+    }
+
+    pub fn reset_interval(&mut self) {
+        self.packets_expected = 0;
+        self.packets_lost = 0;
+    }
+}
+
 /// A fully reassembled, ready-to-decode frame.
 #[derive(Debug)]
 pub struct ReceivedFrame {
@@ -44,9 +101,7 @@ pub struct UdpReceiver {
     bytes_received: u64,
     parse_errors: u64,
     fec_recoveries: u64,
-    last_seq: Option<u16>,
-    packets_lost: u64,
-    packets_expected: u64,
+    seq_tracker: SeqTracker,
 }
 
 impl UdpReceiver {
@@ -77,9 +132,7 @@ impl UdpReceiver {
                 bytes_received: 0,
                 parse_errors: 0,
                 fec_recoveries: 0,
-                last_seq: None,
-                packets_lost: 0,
-                packets_expected: 0,
+                seq_tracker: SeqTracker::new(),
             },
             frame_rx,
         ))
@@ -137,20 +190,7 @@ impl UdpReceiver {
                 }
             };
 
-            let seq = pkt.seq;
-            if let Some(last) = self.last_seq {
-                let diff = seq.wrapping_sub(last);
-                if diff > 1 && diff < 30000 {
-                    let lost = (diff - 1) as u64;
-                    self.packets_lost += lost;
-                    self.packets_expected += lost + 1;
-                } else {
-                    self.packets_expected += 1;
-                }
-            } else {
-                self.packets_expected += 1;
-            }
-            self.last_seq = Some(seq);
+            self.seq_tracker.add(pkt.seq);
 
             let width = pkt.width;
             let height = pkt.height;
@@ -163,8 +203,8 @@ impl UdpReceiver {
                     self.fec_recoveries += 1;
                     debug!(ts, "FEC parity triggered frame completion / recovery");
                 }
-                let loss_pct = if self.packets_expected > 0 {
-                    (self.packets_lost as f32 / self.packets_expected as f32) * 100.0
+                let loss_pct = if self.seq_tracker.packets_expected > 0 {
+                    (self.seq_tracker.packets_lost as f32 / self.seq_tracker.packets_expected as f32) * 100.0
                 } else {
                     0.0
                 };
@@ -203,11 +243,70 @@ impl UdpReceiver {
                 self.bytes_received = 0;
                 self.parse_errors = 0;
                 self.fec_recoveries = 0;
-                self.packets_lost = 0;
-                self.packets_expected = 0;
+                self.seq_tracker.reset_interval();
                 self.last_stats = Instant::now();
             }
         }
         info!("UdpReceiver stopped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_seq_tracker_sequential() {
+        let mut tracker = SeqTracker::new();
+        tracker.add(10);
+        tracker.add(11);
+        tracker.add(12);
+        assert_eq!(tracker.packets_expected, 3);
+        assert_eq!(tracker.packets_lost, 0);
+    }
+
+    #[test]
+    fn test_seq_tracker_out_of_order() {
+        let mut tracker = SeqTracker::new();
+        // Packets: 10, 12, 11
+        tracker.add(10);
+        tracker.add(12); // 11 is lost/skipped initially
+        assert_eq!(tracker.packets_expected, 3);
+        assert_eq!(tracker.packets_lost, 1);
+
+        tracker.add(11); // 11 arrives out-of-order
+        assert_eq!(tracker.packets_expected, 3);
+        assert_eq!(tracker.packets_lost, 0);
+    }
+
+    #[test]
+    fn test_seq_tracker_wrapping() {
+        let mut tracker = SeqTracker::new();
+        tracker.add(65534);
+        tracker.add(65535);
+        tracker.add(0);
+        tracker.add(1);
+        assert_eq!(tracker.packets_expected, 4);
+        assert_eq!(tracker.packets_lost, 0);
+    }
+
+    #[test]
+    fn test_seq_tracker_deduplication() {
+        let mut tracker = SeqTracker::new();
+        tracker.add(10);
+        tracker.add(11);
+        tracker.add(11); // duplicate
+        assert_eq!(tracker.packets_expected, 2);
+        assert_eq!(tracker.packets_lost, 0);
+    }
+
+    #[test]
+    fn test_seq_tracker_large_jump() {
+        let mut tracker = SeqTracker::new();
+        tracker.add(10);
+        tracker.add(100); // jump by 90 packets
+        // Since diff (90) >= 64, the mask is reset to 1
+        assert_eq!(tracker.packets_expected, 91);
+        assert_eq!(tracker.packets_lost, 89);
     }
 }

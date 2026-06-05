@@ -38,7 +38,7 @@
 | ⚡ **Ultra-Low Latency** | Hardware-accelerated capture via Windows Graphics Capture API + Media Foundation H.264 encoding (NVENC/AMF/QSV) |
 | 🖥️ **Multiple Capture Modes** | Single window, entire display, multi-window grid, or dual-window side-by-side |
 | 🖱️ **Remote Control** | Full keyboard + mouse input forwarding with optional clipboard synchronization |
-| 🔒 **Secure Pairing** | 6-digit pairing codes for each session, or unattended mode for trusted networks |
+| 🔒 **Secure Pairing** | 6-digit pairing codes for each session, or password-protected unattended mode |
 | 🛡️ **Watchdog Service** | Automatic crash recovery with exponential back-off — never lose your remote session |
 | 🔄 **System Tray** | Runs silently in background with tray icon — change window or exit via right-click menu |
 | 🌐 **Auto-Discovery** | Finds hosts automatically via UDP broadcast + mDNS + async subnet scanning |
@@ -219,7 +219,7 @@ Once connected, Beacon runs in the system tray. Right-click the tray icon for:
 On first launch, Beacon walks through an interactive setup:
 
 1. **Windows Startup** — Auto-start Beacon when Windows boots
-2. **Unattended Mode** — Skip pairing codes (for trusted networks only)
+2. **Unattended Mode** — Secure password-protected remote access
 3. **Remote Control** — Allow/deny keyboard and mouse input from players
 
 ### Settings Menu
@@ -292,6 +292,13 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 ---
 
 ## 📋 Changelog
+
+### v1.0.6 (2026-06-05)
+
+**Bug Fixes & Security**
+- **UDP Out-of-Order Packet Loss Tracking** — implemented a sliding-window sequence tracker (`SeqTracker`) using a `u64` bitmask. This resolves inflated packet loss reports caused by out-of-order UDP packet delivery, allowing the adaptive bitrate controller to sustain high-quality streaming on jittery local networks.
+- **Alt+F4 Hotkey Support** — corrected player window input capture behavior by delegating `WM_SYSKEYDOWN` + `VK_F4` events back to the default window procedure, enabling standard Alt+F4 closure functionality.
+- **Password-Protected Unattended Access** — introduced secure challenge-response validation using a persistent unattended access password stored in the Registry (`UnattendedPin`). This replaces the unsecured connection flow in unattended mode while remaining fully backward-compatible with the HMAC-SHA256 handshake protocol.
 
 ### v1.0.5 (2026-06-02)
 

@@ -154,6 +154,10 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
       addToast('Validation Error', 'Static Pairing Code must be exactly 6 digits.', 'error');
       return;
     }
+    if (s.unattended_mode && s.unattended_pin && s.unattended_pin.length < 6) {
+      addToast('Validation Error', 'Unattended Access Password must be at least 6 characters.', 'error');
+      return;
+    }
     try {
       await s.save();
       addToast('Settings Saved', 'System configurations successfully written to local disk.', 'success');
@@ -319,6 +323,27 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
           <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px', marginBottom: '10px' }}>Startup Configuration</h3>
           <ToggleRow id="toggle-startup"    label="Start with Windows Boot"     description="Launches Beacon background service automatically at user login" checked={s.start_with_windows} onChange={s.toggleStartWithWindows} />
           <ToggleRow id="toggle-unattended" label="Unattended Service Mode"     description="Maintains connection accessibility when lock screen is active" checked={s.unattended_mode} onChange={s.toggleUnattendedMode} />
+          {s.unattended_mode && (
+            <div style={{ marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+              <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+                Unattended Access Password
+              </label>
+              <input
+                id="input-unattended-pin"
+                type="password"
+                placeholder="Enter custom password"
+                maxLength={32}
+                value={s.unattended_pin}
+                onChange={e => s.setUnattendedPin(e.target.value)}
+                style={{ fontSize: '1.0rem', maxWidth: '300px', padding: '8px 12px' }}
+              />
+              {s.unattended_pin.length > 0 && s.unattended_pin.length < 6 && (
+                <p style={{ color: 'var(--danger)', fontSize: '0.75rem', marginTop: '6px' }}>
+                  Password must be at least 6 characters.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Sharing Indicator */}

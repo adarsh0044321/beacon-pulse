@@ -10,7 +10,7 @@ def run():
         page = context.new_page()
         
         # Go to landing page
-        page.goto('http://localhost:5173')
+        page.goto('http://localhost:5173/beacon-pulse/')
         page.wait_for_load_state('networkidle')
         
         # Verify page title
@@ -70,7 +70,7 @@ def run():
         print("Successfully transitioned to Connected state!")
         
         # 5. Take screenshot of the connected mockup remote desktop
-        screenshot_path = "c:/Users/JAISINGH/.gemini/antigravity/brain/e460db73-14d9-4d86-b443-6e40737ced30/scratch/connected_simulator.png"
+        screenshot_path = "c:/Users/JAISINGH/.gemini/antigravity/brain/b411b0bd-763c-43d3-8e3c-aadae118d53d/connected_simulator.png"
         page.screenshot(path=screenshot_path, full_page=False)
         print(f"Saved simulator screenshot to {screenshot_path}")
         
