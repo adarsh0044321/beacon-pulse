@@ -19,9 +19,14 @@ def run():
         assert "Beacon & Pulse" in title, f"Unexpected title: {title}"
         
         # Verify Hero title text
-        hero_title = page.locator("h1").inner_text()
+        hero_title = page.locator("h1").first.inner_text()
         print(f"Hero Title: {hero_title}")
         assert "BEACON & PULSE" in hero_title, "Hero title missing"
+        
+        # Click "Launch Simulation Workspace" to enter the playground
+        print("Clicking Launch Simulation Workspace...")
+        page.locator('.launch-playground-btn').first.click()
+        time.sleep(0.8) # Wait for transition to complete
         
         # Focus the Pulse Client window first to bring it to the front
         print("Clicking Pulse Player shortcut to focus the window...")

@@ -1,6 +1,74 @@
 import './style.css'
 
 // ==========================================
+// 0. VIEWPORT PAGE TRANSITIONS (LANDING <-> PLAYGROUND)
+// ==========================================
+const landingPage = document.getElementById('landing-page');
+const desktopPlayground = document.getElementById('desktop-playground');
+const launchPlaygroundBtns = document.querySelectorAll('.launch-playground-btn');
+const osStartBtn = document.getElementById('os-start-button');
+
+function enterPlayground() {
+  if (!landingPage || !desktopPlayground) return;
+  
+  // Update browser hash so users can reload directly into playground
+  window.location.hash = 'playground';
+  
+  // Phase 1: Fade out landing page with zoom
+  landingPage.classList.add('opacity-0', 'scale-105', 'pointer-events-none');
+  
+  setTimeout(() => {
+    // Phase 2: Hide landing page and show playground container
+    landingPage.classList.add('hidden');
+    desktopPlayground.classList.remove('hidden');
+    
+    // In next frame, trigger transition to fade in and scale down to normal
+    requestAnimationFrame(() => {
+      desktopPlayground.classList.remove('opacity-0', 'scale-95');
+      desktopPlayground.classList.add('opacity-100', 'scale-100');
+    });
+  }, 700); // Matches transition-all duration-700
+}
+
+function exitPlayground() {
+  if (!landingPage || !desktopPlayground) return;
+  
+  // Clear hash
+  window.history.pushState("", document.title, window.location.pathname + window.location.search);
+  
+  // Phase 1: Fade out playground
+  desktopPlayground.classList.remove('opacity-100', 'scale-100');
+  desktopPlayground.classList.add('opacity-0', 'scale-95');
+  
+  setTimeout(() => {
+    // Phase 2: Hide playground and show landing page
+    desktopPlayground.classList.add('hidden');
+    landingPage.classList.remove('hidden');
+    
+    requestAnimationFrame(() => {
+      landingPage.classList.remove('opacity-0', 'scale-105', 'pointer-events-none');
+    });
+  }, 700);
+}
+
+// Hook up event listeners
+launchPlaygroundBtns.forEach(btn => {
+  btn.addEventListener('click', enterPlayground);
+});
+
+osStartBtn?.addEventListener('click', exitPlayground);
+
+// Check hash on load
+if (window.location.hash === '#playground') {
+  if (landingPage && desktopPlayground) {
+    landingPage.classList.add('hidden', 'opacity-0', 'scale-105', 'pointer-events-none');
+    desktopPlayground.classList.remove('hidden', 'opacity-0', 'scale-95');
+    desktopPlayground.classList.add('opacity-100', 'scale-100');
+  }
+}
+
+
+// ==========================================
 // 1. AMBIENT BACKGROUND CANVAS SIMULATION
 // ==========================================
 const ambientCanvas = document.getElementById('ambient-canvas') as HTMLCanvasElement | null;
