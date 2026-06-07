@@ -20,7 +20,9 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
         let win_hwnd = windows::Win32::Foundation::HWND(hwnd as *mut _);
         if unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(win_hwnd) }.as_bool() {
             match event {
-                InputMsg::MouseMove { .. } | InputMsg::MouseButton { .. } | InputMsg::MouseScroll { .. } => {
+                InputMsg::MouseMove { .. }
+                | InputMsg::MouseButton { .. }
+                | InputMsg::MouseScroll { .. } => {
                     // Ignore mouse inputs for minimized windows to prevent unintended host desktop clicks
                     return Ok(());
                 }

@@ -468,7 +468,8 @@ async fn forward_frames(
         if last_stats.elapsed() >= stats_interval {
             let elapsed_secs = last_stats.elapsed().as_secs_f32();
             let fps = frames as f32 / elapsed_secs;
-            let bitrate_kbps = ((bytes_received as f32 * 8.0) / 1000.0 / elapsed_secs).round() as u32;
+            let bitrate_kbps =
+                ((bytes_received as f32 * 8.0) / 1000.0 / elapsed_secs).round() as u32;
             let rtt_ms = frame.rtt_ms;
 
             let _ = event_tx.send(ClientEvent::RecvStats {

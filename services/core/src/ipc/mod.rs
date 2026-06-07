@@ -430,7 +430,11 @@ async fn dispatch_cmd(
                     };
                     if let Some(c) = code {
                         let _ = push_tx.send(ServiceEvent::PairingCode {
-                            code: if unattended { "********".to_string() } else { c.clone() },
+                            code: if unattended {
+                                "********".to_string()
+                            } else {
+                                c.clone()
+                            },
                             expires_in: if unattended { 999999 } else { 120 },
                         });
                     } else {

@@ -609,7 +609,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
             let is_extended = ((lparam.0 >> 24) & 1) == 1;
 
-            if msg == WM_SYSKEYDOWN && vk_code == windows::Win32::UI::Input::KeyboardAndMouse::VK_F4.0 as u32 {
+            if msg == WM_SYSKEYDOWN
+                && vk_code == windows::Win32::UI::Input::KeyboardAndMouse::VK_F4.0 as u32
+            {
                 return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
             }
 

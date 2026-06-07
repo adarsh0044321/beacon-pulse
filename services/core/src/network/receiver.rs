@@ -173,7 +173,8 @@ impl UdpReceiver {
                 } else {
                     0
                 };
-                self.latest_rtt_ms.store(rtt_ms, std::sync::atomic::Ordering::Relaxed);
+                self.latest_rtt_ms
+                    .store(rtt_ms, std::sync::atomic::Ordering::Relaxed);
 
                 let ack = build_rtcp(RTCP_TYPE_ACK, ts);
                 let _ = self.socket.send_to(&ack, src);
@@ -214,7 +215,9 @@ impl UdpReceiver {
                     debug!(ts, "FEC parity triggered frame completion / recovery");
                 }
                 let loss_pct = if self.seq_tracker.packets_expected > 0 {
-                    (self.seq_tracker.packets_lost as f32 / self.seq_tracker.packets_expected as f32) * 100.0
+                    (self.seq_tracker.packets_lost as f32
+                        / self.seq_tracker.packets_expected as f32)
+                        * 100.0
                 } else {
                     0.0
                 };
@@ -225,7 +228,9 @@ impl UdpReceiver {
                     width,
                     height,
                     packet_loss_pct: loss_pct,
-                    rtt_ms: self.latest_rtt_ms.load(std::sync::atomic::Ordering::Relaxed),
+                    rtt_ms: self
+                        .latest_rtt_ms
+                        .load(std::sync::atomic::Ordering::Relaxed),
                     received_at: Instant::now(),
                 };
                 self.frames_received += 1;
@@ -316,7 +321,7 @@ mod tests {
         let mut tracker = SeqTracker::new();
         tracker.add(10);
         tracker.add(100); // jump by 90 packets
-        // Since diff (90) >= 64, the mask is reset to 1
+                          // Since diff (90) >= 64, the mask is reset to 1
         assert_eq!(tracker.packets_expected, 91);
         assert_eq!(tracker.packets_lost, 89);
     }
