@@ -28,11 +28,27 @@ interface PerformanceWarning {
 interface DebugOverlayProps {
   backend: string
   sessionId?: string
+  clientStats?: {
+    decodeStats: {
+      fps: number
+      decodeMs: number
+      frames: number
+      keyframes: number
+    }
+    sessionStats: {
+      fps: number
+      latency_ms: number
+      bitrate_kbps: number
+    }
+    packetLossPct: number
+    width: number
+    height: number
+  }
 }
 
 const HISTORY_LEN = 60 // 30 seconds at 500ms
 
-export function DebugOverlay({ backend, sessionId }: DebugOverlayProps) {
+export function DebugOverlay({ backend, sessionId, clientStats }: DebugOverlayProps) {
   const [visible, setVisible] = useState(false)
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null)
   const [warnings, setWarnings] = useState<PerformanceWarning[]>([])
@@ -53,6 +69,7 @@ export function DebugOverlay({ backend, sessionId }: DebugOverlayProps) {
 
   // Listen for metrics events from Tauri backend
   useEffect(() => {
+    if (clientStats) return;
     const unlisten = listen<MetricsSnapshot>('metrics_update', (event) => {
       const snap = event.payload
       setMetrics(snap)
@@ -72,7 +89,59 @@ export function DebugOverlay({ backend, sessionId }: DebugOverlayProps) {
       setWarnings(w)
     })
     return () => { unlisten.then(f => f()) }
-  }, [])
+  }, [clientStats])
+
+  // Update history and warnings from clientStats if active
+  useEffect(() => {
+    if (!clientStats) return;
+
+    const pipelineMs = clientStats.decodeStats.decodeMs + clientStats.sessionStats.latency_ms;
+    const snap: MetricsSnapshot = {
+      frames_captured: clientStats.decodeStats.frames,
+      frames_encoded: clientStats.decodeStats.frames,
+      frames_dropped_cap: 0,
+      frames_stale: 0,
+      backend_switches: 0,
+      keyframes: clientStats.decodeStats.keyframes,
+      avg_encode_us: clientStats.decodeStats.decodeMs * 1000, // Show decode latency in place of encode
+      avg_pipeline_us: pipelineMs * 1000,
+      bytes_in_window: Math.round((clientStats.sessionStats.bitrate_kbps * 1000 / 8) / 2), // approximate bytes per 500ms
+      packets_in_window: 100, // dummy
+      packet_loss_in_window: Math.round(clientStats.packetLossPct),
+      rtt_us: clientStats.sessionStats.latency_ms * 1000,
+      render_suspended_count: 0,
+      frame_width: clientStats.width,
+      frame_height: clientStats.height,
+    };
+
+    setMetrics(snap);
+    setHistory(h => {
+      const next = [...h, snap];
+      return next.length > HISTORY_LEN ? next.slice(-HISTORY_LEN) : next;
+    });
+
+    // Compute warnings
+    const w: PerformanceWarning[] = [];
+    if (clientStats.packetLossPct > 5) {
+      w.push({ kind: 'PacketLoss', value: clientStats.packetLossPct });
+    }
+    if (clientStats.sessionStats.latency_ms > 100) {
+      w.push({ kind: 'HighLatency', value: clientStats.sessionStats.latency_ms });
+    }
+    if (clientStats.decodeStats.decodeMs > 20) {
+      w.push({ kind: 'SlowEncoder', value: clientStats.decodeStats.decodeMs });
+    }
+    setWarnings(w);
+  }, [
+    clientStats?.decodeStats.frames,
+    clientStats?.decodeStats.decodeMs,
+    clientStats?.decodeStats.keyframes,
+    clientStats?.sessionStats.latency_ms,
+    clientStats?.sessionStats.bitrate_kbps,
+    clientStats?.packetLossPct,
+    clientStats?.width,
+    clientStats?.height,
+  ]);
 
   // Draw mini sparkline chart
   useEffect(() => {
@@ -119,10 +188,14 @@ export function DebugOverlay({ backend, sessionId }: DebugOverlayProps) {
   const enc_ms = metrics ? (metrics.avg_encode_us / 1000).toFixed(1) : '—'
   const pipe_ms = metrics ? (metrics.avg_pipeline_us / 1000).toFixed(1) : '—'
   const rtt_ms = metrics ? (metrics.rtt_us / 1000).toFixed(1) : '—'
-  const bitrate = metrics
+  const bitrate = clientStats
+    ? (clientStats.sessionStats.bitrate_kbps / 1000).toFixed(2)
+    : metrics
     ? ((metrics.bytes_in_window * 8 * 2) / 1_000_000).toFixed(2)
     : '—'
-  const lossPct = metrics && metrics.packets_in_window > 0
+  const lossPct = clientStats
+    ? clientStats.packetLossPct.toFixed(1)
+    : metrics && metrics.packets_in_window > 0
     ? ((metrics.packet_loss_in_window / (metrics.packets_in_window + metrics.packet_loss_in_window)) * 100).toFixed(1)
     : '0.0'
 
@@ -146,7 +219,7 @@ export function DebugOverlay({ backend, sessionId }: DebugOverlayProps) {
           </div>
         </div>
         <div className="debug-section">
-          <div className="debug-label">Encode</div>
+          <div className="debug-label">{clientStats ? 'Decode' : 'Encode'}</div>
           <div className={`debug-value ${parseFloat(enc_ms) > 16 ? 'debug-warn' : 'debug-ok'}`}>
             {enc_ms} ms
           </div>

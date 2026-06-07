@@ -218,15 +218,46 @@ export const Settings: React.FC<SettingsProps> = ({ onNavigate }) => {
             <input
               id="bitrate-slider"
               type="range"
-              min={1000} max={20000} step={500}
+              min={1000} max={40000} step={500}
               value={s.bitrate_kbps}
               onChange={e => handleBitrateChange(Number(e.target.value))}
               style={{ width: '100%', display: 'block' }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px' }}>
               <span>1.0 Mbps</span>
-              <span>10.0 Mbps</span>
               <span>20.0 Mbps</span>
+              <span>40.0 Mbps</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+              Quick Quality Profile Preset
+            </label>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {[
+                { name: 'Low Latency', fps: 60, kbps: 10000 },
+                { name: 'Balanced', fps: 60, kbps: 20000 },
+                { name: 'High Quality (HD)', fps: 60, kbps: 35000 },
+              ].map(profile => {
+                const isActive = s.fps === profile.fps && s.bitrate_kbps === profile.kbps;
+                return (
+                  <button
+                    key={profile.name}
+                    id={`btn-preset-${profile.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                    type="button"
+                    className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => {
+                      s.setFps(profile.fps);
+                      handleBitrateChange(profile.kbps);
+                    }}
+                    style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px 12px', height: 'auto', alignItems: 'center' }}
+                  >
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{profile.name}</span>
+                    <span style={{ fontSize: '0.68rem', opacity: 0.8 }}>{profile.fps} FPS · {(profile.kbps / 1000).toFixed(0)} Mbps</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

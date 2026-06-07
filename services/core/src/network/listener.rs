@@ -174,7 +174,8 @@ where
     };
 
     let mut current_file: Option<(String, std::fs::File)> = None;
-    let mut current_bitrate_bps = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
+    let mut last_seen_max_bitrate = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
+    let mut current_bitrate_bps = last_seen_max_bitrate;
 
     let result = async {
         while let Some(line) = lines.next_line().await? {
@@ -310,6 +311,10 @@ where
 
                     if adaptive_enabled {
                         let max_bitrate_bps = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
+                        if max_bitrate_bps != last_seen_max_bitrate {
+                            last_seen_max_bitrate = max_bitrate_bps;
+                            current_bitrate_bps = max_bitrate_bps; // Reset to new manual slider setting
+                        }
                         let min_bitrate_bps = 500 * 1000; // 500 kbps floor
                         let mut new_bitrate = current_bitrate_bps;
 

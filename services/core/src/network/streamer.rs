@@ -125,7 +125,13 @@ impl UdpStreamer {
 
     async fn send_rtcp_probes(&mut self) {
         let ts = crate::telemetry::now_us();
-        let probe = build_rtcp(RTCP_TYPE_PROBE, ts);
+        let rtt_us = METRICS.rtt_us.load(std::sync::atomic::Ordering::Relaxed);
+        let rtt_ms = (rtt_us / 1000) as u32;
+
+        let mut probe = [0u8; 20];
+        probe[0..16].copy_from_slice(&build_rtcp(RTCP_TYPE_PROBE, ts));
+        probe[16..20].copy_from_slice(&rtt_ms.to_le_bytes());
+
         // Snapshot clients before await
         let clients: Vec<StreamClient> =
             { self.clients.read().unwrap().values().cloned().collect() };
@@ -134,7 +140,7 @@ impl UdpStreamer {
                 warn!(client = %client.addr, error = %e, "RTCP probe send failed");
             }
         }
-        debug!(ts, n_clients = clients.len(), "RTCP probes sent");
+        debug!(ts, rtt_ms, n_clients = clients.len(), "RTCP probes sent");
     }
 
     /// Non-blocking drain of incoming RTCP acks on the socket.

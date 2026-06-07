@@ -30,7 +30,7 @@ pub const FLAG_PARITY: u8 = 0x04; // FEC parity packet marker
 /// Distinct magic so receivers can tell RTCP from RTP at a glance.
 pub const RTCP_MAGIC: u32 = 0x4C524350; // "LRCP"
 pub const RTCP_SIZE: usize = 16;
-pub const RTCP_TYPE_PROBE: u8 = 1; // host → client
+pub const RTCP_TYPE_PROBE: u8 = 1; // host → client (can optionally be 20 bytes with [rtt_ms:4] appended)
 pub const RTCP_TYPE_ACK: u8 = 2; // client → host
 
 /// Wire layout: [magic:4][type:1][pad:3][timestamp_us:8]

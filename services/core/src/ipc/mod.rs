@@ -196,6 +196,8 @@ pub enum ServiceEvent {
     RecvStats {
         fps: f32,
         packet_loss_pct: f32,
+        rtt_ms: u32,
+        bitrate_kbps: u32,
     },
     #[cfg(feature = "player")]
     CursorChanged {
@@ -757,6 +759,8 @@ async fn dispatch_cmd(
             ServiceEvent::RecvStats {
                 fps: 0.0,
                 packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
             }
         }
 
@@ -776,6 +780,8 @@ async fn dispatch_cmd(
             ServiceEvent::RecvStats {
                 fps: 0.0,
                 packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
             }
         }
 
@@ -795,6 +801,8 @@ async fn dispatch_cmd(
             ServiceEvent::RecvStats {
                 fps: 0.0,
                 packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
             }
         }
 
@@ -812,6 +820,8 @@ async fn dispatch_cmd(
             ServiceEvent::RecvStats {
                 fps: 0.0,
                 packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
             }
         }
     }
@@ -918,9 +928,13 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         client_session::ClientEvent::RecvStats {
             fps,
             packet_loss_pct,
+            rtt_ms,
+            bitrate_kbps,
         } => ServiceEvent::RecvStats {
             fps,
             packet_loss_pct,
+            rtt_ms,
+            bitrate_kbps,
         },
         client_session::ClientEvent::CursorChanged { shape } => {
             ServiceEvent::CursorChanged { shape }
@@ -1039,10 +1053,27 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
         }
     }
 
-    // Fallback: default route detection
+    // Fallback: default route detection (tries offline local broadcast/multicast first, then 8.8.8.8)
     if ips.is_empty() {
         if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect("8.8.8.8:53").is_ok() {
+            let mut resolved = false;
+            // Try connecting to local broadcast/multicast (offline-friendly)
+            for fallback_target in &["255.255.255.255:53", "224.0.0.1:53", "8.8.8.8:53"] {
+                if socket.connect(fallback_target).is_ok() {
+                    if let Ok(local_addr) = socket.local_addr() {
+                        if let std::net::IpAddr::V4(ip) = local_addr.ip() {
+                            let o = ip.octets();
+                            if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
+                                ips.push(ip);
+                                resolved = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Absolute fallback (even if loopback)
+            if !resolved && socket.connect("8.8.8.8:53").is_ok() {
                 if let Ok(local_addr) = socket.local_addr() {
                     if let std::net::IpAddr::V4(ip) = local_addr.ip() {
                         ips.push(ip);

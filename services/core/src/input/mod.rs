@@ -15,6 +15,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 /// Dispatch a received input event to the system.
 /// target: the CaptureTarget that is currently being shared.
 pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> Result<()> {
+    #[cfg(windows)]
+    if let Some(crate::CaptureTarget::Window(hwnd)) = target {
+        let win_hwnd = windows::Win32::Foundation::HWND(hwnd as *mut _);
+        if unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(win_hwnd) }.as_bool() {
+            match event {
+                InputMsg::MouseMove { .. } | InputMsg::MouseButton { .. } | InputMsg::MouseScroll { .. } => {
+                    // Ignore mouse inputs for minimized windows to prevent unintended host desktop clicks
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     match event {
         InputMsg::MouseMove {
             x,

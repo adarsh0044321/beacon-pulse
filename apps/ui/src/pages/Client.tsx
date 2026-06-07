@@ -275,6 +275,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [wolMac, setWolMac] = useState(() => localStorage.getItem('lanshare_last_mac') || '');
   const [wolSending, setWolSending] = useState(false);
   const [wolStatus, setWolStatus] = useState('');
+  const pressedKeysRef = useRef<Map<string, { keyCode: number; scan: number; extended: boolean }>>(new Map());
+  const [packetLossPct, setPacketLossPct] = useState(0);
 
   // Real-time client logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -355,11 +357,29 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       setCursorShape(event.payload.shape);
     });
 
+    const unlistenRecvStats = listen<{
+      fps: number;
+      packet_loss_pct: number;
+      rtt_ms: number;
+      bitrate_kbps: number;
+    }>('recv_stats', (event) => {
+      setPacketLossPct(event.payload.packet_loss_pct);
+      useSessionStore.getState().updateStats({
+        fps: event.payload.fps,
+        encode_ms: 0,
+        latency_ms: event.payload.rtt_ms,
+        bitrate_kbps: event.payload.bitrate_kbps,
+        client_count: 0,
+        gpu_path_active: false,
+      });
+    });
+
     return () => {
       unlistenVideoChunk.then(f => f());
       unlistenConnected.then(f => f());
       unlistenDisconnected.then(f => f());
       unlistenCursorChanged.then(f => f());
+      unlistenRecvStats.then(f => f());
     };
   }, [feedChunk, closeDecoder, addToast]);
 
@@ -562,6 +582,11 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       }
 
       const keyInfo = KEY_MAP[e.code] || { scan: 0, extended: false };
+      pressedKeysRef.current.set(e.code, {
+        keyCode: e.keyCode,
+        scan: keyInfo.scan,
+        extended: keyInfo.extended || false
+      });
 
       invoke('send_input', {
         event: {
@@ -581,6 +606,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       }
 
       const keyInfo = KEY_MAP[e.code] || { scan: 0, extended: false };
+      pressedKeysRef.current.delete(e.code);
 
       invoke('send_input', {
         event: {
@@ -593,11 +619,29 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       }).catch(console.error);
     };
 
+    const handleBlur = () => {
+      pressedKeysRef.current.forEach((val) => {
+        invoke('send_input', {
+          event: {
+            kind: 'key_press',
+            vk_code: val.keyCode,
+            scan_code: val.scan,
+            pressed: false,
+            is_extended: val.extended
+          }
+        }).catch(console.error);
+      });
+      pressedKeysRef.current.clear();
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
     return () => {
+      pressedKeysRef.current.clear();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [streamConnected]);
 
@@ -1129,6 +1173,13 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         <DebugOverlay 
           backend="WebCodecs" 
           sessionId={connectedHost ? connectedHost.name : "Pulse"} 
+          clientStats={{
+            decodeStats,
+            sessionStats,
+            packetLossPct,
+            width: canvasRef.current?.width || 0,
+            height: canvasRef.current?.height || 0
+          }}
         />
       )}
     </div>

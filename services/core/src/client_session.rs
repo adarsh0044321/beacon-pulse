@@ -107,6 +107,8 @@ pub enum ClientEvent {
     RecvStats {
         fps: f32,
         packet_loss_pct: f32,
+        rtt_ms: u32,
+        bitrate_kbps: u32,
     },
     CursorChanged {
         shape: String,
@@ -425,6 +427,7 @@ async fn forward_frames(
     input_tx: mpsc::UnboundedSender<ControlMessage>,
 ) {
     let mut frames = 0u32;
+    let mut bytes_received = 0u64;
     let mut last_stats = std::time::Instant::now();
     let stats_interval = std::time::Duration::from_millis(1000);
 
@@ -446,6 +449,7 @@ async fn forward_frames(
         };
 
         frames += 1;
+        bytes_received += frame.nal_data.len() as u64;
         let data_b64 = B64.encode(&frame.nal_data);
 
         let ev = ClientEvent::VideoChunk {
@@ -462,17 +466,24 @@ async fn forward_frames(
         }
 
         if last_stats.elapsed() >= stats_interval {
-            let fps = frames as f32 / last_stats.elapsed().as_secs_f32();
+            let elapsed_secs = last_stats.elapsed().as_secs_f32();
+            let fps = frames as f32 / elapsed_secs;
+            let bitrate_kbps = ((bytes_received as f32 * 8.0) / 1000.0 / elapsed_secs).round() as u32;
+            let rtt_ms = frame.rtt_ms;
+
             let _ = event_tx.send(ClientEvent::RecvStats {
                 fps,
                 packet_loss_pct: frame.packet_loss_pct,
+                rtt_ms,
+                bitrate_kbps,
             });
             let _ = input_tx.send(ControlMessage::BitrateReport {
-                recv_kbps: 0,
+                recv_kbps: bitrate_kbps,
                 packet_loss_percent: frame.packet_loss_pct,
-                rtt_ms: 0,
+                rtt_ms,
             });
             frames = 0;
+            bytes_received = 0;
             last_stats = std::time::Instant::now();
         }
     }

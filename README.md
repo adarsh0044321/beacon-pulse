@@ -293,6 +293,20 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 
 ## 📋 Changelog
 
+### v1.0.7 (2026-06-07)
+
+**Bug Fixes & Security**
+- **Minimized Window Mouse Inputs** — disabled forwarding mouse move, scroll, and click coordinates when the target window is minimized on the host, preventing accidental host desktop clicks.
+- **Offline Subnet Discovery Fallback** — modified host IP resolution fallback to target local broadcast (`255.255.255.255:53`) and multicast (`224.0.0.1:53`), allowing connection scan to work completely offline.
+- **Adaptive Bitrate Adjustments** — tracked changes to registry target quality settings to prevent the adaptive bitrate rate-controller from instantly resetting manual user slider adjustments.
+- **Real-Time Telemetry & Sync** — mapped round-trip time (`rtt_ms`) into RTCP probe packets, tracked receiver-side bitrates, and updated the IPC protocol to sync telemetry dynamically.
+- **Key Auto-Release on Focus Loss** — tracked active pressed keys on the client and automatically released all keys on window `blur`.
+
+**Improvements**
+- **Quick Settings Quality Profiles** — added pre-configured presets (Low Latency: 10 Mbps, Balanced: 20 Mbps, High Quality: 35 Mbps) to settings.
+- **Bitrate Range Expansion** — extended settings slider max target bitrate limit up to 40 Mbps.
+- **Interactive Client Debug Overlay** — enabled `Ctrl+Shift+D` inside the player to view real-time decoding delays, network RTT, bitrates, packet loss, and latency sparkline graph.
+
 ### v1.0.6 (2026-06-05)
 
 **Bug Fixes & Security**

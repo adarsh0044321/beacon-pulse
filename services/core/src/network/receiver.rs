@@ -85,6 +85,7 @@ pub struct ReceivedFrame {
     pub width: u16,
     pub height: u16,
     pub packet_loss_pct: f32,
+    pub rtt_ms: u32,
     #[allow(dead_code)]
     pub received_at: Instant,
 }
@@ -102,6 +103,7 @@ pub struct UdpReceiver {
     parse_errors: u64,
     fec_recoveries: u64,
     seq_tracker: SeqTracker,
+    pub latest_rtt_ms: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl UdpReceiver {
@@ -133,6 +135,7 @@ impl UdpReceiver {
                 parse_errors: 0,
                 fec_recoveries: 0,
                 seq_tracker: SeqTracker::new(),
+                latest_rtt_ms: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             },
             frame_rx,
         ))
@@ -165,9 +168,16 @@ impl UdpReceiver {
 
             // ── 4a: RTCP-lite ─────────────────────────────────────────────
             if let Some((RTCP_TYPE_PROBE, ts)) = parse_rtcp(data) {
+                let rtt_ms = if data.len() >= 20 {
+                    u32::from_le_bytes(data[16..20].try_into().unwrap_or([0; 4]))
+                } else {
+                    0
+                };
+                self.latest_rtt_ms.store(rtt_ms, std::sync::atomic::Ordering::Relaxed);
+
                 let ack = build_rtcp(RTCP_TYPE_ACK, ts);
                 let _ = self.socket.send_to(&ack, src);
-                debug!(ts, "RTCP probe echoed as ack");
+                debug!(ts, rtt_ms, "RTCP probe echoed as ack");
                 continue;
             }
 
@@ -215,6 +225,7 @@ impl UdpReceiver {
                     width,
                     height,
                     packet_loss_pct: loss_pct,
+                    rtt_ms: self.latest_rtt_ms.load(std::sync::atomic::Ordering::Relaxed),
                     received_at: Instant::now(),
                 };
                 self.frames_received += 1;
