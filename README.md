@@ -4,14 +4,14 @@
 
 ### Low-Latency LAN Remote Desktop
 
-**Hardware-accelerated screen sharing and remote control over local networks — built entirely in Rust.**
+**Hardware-accelerated screen sharing and remote control over local networks — built entirely in Rust & React.**
 
 [![Release](https://img.shields.io/github/v/release/adarsh0044321/beacon-pulse?style=flat-square&color=blue)](https://github.com/adarsh0044321/beacon-pulse/releases/latest)
 [![Rust](https://img.shields.io/badge/Rust-1.77%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows)](https://microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-[Download](#-download) · [Features](#-features) · [Quick Start](#-quick-start) · [CLI Reference](#-cli-reference) · [Architecture](#-architecture) · [Building](#-building-from-source) · [Changelog](#-changelog)
+[Download](#-download) · [Features](#-features) · [Quick Start](#-quick-start) · [Deep-Dive Architecture](#-architecture-deep-dive) · [Developer & Extension Guide](#-developer--extension-guide) · [Building](#-building-from-source) · [Changelog](#-changelog)
 
 </div>
 
@@ -44,8 +44,8 @@
 | 🌐 **Auto-Discovery** | Finds hosts automatically via UDP broadcast + mDNS + async subnet scanning |
 | 🚀 **Windows Startup** | Optional auto-start on boot — shares the last window automatically |
 | 📋 **Registry Persistence** | Remembers your last shared window, settings, and pairing preferences |
-| ⌨️ **Keyboard Fixes** | Layout-independent scan-code injection, extended keys support, loopback loop isolation, and auto key-release on disconnect |
-| 🎛️ **Configurable** | Custom bitrate (Mbps), FPS, audio sharing, and port settings |
+| ⌨️ **Keyboard Fixes** | Layout-independent scan-code injection, extended keys support, loopback isolation, and auto key-release on blur/disconnect |
+| 🎛️ **Configurable** | Custom bitrate presets (up to 40 Mbps), FPS config, audio sharing, and port settings |
 
 ---
 
@@ -56,8 +56,9 @@
 Run `beacon.exe` (or launch via `BeaconSetup.exe`):
 
 ```
+  Base UI Config Menu
   ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.0.5                   ║
+  ║         Beacon  v1.0.7                   ║
   ╚══════════════════════════════════════════╝
 
     [1] Start Sharing Session (Window, Display, Multi, Dual)
@@ -88,7 +89,7 @@ Select host to connect (1-1 or M):
 
 1. Select the discovered host (or enter IP manually)
 2. Enter the **pairing code** displayed on the host
-3. A fullscreen render window opens with the remote screen
+3. A glassmorphic render window opens with the remote screen
 4. Use mouse and keyboard to control the remote machine
 
 ### System Tray Controls
@@ -96,6 +97,67 @@ Select host to connect (1-1 or M):
 Once connected, Beacon runs in the system tray. Right-click the tray icon for:
 - **Change Shared Window** — kills the current session cleanly and relaunches Beacon to pick a new window
 - **Exit Sharing** — stops all sharing and exits completely
+
+---
+
+## 🏗️ Architecture Deep-Dive
+
+Beacon & Pulse is split into a **Rust core service** that manages encoding, capturing, input emulation, and network transmission, and a **Tauri React UI** that serves as the visual control dashboard.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                          BEACON HOST MACHINE                           │
+│                                                                        │
+│ ┌────────────────────────┐  Zero-Copy  ┌─────────────────────────────┐ │
+│ │ Windows Graphics Capt. │────────────►│ Media Foundation HW Encoder │ │
+│ │ (Direct3D11 / DXGI DDA)│    (GPU)    │ (NVENC / AMF / Intel QQSV)  │ │
+│ └────────────────────────┘             └──────────────┬──────────────┘ │
+│                                                       │                │
+│                                                       ▼                │
+│ ┌────────────────────────┐  Simulate   ┌─────────────────────────────┐ │
+│ │ Windows SendInput API  │◄────────────│  RTP Packetizer / FEC XOR   │ │
+│ └────────────────────────┘    Event    └──────────────┬──────────────┘ │
+│                                                       │                │
+└───────────────────────────────────────────────────────┼────────────────┘
+                                                        │ UDP Stream
+                                                        │ (Port 45100)
+                                                        ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                         PULSE PLAYER MACHINE                           │
+│                                                                        │
+│ ┌────────────────────────┐  Reassemble  ┌────────────────────────────┐ │
+│ │  WebCodecs H.264 API   │◄────────────│  UdpReceiver / SeqTracker  │ │
+│ │  (Hardware-Accelerated)│    Frame    │  (Loss Tracking & RTT Echo)│ │
+│ └──────────┬─────────────┘             └────────────────────────────┘ │
+│            │                                                           │
+│            ▼                                                           │
+│ ┌────────────────────────┐             ┌────────────────────────────┐ │
+│ │  HTML5 Canvas Draw     │             │  Tauri UI Keyboard / Mouse │ │
+│ │  (Interactive Overlay) ├────────────►│  Capture & Scan-code Map   │ │
+│ └────────────────────────┘  Input Msg  └────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1. Video Capture Pipeline
+The video capture layer uses two primary backends:
+- **Windows Graphics Capture (WGC)**: Introduced in Windows 10 (version 1803), this API allows secure, low-latency, GPU-native capture of single windows or whole screens. Direct3D11 textures are kept inside VRAM and passed directly to the encoder without any CPU-side buffer copy (Zero-Copy).
+- **DXGI Desktop Duplication API (DDA)**: Fallback engine used for full-display capture when WGC is unavailable.
+
+### 2. Hardware Encoding Pipeline
+Frames are encoded into H.264 stream slices on-GPU via the **Windows Media Foundation (WMF)** API:
+- Auto-detects and loads available GPU encoder engines (`NVENC` for NVIDIA, `AMF` for AMD, or `QuickSync` for Intel).
+- Drops back to `OpenH264` software emulation if no hardware codecs are found.
+- Utilizes constant bitrate control (`MF_MT_AVG_BITRATE`) and low-latency profiles (`MF_LOW_LATENCY`) to ensure real-time transmission.
+
+### 3. RTP Network Layer & FEC (Forward Error Correction)
+- **RTP Packets**: H.264 NAL units are fragmented into RTP payloads (under 1400 bytes to avoid MTU fragmentation).
+- **Forward Error Correction (FEC)**: Parity packets are calculated on blocks of data packets using XOR operations. If a packet is lost in transit, the client reassembler uses the remaining data and parity packets to rebuild the lost frame payload without requesting a retransmission.
+- **Sequence Tracker (`SeqTracker`)**: Tracks incoming packets using a sliding-window `u64` bitmask to filter out duplicate, delayed, or out-of-order UDP packets.
+- **RTCP Probe Echoing**: The host sends 20-byte RTCP UDP probes. The client echoes these probes back immediately. The host measures the elapsed time to calculate the network **Round-Trip Time (RTT)**, which is then fed back to the client session over IPC.
+
+### 4. Input Injection & Keyboard Emulation
+- **Layout Independence**: JavaScript `KeyboardEvent.code` values (e.g. `KeyW`, `ArrowLeft`) are mapped directly to physical **Windows Scan Codes** using a predefined lookup layout. This ensures that remote shortcuts function identically regardless of what keyboard layout (e.g. AZERTY, QWERTY) the player is using.
+- **Input Loop Isolation**: Injected inputs are tagged with a custom dwExtraInfo signature (`0xBEAC0D`) to prevent keyboard loopback echoes when running host and player on the same system.
 
 ---
 
@@ -148,111 +210,111 @@ Once connected, Beacon runs in the system tray. Right-click the tray icon for:
 
 ---
 
-## 🏗️ Architecture
+## 🛠️ Developer & Extension Guide
+
+If you want to modify features, extend telemetry, or add new command endpoints, follow this developer roadmap.
+
+### 📁 Codebase Directory Layout
 
 ```
-┌─────────────────────────────┐                    ┌─────────────────────────────┐
-│       Beacon (Host)         │  TCP Control +     │       Pulse (Player)        │
-│─────────────────────────────│  UDP Video Stream  │─────────────────────────────│
-│  ┌─────────────────────┐    │◄──────────────────►│  ┌─────────────────────┐    │
-│  │ WGC Capture Engine  │    │                    │  │ H.264 Decoder       │    │
-│  │ (GPU Zero-Copy)     │    │                    │  │ (Media Foundation)  │    │
-│  └─────────┬───────────┘    │                    │  └─────────┬───────────┘    │
-│            │                │                    │            │                │
-│  ┌─────────▼───────────┐    │                    │  ┌─────────▼───────────┐    │
-│  │ H.264 HW Encoder    │    │                    │  │ Win32 Render Window │    │
-│  │ (NVENC/AMF/QSV)     │    │                    │  │ (Direct Blit)       │    │
-│  └─────────┬───────────┘    │                    │  └─────────────────────┘    │
-│            │                │                    │                             │
-│  ┌─────────▼───────────┐    │                    │  ┌─────────────────────┐    │
-│  │ Input Simulator     │◄───│────────────────────│──│ Input Capture       │    │
-│  │ (KB + Mouse)        │    │                    │  │ (KB + Mouse + Clip) │    │
-│  └─────────────────────┘    │                    │  └─────────────────────┘    │
-│                             │                    │                             │
-│  ┌─────────────────────┐    │                    └─────────────────────────────┘
-│  │ System Tray Icon    │    │
-│  │ (Change Window/Exit)│    │
-│  └─────────────────────┘    │
-│                             │
-│  ┌─────────────────────┐    │
-│  │ Named Pipe IPC      │    │
-│  │ (UI Communication)  │    │
-│  └─────────────────────┘    │
-└──────────────┬──────────────┘
-               │ Monitored by
-    ┌──────────▼──────────┐
-    │  Beacon Watchdog    │
-    │  - Crash Recovery   │
-    │  - Auto-Restart     │
-    │  - Exponential      │
-    │    Back-off          │
-    └─────────────────────┘
+beacon-pulse/
+├── apps/
+│   └── ui/                       <-- Tauri React Webview frontend
+│       ├── src/
+│       │   ├── components/       <-- Reusable UI elements (DebugOverlay, Toasts, etc.)
+│       │   ├── pages/            <-- Page templates (Client.tsx, Settings.tsx, Host.tsx)
+│       │   └── store/            <-- Zustand global state management
+│       └── src-tauri/            <-- Tauri native windows backend proxy
+├── services/
+│   └── core/                     <-- Core background service (Cargo workspace)
+│       └── src/
+│           ├── bin/              <-- Host (host.rs) and Player (player.rs) CLI entrypoints
+│           ├── capture/          <-- Windows Graphics Capture and DXGI hooks
+│           ├── encoder/          <-- Media Foundation H.264 codecs
+│           ├── input/            <-- Keyboard & mouse SendInput emulators
+│           ├── ipc/              <-- Named Pipe server communicating with UI
+│           └── network/          <-- RTP, RTCP, UdpReceiver, and socket controllers
 ```
 
-### Key Components
+### 1. How to Add a New Named Pipe IPC Command
+Communication between the UI front-end and the Rust core background service flows over a Named Pipe (`\\.\pipe\Beacon` or `\\.\pipe\Pulse`).
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| **Beacon** | `beacon.exe` | Host service — captures, encodes, and streams |
-| **Pulse** | `pulse.exe` | Player client — receives, decodes, and renders |
-| **Watchdog** | `beacon-watchdog.exe` | Monitors beacon and restarts on crash |
-| **Capture Engine** | `capture/wgc.rs` | Windows Graphics Capture API integration |
-| **Encoder** | `encoder/mod.rs` | Media Foundation H.264 hardware encoding |
-| **Network** | `network/` | TCP control channel + UDP video streaming |
-| **Tray** | `tray.rs` | System tray icon with window change/exit |
-| **Registry** | `registry.rs` | Windows Registry persistence for settings |
+To add a new action (e.g. `set_pointer_speed`):
+1. **Define command in Core Service**: Go to [services/core/src/ipc/mod.rs](file:///c:/Users/JAISINGH/.gemini/antigravity/scratch/lanshare/services/core/src/ipc/mod.rs) and add a variant to the `UiCommand` enum:
+   ```rust
+   pub enum UiCommand {
+       // ... existing
+       SetPointerSpeed { speed: u32 },
+   }
+   ```
+2. **Handle the Command**: Inside `dispatch_cmd` in `ipc/mod.rs`, match your command and execute your logic:
+   ```rust
+   UiCommand::SetPointerSpeed { speed } => {
+       // execute Windows registry write or configuration updates
+       ServiceEvent::Stats { /* ... returns a service event status */ }
+   }
+   ```
+3. **Expose through Tauri Webview Backend**: Go to [apps/ui/src-tauri/src/main.rs](file:///c:/Users/JAISINGH/.gemini/antigravity/apps/ui/src-tauri/src/main.rs) and create a command:
+   ```rust
+   #[tauri::command]
+   async fn set_pointer_speed(speed: u32, state: State<'_, AppData>) -> Result<Value, String> {
+       ipc_send(&state, serde_json::json!({ "cmd": "set_pointer_speed", "speed": speed }))
+   }
+   ```
+   Remember to register the command inside the `generate_handler!` macro at the bottom of `main.rs`.
+4. **Call from React Frontend**: Use `@tauri-apps/api/core` inside your React page to invoke the command:
+   ```typescript
+   import { invoke } from '@tauri-apps/api/core';
+   await invoke('set_pointer_speed', { speed: 5 });
+   ```
 
-### Network Protocol
-
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| `45100` | UDP | Video frame streaming |
-| `45101` | TCP | Control channel (pairing, session management) |
-| `45102` | UDP | Client receive port |
+### 2. How to Emit a New Telemetry Event to the UI
+If you need to push real-time information from the background thread to the player frontend (e.g. packet latency spikes):
+1. **Define ClientEvent**: Add a variant inside [services/core/src/client_session.rs](file:///c:/Users/JAISINGH/.gemini/antigravity/scratch/lanshare/services/core/src/client_session.rs):
+   ```rust
+   pub enum ClientEvent {
+       // ... existing
+       LatencyAlert { latency_ms: u32 },
+   }
+   ```
+2. **Define ServiceEvent**: Add a matching event inside [services/core/src/ipc/mod.rs](file:///c:/Users/JAISINGH/.gemini/antigravity/scratch/lanshare/services/core/src/ipc/mod.rs):
+   ```rust
+   pub enum ServiceEvent {
+       // ... existing
+       #[cfg(feature = "player")]
+       LatencyAlert { latency_ms: u32 },
+   }
+   ```
+3. **Map Event**: Add the conversion inside `client_event_to_service` in `ipc/mod.rs`:
+   ```rust
+   client_session::ClientEvent::LatencyAlert { latency_ms } => {
+       ServiceEvent::LatencyAlert { latency_ms }
+   }
+   ```
+4. **Listen in React**: Listen to this event inside [apps/ui/src/pages/Client.tsx](file:///c:/Users/JAISINGH/.gemini/antigravity/scratch/lanshare/apps/ui/src/pages/Client.tsx):
+   ```typescript
+   import { listen } from '@tauri-apps/api/event';
+   
+   useEffect(() => {
+     const unlisten = listen<{ latency_ms: number }>('latency_alert', (event) => {
+       console.log("High latency detected:", event.payload.latency_ms);
+     });
+     return () => { unlisten.then(f => f()); };
+   }, []);
+   ```
 
 ---
 
-## ⚙️ Configuration
-
-### First-Time Setup
-
-On first launch, Beacon walks through an interactive setup:
-
-1. **Windows Startup** — Auto-start Beacon when Windows boots
-2. **Unattended Mode** — Secure password-protected remote access
-3. **Remote Control** — Allow/deny keyboard and mouse input from players
-
-### Settings Menu
-
-Access anytime via the main menu → **[2] Configuration Settings**:
-
-```
-    [1] Windows Startup App:    ENABLED / DISABLED
-    [2] Unattended Mode:        ENABLED / DISABLED
-    [3] Keyboard/Mouse Control: ENABLED / DISABLED
-    [4] Back to Main Menu
-```
-
-### Recommended Network Settings
-
-| Setting | Recommendation |
-|---------|---------------|
-| Connection | Wired Gigabit Ethernet or 5 GHz WiFi-6 |
-| Bitrate | 20–30 Mbps for crisp text, 10–15 Mbps for general use |
-| FPS | 60 for interactive use, 30 for presentations |
-| Encoding | Automatic hardware encoding (NVENC / AMD AMF / Intel QSV) |
-
----
-
-## 🛠️ Building from Source
+## 🏗️ Building from Source
 
 ### Prerequisites
 
 - **Rust** 1.77+ — [Install Rust](https://rustup.rs/)
+- **Node.js** 18+ — [Install Node](https://nodejs.org/)
 - **Windows 10/11** with C++ Build Tools (Visual Studio Installer)
-- **.NET Framework 4.x** (for compiling the standalone installers)
+- **.NET Framework 4.x** (for compiling the self-extracting installers)
 
-### Build
+### 1. Build Rust Service Binaries
 
 ```powershell
 # Clone the repository
@@ -262,31 +324,23 @@ cd beacon-pulse
 # Build in release mode
 cargo build --release
 
-# Binaries output to:
+# Binaries output to target/release/
 #   target/release/beacon.exe
 #   target/release/beacon-watchdog.exe
 #   target/release/pulse.exe
 ```
 
-### Build Standalone Installers
+### 2. Build Tauri Frontend App
 
 ```powershell
-# Copy binaries to installer directories
-copy target\release\beacon.exe installer\host\
-copy target\release\beacon-watchdog.exe installer\host\
-copy target\release\pulse.exe installer\player\
+cd apps/ui
+npm install
 
-# Compile self-extracting installers
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
-  /out:installer\host\BeaconSetup.exe `
-  /resource:installer\host\beacon.exe,beacon.exe `
-  /resource:installer\host\beacon-watchdog.exe,beacon-watchdog.exe `
-  installer\BeaconSetup.cs
+# Run frontend in development mode
+npm run dev
 
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
-  /out:installer\player\PulseSetup.exe `
-  /resource:installer\player\pulse.exe,pulse.exe `
-  installer\player\PulseSetup.cs
+# Compile React and bundle Tauri installers (requires Wix Toolset for MSI bundles)
+npm run tauri build
 ```
 
 ---
@@ -312,7 +366,7 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 **Bug Fixes & Security**
 - **UDP Out-of-Order Packet Loss Tracking** — implemented a sliding-window sequence tracker (`SeqTracker`) using a `u64` bitmask. This resolves inflated packet loss reports caused by out-of-order UDP packet delivery, allowing the adaptive bitrate controller to sustain high-quality streaming on jittery local networks.
 - **Alt+F4 Hotkey Support** — corrected player window input capture behavior by delegating `WM_SYSKEYDOWN` + `VK_F4` events back to the default window procedure, enabling standard Alt+F4 closure functionality.
-- **Password-Protected Unattended Access** — introduced secure challenge-response validation using a persistent unattended access password stored in the Registry (`UnattendedPin`). This replaces the unsecured connection flow in unattended mode while remaining fully backward-compatible with the HMAC-SHA256 handshake protocol.
+- **Password-Protected Unattended Access** — introduced challenge-response validation using a persistent access password stored in the Registry (`UnattendedPin`). This replaces the unsecured connection flow in unattended mode while remaining fully backward-compatible with the HMAC-SHA256 handshake protocol.
 
 ### v1.0.5 (2026-06-02)
 
@@ -330,44 +384,6 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe `
 - **Fixed keyboard layouts and extended keys** — added JS `KeyboardEvent.code` lookup table in the Tauri UI client to ensure correct scan codes and extended key flags (`is_extended`) are sent.
 - **Fixed mouse aspect-ratio coordinates** — corrected mouse clicks and movements on the client canvas by dynamically discounting letterbox/pillarbox margins.
 
-**Improvements**
-- **Registry Synchronization** — connected Tauri settings directly to the Windows registry configuration, enabling UI changes to persist across background services.
-- **Automated Verification** — implemented ring buffer dropping verification unit tests.
-
-### v1.0.3 (2026-05-29)
-
-**Bug Fixes**
-- **Fixed system tray "Change Shared Window"** — now properly kills the old beacon session and watchdog before restarting, preventing port conflicts and ghost sessions
-- **Fixed "Exit Sharing" tray menu** — now kills the watchdog so it doesn't auto-restart beacon after exit
-- **Fixed connection reliability** — resolved TCP port 45101 binding failures when restarting sessions
-- **Fixed host keyboard unresponsiveness/freezes** — implemented layout-independent scan-code input injection and extended key flag support (`WM_SYSKEYDOWN`, arrow keys, right Alt/Ctrl)
-- **Prevented stuck keys on client disconnect** — implemented automatic key-release cleanup guard that automatically clears any stuck key states on connection drop
-- **Isolated local loopback feedback loops** — tagged injected inputs with a custom signature (`0xBEAC0D`) to prevent infinite input storms when testing locally
-
-**Improvements**
-- **Display sharing mode** — share an entire monitor instead of a single window
-- **Multi-window grid mode** — share multiple windows composited into a grid layout
-- **Dual-window side-by-side mode** — share two windows in a split-screen layout
-- **D3D11 Video Processor caching** — reduced GPU allocation overhead during capture
-- **Capture recovery cooldown** — 2-second cooldown prevents rapid recovery loops
-- **Improved watchdog** — registry-driven configuration with exponential back-off crash recovery
-- **Standalone installers** — self-extracting `.exe` installers for both Beacon and Pulse
-
-### v1.0.2 (2026-05-27)
-
-- Hardware-accelerated H.264 encoding via Windows Media Foundation
-- Zero-copy GPU capture via Windows Graphics Capture API
-- Async LAN host discovery (mDNS + UDP broadcast + subnet scan)
-- Named Pipe IPC for UI integration
-- Interactive console menu with configuration settings
-
-### v1.0.0 (2026-05-26)
-
-- Initial release
-- Basic screen sharing with pairing codes
-- Remote keyboard and mouse control
-- Clipboard synchronization
-
 ---
 
 ## 📝 License
@@ -378,7 +394,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 <div align="center">
 
-**Made with ❤️ in Rust**
+**Made with ❤️ in Rust & React**
 
 [Report a Bug](https://github.com/adarsh0044321/beacon-pulse/issues) · [Request a Feature](https://github.com/adarsh0044321/beacon-pulse/issues)
 
