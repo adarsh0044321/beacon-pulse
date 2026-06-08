@@ -1,9 +1,0 @@
-# Workspace-wide Cargo configuration
-
-# ── Static CRT linking (Windows MSVC) ─────────────────────────────────────────
-# Statically link VCRUNTIME140.dll and MSVCRT into every binary so that
-# the produced EXEs are fully self-contained and do NOT require the user to
-# have the Visual C++ Redistributable installed on their machine.
-# This fixes "VCRUNTIME140.dll was not found" errors on clean Windows installs.
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]

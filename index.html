@@ -4,493 +4,706 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/beacon-pulse/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Beacon & Pulse — LAN Remote Desktop OS Workspace</title>
+    <title>Beacon & Pulse — Low-Latency LAN Screen Sharing Engine</title>
     <!-- Premium Display Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/beacon-pulse/assets/index-BshGTUwi.js"></script>
-    <link rel="stylesheet" crossorigin href="/beacon-pulse/assets/index-D3uNcRRE.css">
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700;800&family=Syne:wght@700;800&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/beacon-pulse/assets/index-DEmvZkHC.js"></script>
+    <link rel="stylesheet" crossorigin href="/beacon-pulse/assets/index-BtZJG_1m.css">
   </head>
-  <body class="bg-[#050508] text-slate-300 font-sans antialiased h-screen w-screen overflow-hidden select-none">
+  <body class="bg-[#040407] text-slate-300 font-sans antialiased h-screen w-screen overflow-hidden select-none">
     
-    <!-- Background Canvas Simulation -->
-    <canvas id="ambient-canvas" class="fixed inset-0 pointer-events-none z-0 opacity-40"></canvas>
+    <!-- Ambient Particles Background -->
+    <canvas id="ambient-canvas" class="fixed inset-0 pointer-events-none z-0 opacity-30"></canvas>
 
-    <!-- Main Desktop Grid Workspace (height subtracts taskbar) -->
-    <div id="desktop-workspace" class="os-desktop-workspace relative z-10 w-full p-8 flex flex-col items-start gap-4">
+    <!-- ==========================================
+       MAIN HOMEPAGE LANDING PAGE (INITIALLY SHOWN)
+       ========================================== -->
+    <div id="landing-page" class="absolute inset-0 z-20 w-full h-full overflow-y-auto bg-[#040407]/90 backdrop-blur-md flex flex-col transition-all duration-700 opacity-100 transform">
       
-      <!-- DESKTOP SHORTCUT ICONS -->
-      <!-- Icon 1: Readme overview (Custom line-art folder/document) -->
-      <div class="os-icon-shortcut group" data-open-win="win-overview">
-        <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18V6a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 6v1.5H12V7.5Z"/>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">Guide.txt</span>
-      </div>
-
-      <!-- Icon 2: Pulse Player Client (Custom frequency target analyzer) -->
-      <div class="os-icon-shortcut group animate-[pulse-light_3.5s_infinite]" data-open-win="win-pulse">
-        <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h2l1.5-3 1 6 1-4 1.5 1h3"/>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">pulse.exe</span>
-      </div>
-
-      <!-- Icon 3: Beacon Host Server (Custom micro-dish signal reflector) -->
-      <div class="os-icon-shortcut group" data-open-win="win-beacon">
-        <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 0 0 9-9M12 21a9 9 0 0 1-9-9m9 9v-4.5m0-1.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0v-1.5m6-3a6 6 0 0 0-12 0"/>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">beacon.rs</span>
-      </div>
-
-      <!-- Icon 4: SVG Flow Architecture (Custom integrated logic circuit) -->
-      <div class="os-icon-shortcut group" data-open-win="win-pipeline">
-        <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="5" y="5" width="14" height="14" rx="3"/>
-            <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">pipeline.sys</span>
-      </div>
-
-      <!-- Icon 5: Launch configurations config (Custom hexagonal hex shell badge) -->
-      <div class="os-icon-shortcut group" data-open-win="win-config">
-        <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2Z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10.5h6M9 13.5h6"/>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">cli_config.cfg</span>
-      </div>
-
-      <!-- Icon 6: GitHub External Link -->
-      <a href="https://github.com/adarsh0044321/beacon-pulse" target="_blank" class="os-icon-shortcut group">
-        <div class="w-12 h-12 rounded-xl bg-slate-500/5 border border-slate-500/15 group-hover:bg-slate-500/15 flex items-center justify-center text-slate-400 group-hover:scale-105 transition-all shadow mb-2">
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"></path>
-          </svg>
-        </div>
-        <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-slate-200 truncate max-w-full text-center">GitHub.lnk</span>
-      </a>
-
-
-      <!-- DRAGGABLE WINDOWS PANELS -->
-      <!-- Window 1: Overview System Guide -->
-      <div id="win-overview" class="os-window os-window-active absolute spotlight-card shadow-2xl" style="top: 30px; left: 160px; width: 440px; height: 420px; z-index: 100;">
-        <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
-          <!-- Windows macOS dots chromes -->
-          <div class="flex items-center space-x-1.5">
-            <button class="win-btn-close win-dot-red" title="Close"></button>
-            <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
-            <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+      <!-- Top Navigation -->
+      <nav class="sticky top-0 z-50 w-full border-b border-white/5 bg-[#040407]/75 backdrop-blur-xl px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black">
+            📡
           </div>
-          <span class="text-slate-400 font-bold">system_guide.txt</span>
-          <div class="w-12"></div> <!-- spacer to align center -->
-        </div>
-        <div class="p-6 h-[calc(100%-38px)] overflow-y-auto font-sans leading-relaxed select-text space-y-5 text-slate-400">
-          <div class="space-y-2 border-b border-white/5 pb-3">
-            <h1 class="text-2xl font-black text-white tracking-tight font-display">BEACON & PULSE</h1>
-            <p class="text-[9px] font-mono uppercase tracking-widest text-amber-500">Decoupled LAN Remote Control Protocol</p>
-          </div>
-          <div class="text-xs space-y-4">
-            <p>
-              Beacon & Pulse is a developer-centric performance system written in Rust, engineered to bypass the latency constraints of traditional remote screen mirroring.
-            </p>
-            <h3 class="font-bold text-white uppercase font-display text-sm tracking-wide">Strategic Advantages</h3>
-            <ul class="list-disc pl-5 space-y-2.5 font-light text-slate-400 text-[11px]">
-              <li><strong class="text-slate-300">Windows Graphics Capture:</strong> Locks frame buffers inside GPU VRAM, eliminating expensive copies back and forth to standard system RAM.</li>
-              <li><strong class="text-slate-300">Hardware H.264 Accelerators:</strong> Pulls direct encoding pipelines on physical GPU frames (AMF/NVENC/Intel QSV) yielding sub-millisecond compression.</li>
-              <li><strong class="text-slate-300">TLS 1.3 Security Handshakes:</strong> Encrypts control and keystroke streams via <code class="bg-white/5 px-1 py-0.5 rounded text-[10px]">rustls</code> using secure dynamic keys.</li>
-            </ul>
-            <div class="pt-2">
-              <a href="https://github.com/adarsh0044321/beacon-pulse/releases/latest" target="_blank" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold tracking-tight text-[11px] shadow shadow-amber-500/20">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-                <span>Download Assets</span>
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Window 2: Pulse Player Client Simulator -->
-      <div id="win-pulse" class="os-window absolute spotlight-card shadow-2xl" style="top: 50px; left: 240px; width: 620px; height: 490px; z-index: 90;">
-        <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
-          <div class="flex items-center space-x-1.5">
-            <button class="win-btn-close win-dot-red" title="Close"></button>
-            <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
-            <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
-          </div>
-          <span class="text-slate-400 font-bold">pulse_viewer.exe (Direct Blit client)</span>
-          <div class="flex items-center space-x-2.5">
-            <div id="sim-status-indicator" class="w-2 h-2 rounded-full bg-rose-500"></div>
-            <span id="sim-status-text" class="text-[9px] uppercase tracking-wider text-rose-500 font-bold mr-2 select-none">Offline</span>
-          </div>
+          <span class="text-xs font-mono tracking-widest text-white font-extrabold uppercase">Beacon & Pulse</span>
         </div>
         
-        <!-- Viewer Body Switcher -->
-        <div id="viewer-viewport" class="p-6 h-[calc(100%-38px)] flex flex-col items-center justify-center relative select-none bg-[#030305]/95">
+        <div class="hidden md:flex items-center space-x-8 text-xs font-mono text-slate-400">
+          <a href="#features" class="hover:text-amber-500 transition">Features</a>
+          <a href="#architecture" class="hover:text-amber-500 transition">Architecture</a>
+          <a href="#download" class="hover:text-amber-500 transition">Download</a>
+        </div>
+        
+        <button class="launch-playground-btn px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 font-mono text-[10px] uppercase tracking-wider transition-all">
+          Launch Playground
+        </button>
+      </nav>
+
+      <!-- Hero Section -->
+      <section class="relative max-w-6xl mx-auto px-6 pt-16 pb-20 text-center flex flex-col items-center justify-center z-10">
+        <!-- Glow accents -->
+        <div class="absolute -top-12 left-1/2 -translate-x-1/2 w-72 h-72 bg-amber-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[9px] font-mono tracking-widest uppercase text-amber-500 mb-6">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+          <span>Bypassing VRAM to RAM Bottlenecks</span>
+        </div>
+
+        <h1 class="text-4xl sm:text-6xl font-black text-white tracking-tight uppercase leading-none font-display max-w-4xl text-glow-amber">
+          BEACON & PULSE:<br class="hidden sm:inline" /> Low-Latency LAN Screen Sharing Engine
+        </h1>
+        
+        <p class="mt-6 text-sm sm:text-base text-slate-400 font-light max-w-2xl leading-relaxed">
+          A high-performance remote desktop streaming and input control pipeline built entirely in Rust. Bypasses standard system copy operations to stream directly from GPU video memories to players at <span class="text-white font-semibold">60 FPS under 1.5ms latency</span>.
+        </p>
+
+        <div class="mt-10 flex flex-col sm:flex-row gap-4 items-center justify-center">
+          <button class="launch-playground-btn px-8 py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-500/15 hover:scale-102 active:scale-98">
+            Launch Simulation Workspace
+          </button>
+          <a href="https://github.com/adarsh0044321/beacon-pulse" target="_blank" class="px-8 py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 hover:text-white font-mono text-xs uppercase tracking-wider transition-all flex items-center space-x-2">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"></path></svg>
+            <span>GitHub Code</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- Latency Performance comparison metrics -->
+      <section class="max-w-6xl mx-auto px-6 py-12 w-full z-10">
+        <h3 class="text-xs font-mono uppercase tracking-widest text-slate-500 mb-8 border-b border-white/5 pb-2 text-center md:text-left">Engine Benchmarks</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           
-          <!-- STATE 1: Disconnected Connect Portal -->
-          <div id="sim-view-disconnected" class="text-center max-w-xs flex flex-col items-center">
-            <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-amber-500 mb-5 shadow shadow-amber-500/5">
-              <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
-                <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h2l1.5-3 1 6 1-4 1.5 1h3"/>
-              </svg>
-            </div>
-            <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-2 font-mono">Connect Remote Session</h3>
-            <p class="text-[10px] text-slate-400 mb-5 font-light">Scan subnets or interface with a listening host encoder thread.</p>
-            <button id="sim-btn-connect" class="px-6 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] uppercase tracking-wider transition-all shadow-md shadow-amber-500/10">
-              Scan Interfaces
-            </button>
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#08080c]/50 backdrop-blur">
+            <span class="text-[9px] font-mono uppercase text-amber-500">Capture Encoding Latency</span>
+            <div class="text-4xl font-extrabold text-white mt-2 font-display">1.3 <span class="text-xs font-mono text-slate-500">ms</span></div>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Direct3D11 hardware buffers compressed on-GPU via native NVENC/AMF media engines before pipeline dispatch.</p>
           </div>
 
-          <!-- STATE 2: LAN Scanning -->
-          <div id="sim-view-scanning" class="w-full max-w-sm hidden text-left font-mono text-[10px]">
-            <div class="mb-2.5 text-amber-500 flex items-center justify-between">
-              <span>Scanning: 192.168.1.1 - 254</span>
-              <span class="animate-pulse">scanning...</span>
-            </div>
-            <div class="h-1 w-full rounded-full bg-white/5 overflow-hidden mb-5">
-              <div id="sim-scan-progress" class="h-full bg-gradient-to-r from-amber-600 to-amber-400 w-0 transition-all duration-300"></div>
-            </div>
-            <div id="sim-discovered-list" class="space-y-2 max-h-36 overflow-y-auto pr-1">
-              <div class="text-slate-600">Querying subnet sockets...</div>
-            </div>
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#08080c]/50 backdrop-blur">
+            <span class="text-[9px] font-mono uppercase text-amber-500">Video Render Rate</span>
+            <div class="text-4xl font-extrabold text-white mt-2 font-display">60 / 120 <span class="text-xs font-mono text-slate-500">FPS</span></div>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Continuous hardware framerate constraints matched dynamically to display refreshing caps.</p>
           </div>
 
-          <!-- STATE 3: OTP Authentication Pair Code entry -->
-          <div id="sim-view-pairing" class="w-full max-w-xs hidden text-center font-mono">
-            <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-2">TLS SECURE PAIRING</h3>
-            <p class="text-[10px] text-slate-400 mb-5 font-light">Input the temporary auth key showing on the host terminal.</p>
-            <div class="flex items-center justify-center space-x-1.5 mb-6">
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-              <div class="text-slate-600 font-bold select-none">-</div>
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-              <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
-            </div>
-            <div class="flex gap-2 text-[10px]">
-              <button id="sim-btn-back-to-list" class="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 transition">Back</button>
-              <button id="sim-btn-verify" class="flex-grow py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold uppercase transition">Pair Link</button>
-            </div>
-          </div>
-
-          <!-- STATE 4: Live Connected Stream Viewport -->
-          <div id="sim-view-connected" class="w-full h-full hidden flex flex-col p-1 relative overflow-hidden">
-            <!-- Telemetry overlay -->
-            <div class="flex items-center justify-between px-3 py-1.5 bg-[#07070b]/95 backdrop-blur rounded-lg border border-white/5 text-[9px] font-mono text-slate-400 mb-2">
-              <div class="flex items-center space-x-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>STREAM: <span id="metric-fps">60</span> FPS</span>
-              </div>
-              <div>RTT: <span id="metric-rtt" class="text-amber-500">1.3 ms</span></div>
-              <div>RATE: <span id="metric-bitrate">20.4 Mbps</span></div>
-              <div>LOSS: <span id="metric-loss" class="text-emerald-400">0%</span></div>
-            </div>
-
-            <!-- Virtual display screen canvas -->
-            <div id="sim-stream-container" class="flex-grow rounded-lg bg-black border border-white/5 overflow-hidden relative cursor-crosshair">
-              <canvas id="sim-stream-canvas" class="w-full h-full object-cover"></canvas>
-
-              <!-- Drag files block overlay zone -->
-              <div id="sim-drag-drop-zone" class="absolute inset-1.5 bg-amber-950/60 border-2 border-dashed border-amber-500/40 rounded-lg flex items-center justify-center pointer-events-auto opacity-0 hover:opacity-100 transition-opacity">
-                <div class="text-center text-[10px] p-4">
-                  <svg class="w-5 h-5 text-amber-400 mx-auto mb-1 animate-bounce" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"/></svg>
-                  <span class="font-bold text-amber-300">Drop files to send</span>
-                </div>
-              </div>
-
-              <!-- Fake cursor indicator -->
-              <div id="sim-cursor-pointer" class="absolute w-3 h-3 rounded-full bg-amber-400 border border-white pointer-events-none -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity"></div>
-            </div>
-
-            <!-- Bottom utility interaction bars -->
-            <div class="mt-2.5 flex items-center gap-2">
-              <button id="sim-btn-sync-clipboard" class="flex-1 py-2 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-semibold flex items-center justify-center space-x-1.5 text-slate-300 transition">
-                <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5.25h1.5m4.72-2.224c-.22-.058-.451-.086-.68-.086L10.5 3c-.229 0-.46.028-.68.086a3.375 3.375 0 00-2.453 2.453c-.058.22-.086.451-.086.68v2.292m0-3h9v-2.292c0-.229-.028-.46-.086-.68a3.375 3.375 0 00-2.453-2.453ZM12 10.5a1.5 1.5 0 11-3 0 1.5 1.5 0 0 1 3 0Z"/></svg>
-                <span>Sync Clipboard</span>
-              </button>
-              <button id="sim-btn-send-file" class="flex-1 py-2 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-semibold flex items-center justify-center space-x-1.5 text-slate-300 transition">
-                <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25"/></svg>
-                <span>Inject File</span>
-              </button>
-              <button id="sim-btn-disconnect" class="py-2 px-4 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/25 text-rose-400 text-[10px] font-bold transition">
-                Disconnect
-              </button>
-            </div>
-
-            <!-- Upload toast success card -->
-            <div id="file-toast" class="absolute bottom-12 right-2 px-3 py-2 rounded-lg bg-slate-900 border border-emerald-500/30 text-emerald-400 text-[9px] font-mono flex items-center space-x-2 shadow-xl transform translate-y-8 opacity-0 pointer-events-none transition-all duration-300">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m4.5 12.75 6 6 9-13.5"/></svg>
-              <span>SHA-256 integrity match. Block write OK.</span>
-            </div>
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#08080c]/50 backdrop-blur">
+            <span class="text-[9px] font-mono uppercase text-amber-500">Recovery Re-transmission</span>
+            <div class="text-4xl font-extrabold text-white mt-2 font-display">0 <span class="text-xs font-mono text-slate-500">ms</span></div>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Active Forward Error Correction (FEC) recalculates lost packets on the player client without TCP-like roundtrip timeouts.</p>
           </div>
 
         </div>
-      </div>
+      </section>
 
-      <!-- Window 3: Beacon Host service logs -->
-      <div id="win-beacon" class="os-window absolute spotlight-card shadow-2xl" style="top: 290px; left: 100px; width: 420px; height: 290px; z-index: 85;">
-        <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
-          <div class="flex items-center space-x-1.5">
-            <button class="win-btn-close win-dot-red" title="Close"></button>
-            <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
-            <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
-          </div>
-          <span class="text-slate-400 font-bold">beacon_service.rs (Host Capture)</span>
-          <div class="flex items-center space-x-2.5">
-            <div id="host-status-indicator" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-            <span id="host-status-text" class="text-[9px] uppercase tracking-wider text-amber-500 font-bold mr-2 select-none">Listening</span>
-          </div>
-        </div>
-        <div class="p-4 h-[calc(100%-38px)] flex flex-col justify-between bg-[#030305]/95 font-mono text-[10px] text-slate-500 select-text leading-relaxed">
-          <div id="host-terminal-logs" class="space-y-1.5 overflow-y-auto max-h-[170px] pr-1">
-            <div>[10:14:58] INFO: Starting WGC frame capture loop...</div>
-            <div>[10:14:59] INFO: GPU DXGI Direct3D11 surface bound</div>
-            <div>[10:14:59] INFO: DNS-SD discovery active on subnet range</div>
-            <div class="text-slate-400 font-semibold">[10:15:00] INFO: Listening for TLS links on TCP :45101</div>
-          </div>
-          
-          <!-- Key details output -->
-          <div id="host-pairing-card" class="mt-2.5 pt-2.5 border-t border-white/5 flex items-center justify-between">
-            <span class="text-[9px] uppercase tracking-widest text-slate-600">Dynamic OTP Key</span>
-            <div class="flex items-center space-x-1.5 font-bold text-white tracking-widest text-sm">
-              <span id="host-code-1">582</span>
-              <span class="text-amber-500/80">-</span>
-              <span id="host-code-2">914</span>
+      <!-- Detailed Features Grid Section -->
+      <section id="features" class="max-w-6xl mx-auto px-6 py-16 w-full z-10">
+        <h3 class="text-xs font-mono uppercase tracking-widest text-slate-500 mb-8 border-b border-white/5 pb-2 text-center md:text-left">Core Capabilities</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              ⚡
             </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Zero-Copy GPU capture</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Locks screen surface handles directly inside Windows VRAM, bypassing standard system RAM memory copy cycles entirely.</p>
           </div>
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              🖱️
+            </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Scan-Code Input Injection</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Maps player inputs directly to physical keyboard scan codes. Works layout-independently with absolute zero keystroke delays.</p>
+          </div>
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              🔒
+            </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">TLS 1.3 Control channel</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Secures keystrokes, clipboard buffers, and file transfer streams over authenticated TLS channels with dynamically rotated local keys.</p>
+          </div>
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              🌐
+            </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Offline Auto-Discovery</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Finds sharing hosts over local networks using parallel browse cycles: mDNS, UDP broadcasts, and async subnet scanners.</p>
+          </div>
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              🛡️
+            </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Supervisor Watchdog</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Ensures remote session persistence via a separate watchdog daemon that monitors and auto-restores crashes with exponential back-off.</p>
+          </div>
+
+          <div class="p-6 rounded-2xl border border-white/5 bg-[#060609]/70 hover:border-amber-500/20 transition-all duration-300">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              📊
+            </div>
+            <h4 class="text-sm font-bold text-white uppercase tracking-wider font-mono">Client Telemetry Sync</h4>
+            <p class="text-[11px] text-slate-400 mt-2 font-light leading-relaxed">Measures round-trip time via RTCP probe packet echo loops. Calculates bitrates dynamically and updates real-time player HUD displays.</p>
+          </div>
+
         </div>
-      </div>
+      </section>
 
-      <!-- Window 4: Interactive Architecture Diagram -->
-      <div id="win-pipeline" class="os-window absolute spotlight-card shadow-2xl" style="top: 240px; left: 520px; width: 680px; height: 380px; z-index: 80;">
-        <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
-          <div class="flex items-center space-x-1.5">
-            <button class="win-btn-close win-dot-red" title="Close"></button>
-            <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
-            <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
-          </div>
-          <span class="text-slate-400 font-bold">pipeline_architecture.sys</span>
-          <div class="w-12"></div>
-        </div>
-        <div class="p-6 h-[calc(100%-38px)] grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-[#030305]/95">
-          
-          <!-- SVG Graph -->
-          <div class="lg:col-span-7 flex justify-center">
-            <svg class="w-full max-w-sm" viewBox="0 0 540 320" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="amber-rust" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stop-color="#f59e0b" />
-                  <stop offset="100%" stop-color="#ea580c" />
-                </linearGradient>
-              </defs>
-              
-              <!-- Connection pathways -->
-              <path d="M100 80 H220" stroke="url(#amber-rust)" stroke-dasharray="8 10" stroke-width="2" class="opacity-70 animate-[dash_4s_linear_infinite]" />
-              <path d="M220 80 C270 80 270 120 320 120" stroke="#f59e0b" stroke-dasharray="6 14" stroke-width="1.5" class="opacity-60 animate-[dash_3s_linear_infinite]" />
-              <path d="M220 240 C270 240 270 200 320 200" stroke="#ea580c" stroke-dasharray="6 14" stroke-width="1.5" class="opacity-60 animate-[dash_3s_linear_infinite]" />
-              <path d="M320 120 C370 120 370 160 420 160" stroke="url(#amber-rust)" stroke-dasharray="8 10" stroke-width="2" class="opacity-70 animate-[dash_2.5s_linear_infinite]" />
-
-              <!-- Active click targets -->
-              <g data-node="wgc" class="arch-node cursor-pointer group">
-                <rect x="20" y="50" width="80" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="60" y="80" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">WGC</text>
-                <text x="60" y="92" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">wgc.rs</text>
-              </g>
-
-              <g data-node="encoder" class="arch-node cursor-pointer group">
-                <rect x="20" y="210" width="80" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="60" y="240" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">ENCODER</text>
-                <text x="60" y="252" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">encode.rs</text>
-              </g>
-
-              <g data-node="udp" class="arch-node cursor-pointer group">
-                <rect x="220" y="90" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="270" y="120" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">UDP STREAM</text>
-                <text x="270" y="132" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">rtp::Sender</text>
-              </g>
-
-              <g data-node="tcp" class="arch-node cursor-pointer group">
-                <rect x="220" y="170" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="270" y="200" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">TLS CONTROL</text>
-                <text x="270" y="212" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">listener.rs</text>
-              </g>
-
-              <g data-node="decoder" class="arch-node cursor-pointer group">
-                <rect x="420" y="50" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="470" y="80" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">DECODER</text>
-                <text x="470" y="92" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">decoder.rs</text>
-              </g>
-
-              <g data-node="renderer" class="arch-node cursor-pointer group">
-                <rect x="420" y="210" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
-                <text x="470" y="240" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">DIRECT BLIT</text>
-                <text x="470" y="252" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">render::Blit</text>
-              </g>
-            </svg>
-          </div>
-
-          <!-- Description HUD -->
-          <div class="lg:col-span-5 h-full flex flex-col justify-center">
-            <div class="p-4 rounded-xl border border-white/5 bg-[#040407]/80 font-mono text-[10px] text-slate-400">
-              <div class="flex items-center space-x-1.5 text-amber-500 font-bold mb-2 uppercase text-[9px]" id="arch-detail-title">
-                <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                <span>Select Node</span>
-              </div>
-              <p class="leading-relaxed text-[10px]" id="arch-detail-desc">
-                Click any core block on the left schematic map flow to trace Direct3D capture mappings and frame processing buffers.
+      <!-- Architecture schematic explanations -->
+      <section id="architecture" class="max-w-6xl mx-auto px-6 py-16 w-full z-10">
+        <h3 class="text-xs font-mono uppercase tracking-widest text-slate-500 mb-8 border-b border-white/5 pb-2 text-center md:text-left">How It Works</h3>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div class="lg:col-span-5 space-y-6">
+            <div class="space-y-2">
+              <h4 class="text-2xl font-extrabold text-white font-display uppercase tracking-tight">The Data Transmission Loop</h4>
+              <p class="text-xs text-slate-400 font-light leading-relaxed">
+                Traditional remote desktop protocols are bottlenecked by CPU copying steps. Beacon & Pulse bypasses these layers by linking directly to GPU memory buffers.
               </p>
             </div>
-          </div>
+            
+            <div class="space-y-4 font-mono text-[10px]">
+              <div class="flex items-start space-x-3">
+                <span class="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-[9px] border border-amber-500/20 mt-0.5 select-none">1</span>
+                <div>
+                  <h5 class="text-white font-semibold uppercase text-[9px]">Windows graphics capture</h5>
+                  <p class="text-slate-500 mt-0.5 leading-relaxed font-light">COM bindings retrieve Direct3D11 surface descriptors directly from the compositor namespace.</p>
+                </div>
+              </div>
 
-        </div>
-      </div>
+              <div class="flex items-start space-x-3">
+                <span class="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-[9px] border border-amber-500/20 mt-0.5 select-none">2</span>
+                <div>
+                  <h5 class="text-white font-semibold uppercase text-[9px]">Hardware Compression</h5>
+                  <p class="text-slate-500 mt-0.5 leading-relaxed font-light">GPU encoders compress textures to H.264 slice streams in under 1.5ms using hardware chips (NVENC/AMF/QSV).</p>
+                </div>
+              </div>
 
-      <!-- Window 5: CLI generator config parameters -->
-      <div id="win-config" class="os-window absolute spotlight-card shadow-2xl" style="top: 150px; left: 680px; width: 500px; height: 350px; z-index: 75;">
-        <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
-          <div class="flex items-center space-x-1.5">
-            <button class="win-btn-close win-dot-red" title="Close"></button>
-            <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
-            <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+              <div class="flex items-start space-x-3">
+                <span class="w-5 h-5 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold text-[9px] border border-amber-500/20 mt-0.5 select-none">3</span>
+                <div>
+                  <h5 class="text-white font-semibold uppercase text-[9px]">RTP packetization & FEC</h5>
+                  <p class="text-slate-500 mt-0.5 leading-relaxed font-light">Frames are packetized into RTP fragments. Parity packets are calculated via XOR blocks to handle UDP network losses immediately.</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <span class="text-slate-400 font-bold">cli_launcher_config.cfg</span>
-          <div class="w-12"></div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 h-[calc(100%-38px)] bg-[#030305]/95">
           
-          <!-- Parameters parameters -->
-          <div class="space-y-3.5 font-mono text-[10px] flex flex-col justify-between">
-            <div class="space-y-3">
-              <div class="flex rounded-lg bg-white/5 p-0.5 border border-white/5">
-                <button id="cli-tab-host" class="flex-grow py-1.5 text-[9px] font-bold rounded-md bg-amber-600 text-slate-950 transition-all">HOST</button>
-                <button id="cli-tab-player" class="flex-grow py-1.5 text-[9px] font-bold rounded-md text-slate-400 hover:text-white transition-all">PLAYER</button>
-              </div>
-
-              <div id="cli-opt-target" class="space-y-1">
-                <label class="text-[8px] uppercase tracking-wider text-slate-500">Capture Source</label>
-                <select id="cli-input-target" class="w-full bg-[#050508] border border-white/5 rounded-lg py-1.5 px-2 text-slate-200 focus:outline-none focus:border-amber-500">
-                  <option value='--window "Chrome"'>Chrome Window</option>
-                  <option value='--window "Visual Studio Code"'>VS Code Window</option>
-                  <option value='--display 1'>Monitor Display 1</option>
-                </select>
-              </div>
-
-              <div id="cli-opt-bitrate" class="space-y-1">
-                <div class="flex justify-between items-center text-[8px] uppercase text-slate-500">
-                  <span>Bandwidth Limit</span>
-                  <span class="text-amber-500 font-bold"><span id="cli-lbl-bitrate">20</span> Mbps</span>
-                </div>
-                <input type="range" id="cli-input-bitrate" min="5" max="50" step="5" value="20" class="w-full h-1 bg-[#050508] rounded-lg appearance-none cursor-pointer accent-amber-500" />
-              </div>
-
-              <div id="cli-opt-fps" class="space-y-1">
-                <label class="text-[8px] uppercase tracking-wider text-slate-500">Refresh Cap</label>
-                <div class="grid grid-cols-3 gap-1">
-                  <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-white/5 bg-[#050508] text-slate-400 font-bold hover:border-white/10" data-value="30">30 FPS</button>
-                  <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-amber-500 bg-amber-950/20 text-amber-500 font-bold" data-value="60">60 FPS</button>
-                  <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-white/5 bg-[#050508] text-slate-400 font-bold hover:border-white/10" data-value="120">120 FPS</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Sync Toggle -->
-            <div id="cli-opt-clipboard" class="flex justify-between items-center pt-2 border-t border-white/5">
-              <span class="text-[9px] text-slate-400">Sync Clipboard</span>
-              <button id="cli-toggle-clipboard" class="w-8 h-4.5 rounded-full bg-amber-600 p-0.5 transition-all focus:outline-none flex items-center justify-end">
-                <span class="w-3.5 h-3.5 rounded-full bg-white transition-transform"></span>
-              </button>
-            </div>
+          <div class="lg:col-span-7 p-6 rounded-2xl border border-white/5 bg-[#060609]/40 backdrop-blur flex justify-center">
+            <!-- Flow illustration svg -->
+            <svg class="w-full max-w-md" viewBox="0 0 450 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M60 100 H160" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 4" class="animate-[dash_5s_linear_infinite]" />
+              <path d="M160 100 H290" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 8" class="animate-[dash_3.5s_linear_infinite]" />
+              <path d="M290 100 H390" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="4 4" class="animate-[dash_5s_linear_infinite]" />
+              
+              <rect x="10" y="75" width="50" height="50" rx="8" fill="#090a0f" stroke="rgba(245,158,11,0.2)" />
+              <text x="35" y="105" fill="#fff" font-family="var(--font-mono)" font-size="8" text-anchor="middle" font-weight="bold">GPU</text>
+              
+              <rect x="160" y="70" width="80" height="60" rx="10" fill="#090a0f" stroke="rgba(245,158,11,0.3)" />
+              <text x="200" y="100" fill="#f59e0b" font-family="var(--font-mono)" font-size="8" text-anchor="middle" font-weight="bold">ENCODER</text>
+              <text x="200" y="112" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="6" text-anchor="middle">MF_HW</text>
+              
+              <rect x="290" y="70" width="80" height="60" rx="10" fill="#090a0f" stroke="rgba(245,158,11,0.3)" />
+              <text x="330" y="100" fill="#ea580c" font-family="var(--font-mono)" font-size="8" text-anchor="middle" font-weight="bold">FEC XOR</text>
+              <text x="330" y="112" fill="rgba(255,255,255,0.4)" font-family="var(--font-mono)" font-size="6" text-anchor="middle">rtp.rs</text>
+              
+              <rect x="390" y="75" width="50" height="50" rx="8" fill="#090a0f" stroke="rgba(245,158,11,0.2)" />
+              <text x="415" y="105" fill="#fff" font-family="var(--font-mono)" font-size="8" text-anchor="middle" font-weight="bold">DECODER</text>
+            </svg>
           </div>
-
-          <!-- Console log output command string -->
-          <div class="rounded-xl border border-white/5 bg-black flex flex-col justify-between overflow-hidden text-[9px] font-mono shadow-inner p-3 relative">
-            <div class="flex justify-between items-center border-b border-white/5 pb-2 mb-2 text-[8px] text-slate-500">
-              <span>Command Parser</span>
-              <button id="cli-btn-copy" class="text-slate-400 hover:text-white transition flex items-center space-x-1">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75"/></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <div class="flex-grow text-slate-300 leading-normal select-text break-words">
-              <span class="text-amber-500 select-none">PS C:\></span> <span id="cli-cmd-display">.\beacon.exe host --window "Chrome" --quality 20 --fps 60 --clipboard true</span>
-            </div>
-            <div class="mt-2 pt-2 border-t border-white/5 text-slate-600 text-[8px] leading-relaxed" id="cli-cmd-desc">
-              Executes Beacon host capture loop targeting chrome process handles.
-            </div>
-          </div>
-
         </div>
-      </div>
+      </section>
+
+      <!-- Download CTA / Launch Playground CTA section -->
+      <section id="download" class="relative max-w-6xl mx-auto px-6 py-20 w-full text-center z-10 border-t border-white/5">
+        <h3 class="text-3xl font-black text-white font-display uppercase text-glow-amber">Start Simulation or Download</h3>
+        <p class="mt-4 text-xs text-slate-400 font-light max-w-lg mx-auto leading-relaxed">
+          Interact with a completely virtualised web simulation workspace, or compile the raw Rust binaries to deploy screen sharing hosts locally.
+        </p>
+
+        <div class="mt-8 flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <button class="launch-playground-btn px-6 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider transition-all">
+            Launch Simulation Workspace
+          </button>
+          
+          <div class="flex gap-2 font-mono text-[10px]">
+            <a href="https://github.com/adarsh0044321/beacon-pulse/releases/latest" target="_blank" class="px-5 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 hover:text-white transition-all flex items-center space-x-1.5">
+              <span>Setup.exe</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer section -->
+      <footer class="mt-auto w-full border-t border-white/5 px-6 py-8 text-center text-[10px] font-mono text-slate-600">
+        <div>Made with ❤️ in Rust & React · MIT License</div>
+      </footer>
 
     </div>
 
-    <!-- WINDOWS OS TASKBAR & STATUS SECTOR -->
-    <footer class="h-16 border-t border-white/5 bg-[#040407]/90 backdrop-blur-xl px-6 relative z-50 flex items-center justify-between">
+    <!-- ==========================================
+       OS PLAYGROUND INTERACTIVE DESKTOP SIMULATOR
+       ========================================== -->
+    <div id="desktop-playground" class="hidden absolute inset-0 z-10 w-full h-full flex flex-col transition-all duration-700 opacity-0 transform scale-95">
       
-      <!-- Start Menu Button (Custom cybernetic geometric ring logo) -->
-      <div class="flex items-center space-x-4">
-        <div id="os-start-button" class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center cursor-pointer shadow hover:scale-105 active:scale-95 transition-all">
-          <svg class="w-5 h-5 text-slate-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 0 0 9-9M12 21a9 9 0 0 1-9-9m9 9v-4.5m0-1.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0v-1.5"/>
-          </svg>
-        </div>
+      <!-- OS Workspace Grid (height subtracts taskbar) -->
+      <div id="desktop-workspace" class="os-desktop-workspace relative z-10 w-full p-8 flex flex-col items-start gap-4">
         
-        <!-- Taskbar running windows indicators -->
-        <div id="os-taskbar-pills" class="hidden md:flex items-center space-x-2 font-mono text-[9px]">
-          <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-400 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-overview">Guide.txt</div>
-          <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-400 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-pulse">pulse.exe</div>
-          <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-400 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-beacon">beacon.rs</div>
-          <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-400 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-pipeline">pipeline.sys</div>
-          <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-400 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-config">cli_config.cfg</div>
+        <!-- DESKTOP SHORTCUT ICONS -->
+        <!-- Icon 1: Readme overview (Custom line-art folder/document) -->
+        <div class="os-icon-shortcut group" data-open-win="win-overview">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18V6a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 6v1.5H12V7.5Z"/>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">Guide.txt</span>
         </div>
+
+        <!-- Icon 2: Pulse Player Client (Custom frequency target analyzer) -->
+        <div class="os-icon-shortcut group animate-[pulse-light_3.5s_infinite]" data-open-win="win-pulse">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h2l1.5-3 1 6 1-4 1.5 1h3"/>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">pulse.exe</span>
+        </div>
+
+        <!-- Icon 3: Beacon Host Server (Custom micro-dish signal reflector) -->
+        <div class="os-icon-shortcut group" data-open-win="win-beacon">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 0 0 9-9M12 21a9 9 0 0 1-9-9m9 9v-4.5m0-1.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0v-1.5m6-3a6 6 0 0 0-12 0"/>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">beacon.rs</span>
+        </div>
+
+        <!-- Icon 4: SVG Flow Architecture (Custom integrated logic circuit) -->
+        <div class="os-icon-shortcut group" data-open-win="win-pipeline">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-500 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="5" y="5" width="14" height="14" rx="3"/>
+              <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">pipeline.sys</span>
+        </div>
+
+        <!-- Icon 5: Launch configurations config (Custom hexagonal hex shell badge) -->
+        <div class="os-icon-shortcut group" data-open-win="win-config">
+          <div class="w-12 h-12 rounded-xl bg-amber-500/5 border border-amber-500/15 group-hover:bg-amber-500/15 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-all shadow shadow-amber-500/5 mb-2">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2Z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 10.5h6M9 13.5h6"/>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-amber-400 truncate max-w-full text-center">cli_config.cfg</span>
+        </div>
+
+        <!-- Icon 6: GitHub External Link -->
+        <a href="https://github.com/adarsh0044321/beacon-pulse" target="_blank" class="os-icon-shortcut group">
+          <div class="w-12 h-12 rounded-xl bg-slate-500/5 border border-slate-500/15 group-hover:bg-slate-500/15 flex items-center justify-center text-slate-400 group-hover:scale-105 transition-all shadow mb-2">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"></path>
+            </svg>
+          </div>
+          <span class="text-[9px] font-mono tracking-wide text-slate-400 font-semibold group-hover:text-slate-200 truncate max-w-full text-center">GitHub.lnk</span>
+        </a>
+
+        <!-- DRAGGABLE WINDOWS PANELS -->
+        <!-- Window 1: Overview System Guide -->
+        <div id="win-overview" class="os-window os-window-active absolute spotlight-card shadow-2xl animate-[fade-in_0.4s_ease-out]" style="top: 30px; left: 160px; width: 440px; height: 420px; z-index: 100;">
+          <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
+            <div class="flex items-center space-x-1.5">
+              <button class="win-btn-close win-dot-red" title="Close"></button>
+              <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
+              <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+            </div>
+            <span class="text-slate-400 font-bold">system_guide.txt</span>
+            <div class="w-12"></div>
+          </div>
+          <div class="p-6 h-[calc(100%-38px)] overflow-y-auto font-sans leading-relaxed select-text space-y-5 text-slate-400">
+            <div class="space-y-2 border-b border-white/5 pb-3">
+              <h1 class="text-2xl font-black text-white tracking-tight font-display">BEACON & PULSE</h1>
+              <p class="text-[9px] font-mono uppercase tracking-widest text-amber-500">Decoupled LAN Remote Control Protocol</p>
+            </div>
+            <div class="text-xs space-y-4">
+              <p>
+                Beacon & Pulse is a developer-centric performance system written in Rust, engineered to bypass the latency constraints of traditional remote screen mirroring.
+              </p>
+              <h3 class="font-bold text-white uppercase font-display text-sm tracking-wide">Strategic Advantages</h3>
+              <ul class="list-disc pl-5 space-y-2.5 font-light text-slate-400 text-[11px]">
+                <li><strong class="text-slate-300">Windows Graphics Capture:</strong> Locks frame buffers inside GPU VRAM, eliminating expensive copies back and forth to standard system RAM.</li>
+                <li><strong class="text-slate-300">Hardware H.264 Accelerators:</strong> Pulls direct encoding pipelines on physical GPU frames (AMF/NVENC/Intel QSV) yielding sub-millisecond compression.</li>
+                <li><strong class="text-slate-300">TLS 1.3 Security Handshakes:</strong> Encrypts control and keystroke streams via <code class="bg-white/5 px-1 py-0.5 rounded text-[10px]">rustls</code> using secure dynamic keys.</li>
+              </ul>
+              <div class="pt-2">
+                <a href="https://github.com/adarsh0044321/beacon-pulse/releases/latest" target="_blank" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold tracking-tight text-[11px] shadow shadow-amber-500/20">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                  <span>Download Assets</span>
+                </a>
+              </div>
+              <p class="text-[9px] text-slate-500 font-mono italic pt-2">
+                Tip: Click the cybernetic Start Menu button (bottom-left) to return to the homepage.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Window 2: Pulse Player Client Simulator -->
+        <div id="win-pulse" class="os-window absolute spotlight-card shadow-2xl hidden" style="top: 50px; left: 240px; width: 620px; height: 490px; z-index: 90;">
+          <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
+            <div class="flex items-center space-x-1.5">
+              <button class="win-btn-close win-dot-red" title="Close"></button>
+              <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
+              <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+            </div>
+            <span class="text-slate-400 font-bold">pulse_viewer.exe (Direct Blit client)</span>
+            <div class="flex items-center space-x-2.5">
+              <div id="sim-status-indicator" class="w-2 h-2 rounded-full bg-rose-500"></div>
+              <span id="sim-status-text" class="text-[9px] uppercase tracking-wider text-rose-500 font-bold mr-2 select-none">Offline</span>
+            </div>
+          </div>
+          
+          <div id="viewer-viewport" class="p-6 h-[calc(100%-38px)] flex flex-col items-center justify-center relative select-none bg-[#030305]/95">
+            
+            <!-- STATE 1: Disconnected Connect Portal -->
+            <div id="sim-view-disconnected" class="text-center max-w-xs flex flex-col items-center">
+              <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-amber-500 mb-5 shadow shadow-amber-500/5">
+                <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h2l1.5-3 1 6 1-4 1.5 1h3"/>
+                </svg>
+              </div>
+              <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-2 font-mono">Connect Remote Session</h3>
+              <p class="text-[10px] text-slate-400 mb-5 font-light">Scan subnets or interface with a listening host encoder thread.</p>
+              <button id="sim-btn-connect" class="px-6 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] uppercase tracking-wider transition-all shadow-md shadow-amber-500/10">
+                Scan Interfaces
+              </button>
+            </div>
+
+            <!-- STATE 2: LAN Scanning -->
+            <div id="sim-view-scanning" class="w-full max-w-sm hidden text-left font-mono text-[10px]">
+              <div class="mb-2.5 text-amber-500 flex items-center justify-between">
+                <span>Scanning: 192.168.1.1 - 254</span>
+                <span class="animate-pulse">scanning...</span>
+              </div>
+              <div class="h-1 w-full rounded-full bg-white/5 overflow-hidden mb-5">
+                <div id="sim-scan-progress" class="h-full bg-gradient-to-r from-amber-600 to-amber-400 w-0 transition-all duration-300"></div>
+              </div>
+              <div id="sim-discovered-list" class="space-y-2 max-h-36 overflow-y-auto pr-1">
+                <div class="text-slate-600">Querying subnet sockets...</div>
+              </div>
+            </div>
+
+            <!-- STATE 3: OTP Authentication Pair Code entry -->
+            <div id="sim-view-pairing" class="w-full max-w-xs hidden text-center font-mono">
+              <h3 class="text-xs font-bold text-white uppercase tracking-wider mb-2">TLS SECURE PAIRING</h3>
+              <p class="text-[10px] text-slate-400 mb-5 font-light">Input the temporary auth key showing on the host terminal.</p>
+              <div class="flex items-center justify-center space-x-1.5 mb-6">
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+                <div class="text-slate-600 font-bold select-none">-</div>
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+                <input type="text" maxlength="1" class="sim-code-input w-8 h-10 bg-white/5 border border-white/10 rounded-lg text-center text-sm font-bold text-white focus:border-amber-500 focus:outline-none transition" />
+              </div>
+              <div class="flex gap-2 text-[10px]">
+                <button id="sim-btn-back-to-list" class="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 transition">Back</button>
+                <button id="sim-btn-verify" class="flex-grow py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold uppercase transition">Pair Link</button>
+              </div>
+            </div>
+
+            <!-- STATE 4: Live Connected Stream Viewport -->
+            <div id="sim-view-connected" class="w-full h-full hidden flex flex-col p-1 relative overflow-hidden">
+              <div class="flex items-center justify-between px-3 py-1.5 bg-[#07070b]/95 backdrop-blur rounded-lg border border-white/5 text-[9px] font-mono text-slate-400 mb-2">
+                <div class="flex items-center space-x-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>STREAM: <span id="metric-fps">60</span> FPS</span>
+                </div>
+                <div>RTT: <span id="metric-rtt" class="text-amber-500">1.3 ms</span></div>
+                <div>RATE: <span id="metric-bitrate">20.4 Mbps</span></div>
+                <div>LOSS: <span id="metric-loss" class="text-emerald-400">0%</span></div>
+              </div>
+
+              <div id="sim-stream-container" class="flex-grow rounded-lg bg-black border border-white/5 overflow-hidden relative cursor-crosshair">
+                <canvas id="sim-stream-canvas" class="w-full h-full object-cover"></canvas>
+                <div id="sim-drag-drop-zone" class="absolute inset-1.5 bg-amber-950/60 border-2 border-dashed border-amber-500/40 rounded-lg flex items-center justify-center pointer-events-auto opacity-0 hover:opacity-100 transition-opacity">
+                  <div class="text-center text-[10px] p-4">
+                    <svg class="w-5 h-5 text-amber-400 mx-auto mb-1 animate-bounce" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"/></svg>
+                    <span class="font-bold text-amber-300">Drop files to send</span>
+                  </div>
+                </div>
+                <div id="sim-cursor-pointer" class="absolute w-3 h-3 rounded-full bg-amber-400 border border-white pointer-events-none -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity"></div>
+              </div>
+
+              <div class="mt-2.5 flex items-center gap-2">
+                <button id="sim-btn-sync-clipboard" class="flex-1 py-2 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-semibold flex items-center justify-center space-x-1.5 text-slate-300 transition">
+                  <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5.25h1.5m4.72-2.224c-.22-.058-.451-.086-.68-.086L10.5 3c-.229 0-.46.028-.68.086a3.375 3.375 0 00-2.453 2.453c-.058.22-.086.451-.086.68v2.292m0-3h9v-2.292c0-.229-.028-.46-.086-.68a3.375 3.375 0 00-2.453-2.453ZM12 10.5a1.5 1.5 0 11-3 0 1.5 1.5 0 0 1 3 0Z"/></svg>
+                  <span>Sync Clipboard</span>
+                </button>
+                <button id="sim-btn-send-file" class="flex-1 py-2 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-semibold flex items-center justify-center space-x-1.5 text-slate-300 transition">
+                  <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25"/></svg>
+                  <span>Inject File</span>
+                </button>
+                <button id="sim-btn-disconnect" class="py-2 px-4 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/25 text-rose-400 text-[10px] font-bold transition">
+                  Disconnect
+                </button>
+              </div>
+
+              <div id="file-toast" class="absolute bottom-12 right-2 px-3 py-2 rounded-lg bg-slate-900 border border-emerald-500/30 text-emerald-400 text-[9px] font-mono flex items-center space-x-2 shadow-xl transform translate-y-8 opacity-0 pointer-events-none transition-all duration-300">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m4.5 12.75 6 6 9-13.5"/></svg>
+                <span>SHA-256 integrity match. Block write OK.</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Window 3: Beacon Host service logs -->
+        <div id="win-beacon" class="os-window absolute spotlight-card shadow-2xl" style="top: 290px; left: 100px; width: 420px; height: 290px; z-index: 85;">
+          <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
+            <div class="flex items-center space-x-1.5">
+              <button class="win-btn-close win-dot-red" title="Close"></button>
+              <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
+              <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+            </div>
+            <span class="text-slate-400 font-bold">beacon_service.rs (Host Capture)</span>
+            <div class="flex items-center space-x-2.5">
+              <div id="host-status-indicator" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+              <span id="host-status-text" class="text-[9px] uppercase tracking-wider text-amber-500 font-bold mr-2 select-none">Listening</span>
+            </div>
+          </div>
+          <div class="p-4 h-[calc(100%-38px)] flex flex-col justify-between bg-[#030305]/95 font-mono text-[10px] text-slate-500 select-text leading-relaxed">
+            <div id="host-terminal-logs" class="space-y-1.5 overflow-y-auto max-h-[170px] pr-1">
+              <div>[10:14:58] INFO: Starting WGC frame capture loop...</div>
+              <div>[10:14:59] INFO: GPU DXGI Direct3D11 surface bound</div>
+              <div>[10:14:59] INFO: DNS-SD discovery active on subnet range</div>
+              <div class="text-slate-400 font-semibold">[10:15:00] INFO: Listening for TLS links on TCP :45101</div>
+            </div>
+            
+            <div id="host-pairing-card" class="mt-2.5 pt-2.5 border-t border-white/5 flex items-center justify-between">
+              <span class="text-[9px] uppercase tracking-widest text-slate-600">Dynamic OTP Key</span>
+              <div class="flex items-center space-x-1.5 font-bold text-white tracking-widest text-sm">
+                <span id="host-code-1">582</span>
+                <span class="text-amber-500/80">-</span>
+                <span id="host-code-2">914</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Window 4: Interactive Architecture Diagram -->
+        <div id="win-pipeline" class="os-window absolute spotlight-card shadow-2xl hidden" style="top: 240px; left: 520px; width: 680px; height: 380px; z-index: 80;">
+          <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
+            <div class="flex items-center space-x-1.5">
+              <button class="win-btn-close win-dot-red" title="Close"></button>
+              <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
+              <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+            </div>
+            <span class="text-slate-400 font-bold">pipeline_architecture.sys</span>
+            <div class="w-12"></div>
+          </div>
+          <div class="p-6 h-[calc(100%-38px)] grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-[#030305]/95">
+            
+            <div class="lg:col-span-7 flex justify-center">
+              <svg class="w-full max-w-sm" viewBox="0 0 540 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="amber-rust" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#f59e0b" />
+                    <stop offset="100%" stop-color="#ea580c" />
+                  </linearGradient>
+                </defs>
+                
+                <path d="M100 80 H220" stroke="url(#amber-rust)" stroke-dasharray="8 10" stroke-width="2" class="opacity-70 animate-[dash_4s_linear_infinite]" />
+                <path d="M220 80 C270 80 270 120 320 120" stroke="#f59e0b" stroke-dasharray="6 14" stroke-width="1.5" class="opacity-60 animate-[dash_3s_linear_infinite]" />
+                <path d="M220 240 C270 240 270 200 320 200" stroke="#ea580c" stroke-dasharray="6 14" stroke-width="1.5" class="opacity-60 animate-[dash_3s_linear_infinite]" />
+                <path d="M320 120 C370 120 370 160 420 160" stroke="url(#amber-rust)" stroke-dasharray="8 10" stroke-width="2" class="opacity-70 animate-[dash_2.5s_linear_infinite]" />
+
+                <g data-node="wgc" class="arch-node cursor-pointer group">
+                  <rect x="20" y="50" width="80" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="60" y="80" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">WGC</text>
+                  <text x="60" y="92" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">wgc.rs</text>
+                </g>
+
+                <g data-node="encoder" class="arch-node cursor-pointer group">
+                  <rect x="20" y="210" width="80" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="60" y="240" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">ENCODER</text>
+                  <text x="60" y="252" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">encode.rs</text>
+                </g>
+
+                <g data-node="udp" class="arch-node cursor-pointer group">
+                  <rect x="220" y="90" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="270" y="120" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">UDP STREAM</text>
+                  <text x="270" y="132" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">rtp::Sender</text>
+                </g>
+
+                <g data-node="tcp" class="arch-node cursor-pointer group">
+                  <rect x="220" y="170" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="270" y="200" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">TLS CONTROL</text>
+                  <text x="270" y="212" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">listener.rs</text>
+                </g>
+
+                <g data-node="decoder" class="arch-node cursor-pointer group">
+                  <rect x="420" y="50" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="470" y="80" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">DECODER</text>
+                  <text x="470" y="92" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">decoder.rs</text>
+                </g>
+
+                <g data-node="renderer" class="arch-node cursor-pointer group">
+                  <rect x="420" y="210" width="100" height="60" rx="8" fill="#090a0f" stroke="rgba(255,255,255,0.06)" stroke-width="1" class="group-hover:stroke-amber-500 transition-all duration-300" />
+                  <text x="470" y="240" fill="#f59e0b" font-family="var(--font-mono)" font-size="9" text-anchor="middle" font-weight="bold">DIRECT BLIT</text>
+                  <text x="470" y="252" fill="rgba(255,255,255,0.3)" font-family="var(--font-mono)" font-size="6.5" text-anchor="middle">render::Blit</text>
+                </g>
+              </svg>
+            </div>
+
+            <div class="lg:col-span-5 h-full flex flex-col justify-center">
+              <div class="p-4 rounded-xl border border-white/5 bg-[#040407]/80 font-mono text-[10px] text-slate-400">
+                <div class="flex items-center space-x-1.5 text-amber-500 font-bold mb-2 uppercase text-[9px]" id="arch-detail-title">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>Select Node</span>
+                </div>
+                <p class="leading-relaxed text-[10px]" id="arch-detail-desc">
+                  Click any core block on the left schematic map flow to trace Direct3D capture mappings and frame processing buffers.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Window 5: CLI generator config parameters -->
+        <div id="win-config" class="os-window absolute spotlight-card shadow-2xl" style="top: 150px; left: 680px; width: 500px; height: 350px; z-index: 75;">
+          <div class="os-window-header px-4 py-2.5 flex items-center justify-between font-mono text-xs select-none">
+            <div class="flex items-center space-x-1.5">
+              <button class="win-btn-close win-dot-red" title="Close"></button>
+              <button class="win-btn-minimize win-dot-yellow" title="Minimize"></button>
+              <span class="win-dot-green opacity-50 cursor-not-allowed"></span>
+            </div>
+            <span class="text-slate-400 font-bold">cli_launcher_config.cfg</span>
+            <div class="w-12"></div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 h-[calc(100%-38px)] bg-[#030305]/95">
+            
+            <div class="space-y-3.5 font-mono text-[10px] flex flex-col justify-between">
+              <div class="space-y-3">
+                <div class="flex rounded-lg bg-white/5 p-0.5 border border-white/5">
+                  <button id="cli-tab-host" class="flex-grow py-1.5 text-[9px] font-bold rounded-md bg-purple-600 text-white transition-all">HOST</button>
+                  <button id="cli-tab-player" class="flex-grow py-1.5 text-[9px] font-bold rounded-md text-slate-400 hover:text-white transition-all">PLAYER</button>
+                </div>
+
+                <div id="cli-opt-target" class="space-y-1">
+                  <label class="text-[8px] uppercase tracking-wider text-slate-500">Capture Source</label>
+                  <select id="cli-input-target" class="w-full bg-[#050508] border border-white/5 rounded-lg py-1.5 px-2 text-slate-200 focus:outline-none focus:border-amber-500">
+                    <option value='--window "Chrome"'>Chrome Window</option>
+                    <option value='--window "Visual Studio Code"'>VS Code Window</option>
+                    <option value='--display 1'>Monitor Display 1</option>
+                  </select>
+                </div>
+
+                <div id="cli-opt-bitrate" class="space-y-1">
+                  <div class="flex justify-between items-center text-[8px] uppercase text-slate-500">
+                    <span>Bandwidth Limit</span>
+                    <span class="text-amber-500 font-bold"><span id="cli-lbl-bitrate">20</span> Mbps</span>
+                  </div>
+                  <input type="range" id="cli-input-bitrate" min="5" max="50" step="5" value="20" class="w-full h-1 bg-[#050508] rounded-lg appearance-none cursor-pointer accent-amber-500" />
+                </div>
+
+                <div id="cli-opt-fps" class="space-y-1">
+                  <label class="text-[8px] uppercase tracking-wider text-slate-500">Refresh Cap</label>
+                  <div class="grid grid-cols-3 gap-1">
+                    <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-white/5 bg-[#050508] text-slate-400 font-bold hover:border-white/10" data-value="30">30 FPS</button>
+                    <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-amber-500 bg-amber-950/20 text-amber-500 font-bold" data-value="60">60 FPS</button>
+                    <button class="cli-btn-fps py-1.5 text-[9px] rounded-lg border border-white/5 bg-[#050508] text-slate-400 font-bold hover:border-white/10" data-value="120">120 FPS</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="cli-opt-clipboard" class="flex justify-between items-center pt-2 border-t border-white/5">
+                <span class="text-[9px] text-slate-400">Sync Clipboard</span>
+                <button id="cli-toggle-clipboard" class="w-8 h-4.5 rounded-full bg-purple-600 p-0.5 transition-all focus:outline-none flex items-center justify-end">
+                  <span class="w-3.5 h-3.5 rounded-full bg-white transition-transform"></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-white/5 bg-black flex flex-col justify-between overflow-hidden text-[9px] font-mono shadow-inner p-3 relative">
+              <div class="flex justify-between items-center border-b border-white/5 pb-2 mb-2 text-[8px] text-slate-500">
+                <span>Command Parser</span>
+                <button id="cli-btn-copy" class="text-slate-400 hover:text-white transition flex items-center space-x-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75"/></svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+              <div class="flex-grow text-slate-300 leading-normal select-text break-words">
+                <span class="text-amber-500 select-none">PS C:\></span> <span id="cli-cmd-display">.\beacon.exe host --window "Chrome" --quality 20 --fps 60 --clipboard true</span>
+              </div>
+              <div class="mt-2 pt-2 border-t border-white/5 text-slate-600 text-[8px] leading-relaxed" id="cli-cmd-desc">
+                Executes Beacon host capture loop targeting chrome process handles.
+              </div>
+            </div>
+
+          </div>
+        </div>
+
       </div>
 
-      <!-- Right system trays: Performance monitors and Clocks -->
-      <div class="flex items-center space-x-6 text-[10px] font-mono text-slate-400 select-none">
-        
-        <!-- Live performance network charts -->
-        <div class="hidden lg:flex items-center space-x-4 border-r border-white/5 pr-6 h-10">
+      <!-- Taskbar Footer -->
+      <footer class="h-16 border-t border-white/5 bg-[#040407]/90 backdrop-blur-xl px-6 relative z-50 flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div id="os-start-button" class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center cursor-pointer shadow hover:scale-105 active:scale-95 transition-all" title="Return to Homepage">
+            <svg class="w-5 h-5 text-slate-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+            </svg>
+          </div>
+          
+          <div id="os-taskbar-pills" class="hidden md:flex items-center space-x-2 font-mono text-[9px]">
+            <div class="task-pill px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold cursor-pointer transition" data-target-win="win-overview">Guide.txt</div>
+            <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-pulse">pulse.exe</div>
+            <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-beacon">beacon.rs</div>
+            <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-pipeline">pipeline.sys</div>
+            <div class="task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 cursor-pointer hover:bg-white/10 active:scale-95 transition" data-target-win="win-config">cli_config.cfg</div>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-6 text-[10px] font-mono text-slate-400 select-none">
+          <div class="hidden lg:flex items-center space-x-4 border-r border-white/5 pr-6 h-10">
+            <div class="flex flex-col items-end">
+              <span class="text-[8px] text-slate-600 uppercase">RTT JITTER</span>
+              <span class="text-amber-500 font-bold" id="taskbar-rtt">1.3 ms</span>
+            </div>
+            <div class="w-16 h-8 bg-black/40 rounded border border-white/5 overflow-hidden p-0.5">
+              <canvas id="sim-graph-canvas" class="w-full h-full"></canvas>
+            </div>
+          </div>
+
           <div class="flex flex-col items-end">
-            <span class="text-[8px] text-slate-600 uppercase">RTT JITTER</span>
-            <span class="text-amber-500 font-bold" id="taskbar-rtt">1.3 ms</span>
-          </div>
-          <div class="w-16 h-8 bg-black/40 rounded border border-white/5 overflow-hidden p-0.5">
-            <canvas id="sim-graph-canvas" class="w-full h-full"></canvas>
+            <span class="text-white font-bold" id="os-clock-time">10:48 AM</span>
+            <span class="text-[8px] text-slate-600">2026-06-03</span>
           </div>
         </div>
+      </footer>
 
-        <div class="flex flex-col items-end">
-          <span class="text-white font-bold" id="os-clock-time">10:48 AM</span>
-          <span class="text-[8px] text-slate-600">2026-06-03</span>
-        </div>
-      </div>
-
-    </footer>
+    </div>
 
     <!-- CSS/JS Entry modules -->
     
-    <!-- SVG animation stylesheet -->
     <style>
       @keyframes dash {
         to {
           stroke-dashoffset: -100;
         }
+      }
+      .text-glow-amber {
+        text-shadow: 0 0 40px rgba(245, 158, 11, 0.2);
       }
     </style>
   </body>
