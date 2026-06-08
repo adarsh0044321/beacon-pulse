@@ -95,3 +95,35 @@ jobs:
         body_path: RELEASE_NOTES.txt
         tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
 
+  deploy-portfolio:
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: portfolio/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd portfolio
+          npm ci
+
+      - name: Build portfolio
+        run: |
+          cd portfolio
+          npm run build
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: portfolio/dist
+          branch: gh-pages
+
