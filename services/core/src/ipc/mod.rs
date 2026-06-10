@@ -24,6 +24,18 @@ use crate::network::broadcast;
 use crate::network::discovery;
 use crate::AppState;
 
+use futures_util::{SinkExt, StreamExt};
+use rust_embed::RustEmbed;
+use tokio_tungstenite::tungstenite::Message;
+
+#[derive(RustEmbed)]
+#[folder = "../../apps/ui/dist-host/"]
+struct HostAssets;
+
+#[derive(RustEmbed)]
+#[folder = "../../apps/ui/dist-player/"]
+struct PlayerAssets;
+
 /// Messages sent from UI → Service
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -1088,4 +1100,240 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
     }
 
     ips
+}
+
+#[derive(Debug)]
+enum WsMsg {
+    Event(ServiceEvent),
+    Response(ServiceEvent),
+}
+
+pub async fn run_web_server(state: Arc<AppState>, port: u16, is_player: bool, launch_browser: bool) -> Result<()> {
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            warn!("Web server failed to bind to {}: {}", addr, e);
+            return Err(e.into());
+        }
+    };
+    info!("Web / WebSocket server listening on http://{}", addr);
+
+    if launch_browser {
+        open_browser(&format!("http://localhost:{}", port));
+    }
+
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    loop {
+        tokio::select! {
+            Ok((stream, _)) = listener.accept() => {
+                let state_clone = Arc::clone(&state);
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(stream, state_clone, is_player).await {
+                        warn!("Web client connection error: {}", e);
+                    }
+                });
+            }
+            _ = shutdown_rx.recv() => {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn open_browser(url: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .creation_flags(0x0800_0000)
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
+    }
+}
+
+async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<AppState>, is_player: bool) -> Result<()> {
+    let mut peek_buf = [0u8; 1024];
+    let n = stream.peek(&mut peek_buf).await?;
+    let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
+    if peek_str.contains("Upgrade: websocket") || (peek_str.contains("upgrade:") && peek_str.contains("websocket")) {
+        let ws_stream = tokio_tungstenite::accept_async(stream).await?;
+        handle_ws_client(ws_stream, state, is_player).await?;
+    } else {
+        handle_http_request(stream, is_player).await?;
+    }
+    Ok(())
+}
+
+async fn handle_http_request(mut stream: tokio::net::TcpStream, is_player: bool) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = [0u8; 2048];
+    let n = stream.read(&mut buf).await?;
+    let req_str = String::from_utf8_lossy(&buf[..n]);
+
+    let first_line = match req_str.lines().next() {
+        Some(l) => l,
+        None => return Ok(()),
+    };
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    if parts.len() < 2 {
+        return Ok(());
+    }
+    let method = parts[0];
+    let mut path = parts[1];
+
+    if method != "GET" {
+        let resp = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
+        stream.write_all(resp.as_bytes()).await?;
+        return Ok(());
+    }
+
+    if let Some(idx) = path.find('?') {
+        path = &path[..idx];
+    }
+
+    let file_path = if path == "/" || path.is_empty() {
+        "index.html"
+    } else {
+        path.trim_start_matches('/')
+    };
+
+    let file_data = if is_player {
+        PlayerAssets::get(file_path).or_else(|| PlayerAssets::get("index.html"))
+    } else {
+        HostAssets::get(file_path).or_else(|| HostAssets::get("index.html"))
+    };
+
+    if let Some(file) = file_data {
+        let is_fallback = file_path != "index.html" && if is_player {
+            PlayerAssets::get(file_path).is_none()
+        } else {
+            HostAssets::get(file_path).is_none()
+        };
+        let actual_path = if is_fallback { "index.html" } else { file_path };
+        let content_type = match actual_path.split('.').last() {
+            Some("html") => "text/html",
+            Some("js") => "application/javascript",
+            Some("css") => "text/css",
+            Some("png") => "image/png",
+            Some("ico") => "image/x-icon",
+            Some("svg") => "image/svg+xml",
+            _ => "application/octet-stream",
+        };
+        let body = file.data.as_ref();
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\n\
+             Content-Type: {}\r\n\
+             Content-Length: {}\r\n\
+             Access-Control-Allow-Origin: *\r\n\r\n",
+            content_type,
+            body.len()
+        );
+        stream.write_all(headers.as_bytes()).await?;
+        stream.write_all(body).await?;
+    } else {
+        let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        stream.write_all(resp.as_bytes()).await?;
+    }
+
+    Ok(())
+}
+
+async fn handle_ws_client(
+    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    state: Arc<AppState>,
+    is_player: bool,
+) -> Result<()> {
+    let (mut ws_writer, mut ws_reader) = ws_stream.split();
+
+    // Channel for pushing events/responses back to UI
+    let (push_tx, mut push_rx) = tokio::sync::mpsc::unbounded_channel::<WsMsg>();
+
+    // If host mode, subscribe to metrics updates
+    #[cfg(feature = "host")]
+    {
+        let push_tx_metrics = push_tx.clone();
+        let mut metrics_rx = crate::logging::metrics::METRICS_CHANNEL.subscribe();
+        let mut metrics_shutdown = state.shutdown_tx.subscribe();
+        if !is_player {
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        Ok(snap) = metrics_rx.recv() => {
+                            let ev = ServiceEvent::MetricsUpdate { metrics: snap };
+                            if push_tx_metrics.send(WsMsg::Event(ev)).is_err() {
+                                break;
+                            }
+                        }
+                        _ = metrics_shutdown.recv() => {
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // Set up a proactive event channel for dispatch_cmd
+    let (dispatch_push_tx, mut dispatch_push_rx) = tokio::sync::mpsc::unbounded_channel::<ServiceEvent>();
+    let push_tx_clone = push_tx.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = dispatch_push_rx.recv().await {
+            let _ = push_tx_clone.send(WsMsg::Event(ev));
+        }
+    });
+
+    // Loop for sending events/responses to WebSocket
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    let ws_writer_handle = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                Some(msg) = push_rx.recv() => {
+                    let wrapped = match msg {
+                        WsMsg::Event(ev) => serde_json::json!({"type":"event","data":ev}),
+                        WsMsg::Response(resp) => serde_json::json!({"type":"response","data":resp}),
+                    };
+                    if let Ok(json) = serde_json::to_string(&wrapped) {
+                        if ws_writer.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                _ = shutdown_rx.recv() => {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Loop for receiving command requests from WebSocket
+    while let Some(msg_res) = ws_reader.next().await {
+        let msg = match msg_res {
+            Ok(Message::Text(text)) => text,
+            Ok(Message::Close(_)) => break,
+            Err(_) => break,
+            _ => continue,
+        };
+
+        // Command message
+        let cmd: UiCommand = match serde_json::from_str(&msg) {
+            Ok(c) => c,
+            Err(e) => {
+                let err_resp = ServiceEvent::Error { message: format!("invalid command: {e}") };
+                let _ = push_tx.send(WsMsg::Event(err_resp));
+                continue;
+            }
+        };
+
+        let response = dispatch_cmd(cmd, &state, dispatch_push_tx.clone()).await;
+        let _ = push_tx.send(WsMsg::Response(response));
+    }
+
+    ws_writer_handle.abort();
+    Ok(())
 }

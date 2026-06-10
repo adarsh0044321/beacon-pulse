@@ -145,6 +145,18 @@ mod run {
         let ipc_server = IpcServer::new(Arc::clone(&state), r"\\.\pipe\Beacon".to_string());
         let ipc_handle = tokio::spawn(async move { ipc_server.run().await });
 
+        // Start web / WebSocket server (port 45199 for host)
+        let web_state = Arc::clone(&state);
+        let is_service = std::env::args()
+            .nth(1)
+            .map(|s| s == "service")
+            .unwrap_or(false);
+        let web_handle = tokio::spawn(async move {
+            if let Err(e) = lanshare_service::ipc::run_web_server(web_state, 45199, false, !is_service).await {
+                error!("Web server failed: {}", e);
+            }
+        });
+
         // Start network listener (TCP control channel for client connections)
         // Bind TCP listener first to verify port is free and service is healthy!
         let addr = format!("0.0.0.0:{}", network::CONTROL_PORT);
@@ -194,6 +206,7 @@ mod run {
         mdns_handle.abort();
         ipc_handle.abort();
         net_handle.abort();
+        web_handle.abort();
 
         info!("Beacon stopped");
 
@@ -215,9 +228,9 @@ mod run {
         let args: Vec<String> = std::env::args().collect();
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("host");
 
-        // Default: launch CLI host (terminal window with window picker + pairing code)
-        if mode == "host" || mode.starts_with('-') {
-            // If user passed flags like --window directly, treat as "host" mode
+        // Default: bypass CLI interactive mode and go straight to the web interface.
+        // Headless execution (via watchdog or background service) is kept compatible.
+        if mode == "headless" || args.iter().any(|arg| arg == "--bg-service" || arg == "--startup") {
             return cli_host::run(args);
         }
 

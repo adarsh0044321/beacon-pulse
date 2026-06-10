@@ -118,6 +118,18 @@ mod run {
         let ipc_server = IpcServer::new(Arc::clone(&state), r"\\.\pipe\Pulse".to_string());
         let ipc_handle = tokio::spawn(async move { ipc_server.run().await });
 
+        // Start web / WebSocket server (port 45200 for player)
+        let web_state = Arc::clone(&state);
+        let is_service = std::env::args()
+            .nth(1)
+            .map(|s| s == "service")
+            .unwrap_or(false);
+        let web_handle = tokio::spawn(async move {
+            if let Err(e) = lanshare_service::ipc::run_web_server(web_state, 45200, true, !is_service).await {
+                error!("Web server failed: {}", e);
+            }
+        });
+
         // Wait for shutdown
         let mut shutdown_rx = shutdown_tx.subscribe();
         let _ = shutdown_rx.recv().await;
@@ -130,6 +142,7 @@ mod run {
         }
 
         ipc_handle.abort();
+        web_handle.abort();
 
         info!("Pulse Player stopped");
         Ok(())
@@ -139,8 +152,8 @@ mod run {
         let args: Vec<String> = std::env::args().collect();
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("play");
 
-        // Default: launch CLI player (terminal with host discovery + connection)
-        if mode == "play" || mode.starts_with('-') {
+        // Default: bypass CLI interactive mode and go straight to the web interface.
+        if mode == "headless" || args.iter().any(|arg| arg == "--bg-service" || arg == "--startup") {
             return cli_player::run(args);
         }
 
