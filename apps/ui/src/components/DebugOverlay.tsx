@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
+import { listen } from '../store/ipc'
 import './DebugOverlay.css'
 
 interface MetricsSnapshot {

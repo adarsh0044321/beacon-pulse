@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, listen } from '../store/ipc';
 import { 
   ArrowLeft, Play, Square, RefreshCw, Users, Key, AlertTriangle, 
   Cpu, Zap, Settings as SettingsIcon, Monitor, Activity, Terminal, ShieldAlert

@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users, Trash2, History } from 'lucide-react';
 import type { Page } from '../App';
 import { useSessionStore, type DiscoveredHost } from '../store/sessionStore';
 import { useToastStore } from '../store/toastStore';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, listen } from '../store/ipc';
 import { DebugOverlay } from '../components/DebugOverlay';
 
 interface ClientProps { onNavigate: (p: Page) => void; }
@@ -277,6 +276,19 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [wolStatus, setWolStatus] = useState('');
   const pressedKeysRef = useRef<Map<string, { keyCode: number; scan: number; extended: boolean }>>(new Map());
   const [packetLossPct, setPacketLossPct] = useState(0);
+  const [recentConnections, setRecentConnections] = useState<DiscoveredHost[]>([]);
+  const [scalingMode, setScalingMode] = useState<'fit' | 'stretch' | 'original'>('fit');
+
+  // Load recent connections on load/tab switch
+  useEffect(() => {
+    const loadRecent = () => {
+      const recentStr = localStorage.getItem('lanshare_recent_connections') || '[]';
+      try {
+        setRecentConnections(JSON.parse(recentStr));
+      } catch {}
+    };
+    loadRecent();
+  }, [tab, streamConnected]);
 
   // Real-time client logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -344,6 +356,20 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       setTab('stream');
       setError(null);
       addToast('Stream Connected', 'Established direct connection with remote host.', 'success');
+
+      // Save to recent connections
+      const { connectedHost } = useSessionStore.getState();
+      if (connectedHost) {
+        const recentStr = localStorage.getItem('lanshare_recent_connections') || '[]';
+        let recent: DiscoveredHost[] = [];
+        try {
+          recent = JSON.parse(recentStr);
+        } catch {}
+        recent = recent.filter(h => h.address !== connectedHost.address || h.port !== connectedHost.port);
+        recent.unshift(connectedHost);
+        recent = recent.slice(0, 5);
+        localStorage.setItem('lanshare_recent_connections', JSON.stringify(recent));
+      }
     });
 
     const unlistenDisconnected = listen<{ reason: string }>('stream_disconnected', () => {
@@ -488,6 +514,29 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     const videoHeight = canvas.height;
     if (videoWidth === 0 || videoHeight === 0) return null;
 
+    if (scalingMode === 'stretch') {
+      const xCanvas = e.clientX - rect.left;
+      const yCanvas = e.clientY - rect.top;
+      return {
+        x: xCanvas,
+        y: yCanvas,
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+      };
+    }
+
+    if (scalingMode === 'original') {
+      const xCanvas = e.clientX - rect.left;
+      const yCanvas = e.clientY - rect.top;
+      return {
+        x: xCanvas,
+        y: yCanvas,
+        w: videoWidth,
+        h: videoHeight,
+      };
+    }
+
+    // Default: 'fit' (contain)
     const videoRatio = videoWidth / videoHeight;
     const displayRatio = rect.width / rect.height;
 
@@ -899,6 +948,52 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 </div>
               )}
 
+              {/* Recent Connections */}
+              {recentConnections.length > 0 && (
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <History size={16} style={{ color: 'var(--accent-purple)' }} />
+                    <h3>Recent Connections</h3>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {recentConnections.map(host => (
+                      <div key={`${host.address}:${host.port}`} className="device-card">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Wifi size={18} style={{ color: 'var(--text-muted)' }} />
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>{host.name}</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                              IP Target: {host.address}:{host.port}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            id={`btn-connect-recent-${host.address.replace(/\./g, '-')}`}
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleConnect(host)}
+                            disabled={connectingHost?.address === host.address}
+                          >
+                            {connectingHost?.address === host.address ? <div className="spinner" /> : 'Connect'}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              const updated = recentConnections.filter(h => h.address !== host.address || h.port !== host.port);
+                              localStorage.setItem('lanshare_recent_connections', JSON.stringify(updated));
+                              setRecentConnections(updated);
+                            }}
+                            style={{ color: 'var(--danger)' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Pairing code inputs */}
               <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <h3>Connection Pairing Code</h3>
@@ -955,13 +1050,19 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
           {/* TAB 2: Active Stream Canvas Render */}
           {tab === 'stream' && streamConnected && (
-            <div style={{ width: '100%', height: 'calc(100vh - 120px)', background: '#000', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ width: '100%', height: 'calc(100vh - 120px)', background: '#000', position: 'relative', overflow: scalingMode === 'original' ? 'auto' : 'hidden' }}>
               
               {/* HTML5 Video Decoder Canvas */}
               <canvas
                 ref={canvasRef}
                 id="stream-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', cursor: cursorShape }}
+                style={{
+                  width: scalingMode === 'original' ? `${canvasRef.current?.width || 1920}px` : '100%',
+                  height: scalingMode === 'original' ? `${canvasRef.current?.height || 1080}px` : '100%',
+                  objectFit: scalingMode === 'fit' ? 'contain' : scalingMode === 'stretch' ? 'fill' : 'none',
+                  display: 'block',
+                  cursor: cursorShape
+                }}
                 onMouseMove={handleMouseMove}
                 onMouseDown={(e) => handleMouseButton(e, true)}
                 onMouseUp={(e) => handleMouseButton(e, false)}
@@ -1019,12 +1120,34 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
                 {/* HUD controls (clickable) */}
                 <div style={{
-                  display: 'flex', gap: '10px', pointerEvents: 'auto'
+                  display: 'flex', gap: '10px', alignItems: 'center', pointerEvents: 'auto'
                 }}>
+                  {/* Scaling Mode Selector */}
+                  <div style={{
+                    display: 'flex', background: 'rgba(10, 8, 20, 0.7)', borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)', backdropFilter: 'var(--glass-blur)', overflow: 'hidden',
+                    height: '32px', alignItems: 'center'
+                  }}>
+                    {(['fit', 'stretch', 'original'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        className={`btn ${scalingMode === mode ? 'btn-primary' : 'btn-ghost'}`}
+                        onClick={() => setScalingMode(mode)}
+                        style={{
+                          textTransform: 'capitalize', padding: '0 8px', fontSize: '0.72rem',
+                          borderRadius: 0, border: 'none', height: '100%', minHeight: 'unset',
+                          fontWeight: 500
+                        }}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+
                   <button 
                     className="btn btn-ghost btn-sm"
                     onClick={() => invoke('request_keyframe').then(() => addToast('Keyframe Requested', 'Sent IDR request to host.', 'info')).catch(console.error)}
-                    style={{ background: 'rgba(10, 8, 20, 0.7)', backdropFilter: 'var(--glass-blur)' }}
+                    style={{ background: 'rgba(10, 8, 20, 0.7)', backdropFilter: 'var(--glass-blur)', height: '32px' }}
                   >
                     Request IDR
                   </button>
@@ -1032,7 +1155,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   <button 
                     className="btn btn-ghost btn-sm"
                     onClick={toggleFullscreen}
-                    style={{ background: 'rgba(10, 8, 20, 0.7)', backdropFilter: 'var(--glass-blur)' }}
+                    style={{ background: 'rgba(10, 8, 20, 0.7)', backdropFilter: 'var(--glass-blur)', height: '32px' }}
                   >
                     {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                   </button>
@@ -1040,6 +1163,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   <button 
                     className="btn btn-danger btn-sm"
                     onClick={handleDisconnect}
+                    style={{ height: '32px' }}
                   >
                     Disconnect
                   </button>
