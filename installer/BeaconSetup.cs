@@ -83,6 +83,41 @@ class BeaconSetup {
     }
 
     Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("  Select UI Mode to Install:");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("    [1]  Localhost Web UI  — user-friendly, runs in default browser");
+    Console.WriteLine("    [2]  Headless Mode     — runs undetected in background, console hides");
+    Console.WriteLine();
+    Console.ResetColor();
+    Console.Write("  Enter choice (1/2) [default: 1]: ");
+
+    uint uiMode = 1;
+    while (true) {
+      var key = Console.ReadKey(true);
+      if (key.KeyChar == '1' || key.Key == ConsoleKey.Enter) {
+        Console.WriteLine(key.Key == ConsoleKey.Enter ? "1" : key.KeyChar.ToString());
+        uiMode = 1;
+        break;
+      }
+      if (key.KeyChar == '2') {
+        Console.WriteLine("2");
+        uiMode = 2;
+        break;
+      }
+    }
+
+    try {
+      using (var rk = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Beacon")) {
+        if (rk != null) {
+          rk.SetValue("UiMode", uiMode, Microsoft.Win32.RegistryValueKind.DWord);
+        }
+      }
+    } catch (Exception ex) {
+      Msg("Warning: Failed to write UI mode to registry: " + ex.Message);
+    }
+
+    Console.WriteLine();
 
     // ── Step 1: Kill existing processes ──────────────────────────────────
     Msg("Stopping existing Beacon processes...");
