@@ -410,11 +410,16 @@ pub fn read_clipboard_text() -> Option<String> {
 
 #[cfg(windows)]
 pub fn write_clipboard_text(text: &str) -> bool {
-    use windows::Win32::Foundation::{HANDLE, HWND};
+    use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalFree(hmem: HGLOBAL) -> HGLOBAL;
+    }
 
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     let size = wide.len() * 2;
@@ -435,7 +440,11 @@ pub fn write_clipboard_text(text: &str) -> bool {
                         let handle = HANDLE(hglobal.0);
                         if SetClipboardData(13, handle).is_ok() {
                             success = true;
+                        } else {
+                            let _ = GlobalFree(hglobal);
                         }
+                    } else {
+                        let _ = GlobalFree(hglobal);
                     }
                 }
             }

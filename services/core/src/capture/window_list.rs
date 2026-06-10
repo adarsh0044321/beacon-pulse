@@ -4,7 +4,7 @@ use anyhow::Result;
 
 #[cfg(windows)]
 use windows::Win32::{
-    Foundation::{BOOL, HWND, LPARAM, RECT},
+    Foundation::{BOOL, HWND, LPARAM, RECT, CloseHandle},
     System::{
         ProcessStatus::GetModuleBaseNameW,
         Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
@@ -132,6 +132,7 @@ fn get_process_name(pid: u32) -> Option<String> {
         let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid).ok()?;
         let mut name_buf = [0u16; 260];
         let len = GetModuleBaseNameW(handle, None, &mut name_buf);
+        let _ = CloseHandle(handle);
         if len == 0 {
             return None;
         }
