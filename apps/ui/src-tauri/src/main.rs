@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, State, Manager};
 
 mod ipc_client;
 use ipc_client::IpcClient;
+use beacon_pulse as lanshare_service;
 
 // Windows CREATE_NO_WINDOW flag — ensures no terminal flickers on spawn.
 #[cfg(windows)]
@@ -204,6 +205,8 @@ fn main() {
             send_file_start,
             send_file_chunk,
             send_file_end,
+            list_host_processes,
+            kill_host_process,
         ])
         // ── Graceful shutdown on window close ─────────────────────────────
         // Kill watchdog + service when the user closes the last window.
@@ -580,5 +583,15 @@ async fn send_file_end(state: State<'_, AppData>) -> Result<Value, String> {
             "cmd": "send_file_end",
         }),
     )
+}
+
+#[tauri::command]
+async fn list_host_processes(state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(&state, serde_json::json!({ "cmd": "list_host_processes" }))
+}
+
+#[tauri::command]
+async fn kill_host_process(pid: u32, state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(&state, serde_json::json!({ "cmd": "kill_host_process", "pid": pid }))
 }
 

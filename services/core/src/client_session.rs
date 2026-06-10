@@ -113,6 +113,13 @@ pub enum ClientEvent {
     CursorChanged {
         shape: String,
     },
+    HostProcessList {
+        processes: Vec<crate::network::ProcessInfo>,
+    },
+    HostProcessKilled {
+        pid: u32,
+        success: bool,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,6 +382,12 @@ pub async fn start(
                                                 crate::input::write_clipboard_text(&text);
                                             }
                                         }
+                                    }
+                                    ControlMessage::HostProcessList { processes } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::HostProcessList { processes });
+                                    }
+                                    ControlMessage::HostProcessKilled { pid, success } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::HostProcessKilled { pid, success });
                                     }
                                     _ => {}
                                 }

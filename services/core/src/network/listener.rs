@@ -467,6 +467,24 @@ where
                     }
                 }
 
+                ControlMessage::ListHostProcesses => {
+                    let processes = crate::ipc::list_processes();
+                    let response = ControlMessage::HostProcessList { processes };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                }
+
+                ControlMessage::KillHostProcess { pid } => {
+                    let success = crate::ipc::kill_process(pid);
+                    let response = ControlMessage::HostProcessKilled { pid, success };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                }
+
                 _ => {}
             }
         }

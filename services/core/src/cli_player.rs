@@ -274,6 +274,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
                                 }
                             }
                         }
+                        ClientEvent::HostProcessList { .. } => {}
+                        ClientEvent::HostProcessKilled { .. } => {}
                     }
                 }
                 Some(_) = window_shutdown_rx.recv() => {

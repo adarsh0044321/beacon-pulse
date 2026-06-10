@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users, Trash2, History } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users, Trash2, History, Cpu } from 'lucide-react';
 import type { Page } from '../App';
 import { useSessionStore, type DiscoveredHost } from '../store/sessionStore';
 import { useToastStore } from '../store/toastStore';
@@ -253,6 +253,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     discoveredHosts, hostsLoading, discoverHosts,
     connectedHost, connectToHost, disconnectFromHost,
     stats: sessionStats,
+    hostProcesses, processesLoading, fetchHostProcesses,
+    killHostProcess, setHostProcesses,
   } = useSessionStore();
 
   const { addToast } = useToastStore();
@@ -261,7 +263,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const { feedChunk, closeDecoder, stats: decodeStats, error: decodeError } =
     useWebCodecsDecoder(canvasRef as React.RefObject<HTMLCanvasElement>);
 
-  const [tab, setTab] = useState<'join' | 'stream' | 'performance' | 'logs'>('join');
+  const [tab, setTab] = useState<'join' | 'stream' | 'performance' | 'logs' | 'remote_manager'>('join');
   const [pairingInput, setPairingInput] = useState('');
   const [connectingHost, setConnectingHost] = useState<DiscoveredHost | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -278,6 +280,9 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [packetLossPct, setPacketLossPct] = useState(0);
   const [recentConnections, setRecentConnections] = useState<DiscoveredHost[]>([]);
   const [scalingMode, setScalingMode] = useState<'fit' | 'stretch' | 'original'>('fit');
+  const [processSearch, setProcessSearch] = useState('');
+  const [killConfirmPid, setKillConfirmPid] = useState<number | null>(null);
+  const [killConfirmName, setKillConfirmName] = useState('');
 
   // Load recent connections on load/tab switch
   useEffect(() => {
@@ -432,6 +437,14 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs]);
+
+  // Poll host processes when on remote manager tab
+  useEffect(() => {
+    if (tab !== 'remote_manager' || !streamConnected) return;
+    fetchHostProcesses();
+    const iv = setInterval(fetchHostProcesses, 5000);
+    return () => clearInterval(iv);
+  }, [fetchHostProcesses, tab, streamConnected]);
 
   // Accumulate performance history
   useEffect(() => {
@@ -782,8 +795,13 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        const len = bytes.byteLength;
+        const subChunkSize = 8192;
+        for (let i = 0; i < len; i += subChunkSize) {
+          binary += String.fromCharCode.apply(
+            null,
+            bytes.subarray(i, i + subChunkSize) as unknown as number[]
+          );
         }
         const base64Data = btoa(binary);
         
@@ -866,6 +884,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
             <span>Performance</span>
           </div>
 
+          <div 
+            className={`sidebar-item ${tab === 'remote_manager' ? 'active' : ''} ${!streamConnected ? 'disabled' : ''}`}
+            onClick={() => streamConnected && setTab('remote_manager')}
+            style={{ opacity: streamConnected ? 1 : 0.45, cursor: streamConnected ? 'pointer' : 'not-allowed' }}
+          >
+            <Cpu size={16} />
+            <span>Remote Manager</span>
+          </div>
+
           <div className={`sidebar-item ${tab === 'logs' ? 'active' : ''}`} onClick={() => setTab('logs')}>
             <Terminal size={16} />
             <span>System Logs</span>
@@ -889,7 +916,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       <div className="main-content">
         <div className="page-header">
           <h2 style={{ textTransform: 'capitalize' }}>
-            {tab === 'join' ? 'Connect to Stream' : tab === 'stream' ? 'Video Stream HUD' : tab === 'performance' ? 'Decoding Latency Graph' : 'System Logs'}
+            {tab === 'join' ? 'Connect to Stream' : tab === 'stream' ? 'Video Stream HUD' : tab === 'performance' ? 'Decoding Latency Graph' : tab === 'remote_manager' ? 'Remote Task Manager' : 'System Logs'}
           </h2>
           {streamConnected && (
             <div className="badge badge-active" style={{ marginLeft: 'auto' }}>
@@ -1237,6 +1264,119 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 <div className="empty-state">
                   <Activity size={32} style={{ opacity: 0.3 }} />
                   <p>Performance analytics will plot once an active stream connects.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 5: Remote Task Manager */}
+          {tab === 'remote_manager' && streamConnected && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <RefreshCw 
+                    size={16} 
+                    className={processesLoading ? 'spinner' : ''} 
+                    style={{ cursor: 'pointer', color: 'var(--accent)' }} 
+                    onClick={fetchHostProcesses} 
+                  />
+                  <h3>Remote Host Processes</h3>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search processes by name..."
+                  value={processSearch}
+                  onChange={e => setProcessSearch(e.target.value)}
+                  style={{ maxWidth: '300px' }}
+                />
+              </div>
+
+              {processesLoading && hostProcesses.length === 0 ? (
+                <div className="empty-state">
+                  <div className="spinner" />
+                  <p>Retrieving host process list...</p>
+                </div>
+              ) : hostProcesses.length === 0 ? (
+                <div className="empty-state">
+                  <p>No processes found.</p>
+                </div>
+              ) : (
+                <div className="card" style={{ padding: '0', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                  <div style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-secondary)' }}>Process Name</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-secondary)' }}>PID</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-secondary)' }}>Threads</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hostProcesses
+                          .filter(p => p.name.toLowerCase().includes(processSearch.toLowerCase()))
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map(proc => (
+                            <tr key={proc.pid} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}>
+                              <td style={{ padding: '10px 16px', fontWeight: 500, color: '#fff' }}>{proc.name}</td>
+                              <td style={{ padding: '10px 16px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{proc.pid}</td>
+                              <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>{proc.threads}</td>
+                              <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                <button
+                                  className="btn btn-sm btn-ghost"
+                                  style={{ color: 'var(--danger)', padding: '4px 8px', minHeight: 'unset' }}
+                                  onClick={() => {
+                                    setKillConfirmPid(proc.pid);
+                                    setKillConfirmName(proc.name);
+                                  }}
+                                >
+                                  End Task
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Confirmation Modal */}
+              {killConfirmPid !== null && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(10, 8, 20, 0.75)', backdropFilter: 'blur(8px)',
+                  display: 'flex', justifyContent: 'center', alignItems: 'center',
+                  zIndex: 1000
+                }}>
+                  <div className="card" style={{ width: '400px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid var(--border)' }}>
+                    <h3 style={{ color: 'var(--danger)' }}>Confirm End Task</h3>
+                    <p style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
+                      Are you sure you want to terminate <strong>{killConfirmName}</strong> (PID: {killConfirmPid}) on the host machine?
+                      Unsaved data in this process will be lost.
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                      <button 
+                        className="btn btn-ghost" 
+                        onClick={() => {
+                          setKillConfirmPid(null);
+                          setKillConfirmName('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        className="btn btn-danger" 
+                        onClick={() => {
+                          killHostProcess(killConfirmPid);
+                          setKillConfirmPid(null);
+                          setKillConfirmName('');
+                        }}
+                      >
+                        End Process
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

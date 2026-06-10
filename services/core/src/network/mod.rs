@@ -54,6 +54,10 @@ pub enum ControlMessage {
         data: String,
     },
     FileEnd,
+    ListHostProcesses,
+    KillHostProcess {
+        pid: u32,
+    },
 
     // Host → Client
     JoinAccepted {
@@ -88,6 +92,13 @@ pub enum ControlMessage {
     ClipboardSync {
         text: String,
     },
+    HostProcessList {
+        processes: Vec<ProcessInfo>,
+    },
+    HostProcessKilled {
+        pid: u32,
+        success: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -95,6 +106,13 @@ pub struct Permissions {
     pub input_control: bool,
     pub clipboard: bool,
     pub audio: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub threads: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

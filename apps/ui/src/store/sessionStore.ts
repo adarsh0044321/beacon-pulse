@@ -67,6 +67,12 @@ export interface MonitorInfo {
   index: number;
 }
 
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  threads: number;
+}
+
 interface SessionState {
   // Sharing state
   isSharing: boolean;
@@ -90,8 +96,15 @@ interface SessionState {
   hostsLoading: boolean;
   connectedHost: DiscoveredHost | null;
 
+  // Remote Task Manager
+  hostProcesses: ProcessInfo[];
+  processesLoading: boolean;
+
   // Actions
   fetchWindows: () => Promise<void>;
+  fetchHostProcesses: () => Promise<void>;
+  killHostProcess: (pid: number) => Promise<void>;
+  setHostProcesses: (processes: ProcessInfo[]) => void;
   fetchMonitors: () => Promise<void>;
   startShare: (target: any) => Promise<void>;
   stopShare: () => Promise<void>;
@@ -129,6 +142,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   discoveredHosts: [],
   hostsLoading: false,
   connectedHost: null,
+
+  hostProcesses: [],
+  processesLoading: false,
 
   encoderInfo: null,
 
@@ -309,5 +325,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setEncoderInfo: (info: EncoderInfo) => set({ encoderInfo: info }),
   setBitrate: (kbps: number) => {
     invoke('set_bitrate', { kbps }).catch(console.error);
+  },
+
+  fetchHostProcesses: async () => {
+    set({ processesLoading: true });
+    try {
+      await invoke('list_host_processes');
+    } catch (e) {
+      console.error('Failed to list host processes:', e);
+      set({ processesLoading: false });
+    }
+  },
+
+  killHostProcess: async (pid: number) => {
+    try {
+      await invoke('kill_host_process', { pid });
+    } catch (e) {
+      console.error('Failed to kill host process:', e);
+    }
+  },
+
+  setHostProcesses: (processes: ProcessInfo[]) => {
+    set({ hostProcesses: processes, processesLoading: false });
   },
 }));

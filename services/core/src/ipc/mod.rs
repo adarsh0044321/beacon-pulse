@@ -100,6 +100,12 @@ pub enum UiCommand {
     },
     #[cfg(feature = "player")]
     SendFileEnd,
+    #[cfg(feature = "player")]
+    ListHostProcesses,
+    #[cfg(feature = "player")]
+    KillHostProcess {
+        pid: u32,
+    },
 }
 
 /// Messages sent from Service → UI
@@ -214,6 +220,15 @@ pub enum ServiceEvent {
     #[cfg(feature = "player")]
     CursorChanged {
         shape: String,
+    },
+    #[cfg(feature = "player")]
+    HostProcessList {
+        processes: Vec<crate::network::ProcessInfo>,
+    },
+    #[cfg(feature = "player")]
+    HostProcessKilled {
+        pid: u32,
+        success: bool,
     },
 
     /// Phase 3: sent immediately after hardware encoder activates
@@ -840,6 +855,44 @@ async fn dispatch_cmd(
                 bitrate_kbps: 0,
             }
         }
+
+        #[cfg(feature = "player")]
+        UiCommand::ListHostProcesses => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::ListHostProcesses) {
+                    error!(error = %e, "Failed to send ListHostProcesses request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::KillHostProcess { pid } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::KillHostProcess { pid }) {
+                    error!(error = %e, "Failed to send KillHostProcess request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
     }
 }
 
@@ -954,6 +1007,12 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         },
         client_session::ClientEvent::CursorChanged { shape } => {
             ServiceEvent::CursorChanged { shape }
+        }
+        client_session::ClientEvent::HostProcessList { processes } => {
+            ServiceEvent::HostProcessList { processes }
+        }
+        client_session::ClientEvent::HostProcessKilled { pid, success } => {
+            ServiceEvent::HostProcessKilled { pid, success }
         }
     }
 }
@@ -1351,4 +1410,77 @@ async fn handle_ws_client(
 
     ws_writer_handle.abort();
     Ok(())
+}
+
+#[cfg(windows)]
+pub fn list_processes() -> Vec<crate::network::ProcessInfo> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::Foundation::CloseHandle;
+
+    let mut processes = Vec::new();
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if let Ok(snapshot) = snapshot {
+            if snapshot.is_invalid() {
+                return processes;
+            }
+            let mut entry = PROCESSENTRY32::default();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+
+            if Process32First(snapshot, &mut entry).is_ok() {
+                loop {
+                    let name_len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                    let name_bytes: Vec<u8> = entry.szExeFile[..name_len]
+                        .iter()
+                        .map(|&c| c as u8)
+                        .collect();
+                    let name = String::from_utf8_lossy(&name_bytes).into_owned();
+
+                    processes.push(crate::network::ProcessInfo {
+                        pid: entry.th32ProcessID,
+                        name,
+                        threads: entry.cntThreads,
+                    });
+
+                    if Process32Next(snapshot, &mut entry).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snapshot);
+        }
+    }
+    processes
+}
+
+#[cfg(not(windows))]
+pub fn list_processes() -> Vec<crate::network::ProcessInfo> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+pub fn kill_process(pid: u32) -> bool {
+    use windows::Win32::System::Threading::{
+        OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+    };
+    use windows::Win32::Foundation::CloseHandle;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, false, pid);
+        if let Ok(handle) = handle {
+            if !handle.is_invalid() {
+                let success = TerminateProcess(handle, 1).is_ok();
+                let _ = CloseHandle(handle);
+                return success;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+pub fn kill_process(_pid: u32) -> bool {
+    false
 }
