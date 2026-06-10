@@ -152,7 +152,9 @@ mod run {
             .map(|s| s == "service")
             .unwrap_or(false);
         let web_handle = tokio::spawn(async move {
-            if let Err(e) = lanshare_service::ipc::run_web_server(web_state, 45199, false, !is_service).await {
+            if let Err(e) =
+                lanshare_service::ipc::run_web_server(web_state, 45199, false, !is_service).await
+            {
                 error!("Web server failed: {}", e);
             }
         });
@@ -230,7 +232,12 @@ mod run {
 
         // Read registry setting for UI mode choice (1 = Localhost Web UI, 2 = Headless/Background Terminal)
         let ui_mode = lanshare_service::registry::read_dword("UiMode").unwrap_or(1);
-        if ui_mode == 2 || mode == "headless" || args.iter().any(|arg| arg == "--bg-service" || arg == "--startup") {
+        if ui_mode == 2
+            || mode == "headless"
+            || args
+                .iter()
+                .any(|arg| arg == "--bg-service" || arg == "--startup")
+        {
             return cli_host::run(args);
         }
 
