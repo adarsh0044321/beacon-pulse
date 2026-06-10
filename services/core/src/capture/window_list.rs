@@ -4,7 +4,7 @@ use anyhow::Result;
 
 #[cfg(windows)]
 use windows::Win32::{
-    Foundation::{BOOL, HWND, LPARAM, RECT, CloseHandle},
+    Foundation::{CloseHandle, BOOL, HWND, LPARAM, RECT},
     System::{
         ProcessStatus::GetModuleBaseNameW,
         Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
