@@ -1108,7 +1108,12 @@ enum WsMsg {
     Response(ServiceEvent),
 }
 
-pub async fn run_web_server(state: Arc<AppState>, port: u16, is_player: bool, launch_browser: bool) -> Result<()> {
+pub async fn run_web_server(
+    state: Arc<AppState>,
+    port: u16,
+    is_player: bool,
+    launch_browser: bool,
+) -> Result<()> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -1157,11 +1162,17 @@ fn open_browser(url: &str) {
     }
 }
 
-async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<AppState>, is_player: bool) -> Result<()> {
+async fn handle_connection(
+    stream: tokio::net::TcpStream,
+    state: Arc<AppState>,
+    is_player: bool,
+) -> Result<()> {
     let mut peek_buf = [0u8; 1024];
     let n = stream.peek(&mut peek_buf).await?;
     let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
-    if peek_str.contains("Upgrade: websocket") || (peek_str.contains("upgrade:") && peek_str.contains("websocket")) {
+    if peek_str.contains("Upgrade: websocket")
+        || (peek_str.contains("upgrade:") && peek_str.contains("websocket"))
+    {
         let ws_stream = tokio_tungstenite::accept_async(stream).await?;
         handle_ws_client(ws_stream, state, is_player).await?;
     } else {
@@ -1210,11 +1221,12 @@ async fn handle_http_request(mut stream: tokio::net::TcpStream, is_player: bool)
     };
 
     if let Some(file) = file_data {
-        let is_fallback = file_path != "index.html" && if is_player {
-            PlayerAssets::get(file_path).is_none()
-        } else {
-            HostAssets::get(file_path).is_none()
-        };
+        let is_fallback = file_path != "index.html"
+            && if is_player {
+                PlayerAssets::get(file_path).is_none()
+            } else {
+                HostAssets::get(file_path).is_none()
+            };
         let actual_path = if is_fallback { "index.html" } else { file_path };
         let content_type = match actual_path.split('.').last() {
             Some("html") => "text/html",
@@ -1280,7 +1292,8 @@ async fn handle_ws_client(
     }
 
     // Set up a proactive event channel for dispatch_cmd
-    let (dispatch_push_tx, mut dispatch_push_rx) = tokio::sync::mpsc::unbounded_channel::<ServiceEvent>();
+    let (dispatch_push_tx, mut dispatch_push_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ServiceEvent>();
     let push_tx_clone = push_tx.clone();
     tokio::spawn(async move {
         while let Some(ev) = dispatch_push_rx.recv().await {
@@ -1324,7 +1337,9 @@ async fn handle_ws_client(
         let cmd: UiCommand = match serde_json::from_str(&msg) {
             Ok(c) => c,
             Err(e) => {
-                let err_resp = ServiceEvent::Error { message: format!("invalid command: {e}") };
+                let err_resp = ServiceEvent::Error {
+                    message: format!("invalid command: {e}"),
+                };
                 let _ = push_tx.send(WsMsg::Event(err_resp));
                 continue;
             }
