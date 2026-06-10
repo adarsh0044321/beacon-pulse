@@ -152,8 +152,9 @@ mod run {
         let args: Vec<String> = std::env::args().collect();
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("play");
 
-        // Default: bypass CLI interactive mode and go straight to the web interface.
-        if mode == "headless" || args.iter().any(|arg| arg == "--bg-service" || arg == "--startup") {
+        // Read registry setting for UI mode choice (1 = Localhost Web UI, 2 = Headless/Background Terminal)
+        let ui_mode = lanshare_service::registry::read_dword("UiMode").unwrap_or(1);
+        if ui_mode == 2 || mode == "headless" || args.iter().any(|arg| arg == "--bg-service" || arg == "--startup") {
             return cli_player::run(args);
         }
 
