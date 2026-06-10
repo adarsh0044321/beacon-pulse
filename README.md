@@ -49,6 +49,25 @@
 
 ---
 
+## 🔌 UI Modes: Localhost Web UI vs. Headless Mode
+
+During installation (or via registry configuration), you can select the active interface mode for both Beacon and Pulse:
+
+### 1. Localhost Web UI Mode (Default)
+- **Overview**: Spins up a local web server (port `45199` for Host, `45200` for Player) and automatically opens a beautiful glassmorphic React app in your default web browser (Chrome, Edge, Firefox, etc.).
+- **Foreground Operation**: Designed for a user-friendly and visual experience. It runs in the foreground and **cannot hide undetected**. The terminal console remains visible.
+- **Port Details**:
+  - Host Web UI: `http://localhost:45199`
+  - Player Web UI: `http://localhost:45200`
+
+### 2. Headless / Terminal UI Mode
+- **Overview**: Runs as a classic terminal interface with an interactive console menu.
+- **Undetected Background Run**: Designed for silent, headless operations. The terminal console window **explicitly hides** when sharing or running in the background.
+- **Access**: The processes run silently and undetected in the background (monitored by the watchdog service), and are accessible only via the tray overlay menu.
+- **Registry Setting**: Persisted via the `UiMode` DWORD under `HKCU\Software\Beacon` (value `1` for Web UI, `2` for Headless/Terminal).
+
+---
+
 ## 🚀 Quick Start
 
 ### Step 1: Start Sharing (Host Machine)
