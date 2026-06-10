@@ -1,4 +1,4 @@
-//! Named pipe IPC server — communication bridge between LANShareService and LANShareUI.
+//! Named pipe IPC server — communication bridge between Beacon/Pulse Service and UI.
 //! Protocol: newline-delimited JSON messages.
 
 use anyhow::Result;
@@ -958,7 +958,7 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
     }
 }
 
-/// TCP port-scan discovery: scans all local /24 subnets for LANShare control port.
+/// TCP port-scan discovery: scans all local /24 subnets for Beacon/Pulse control port.
 /// This is the most reliable method — works on hotspots, corporate networks,
 /// and anywhere UDP broadcast/multicast is blocked.
 /// Runs async TCP connect attempts concurrently up to 128 tasks.

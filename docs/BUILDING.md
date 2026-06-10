@@ -12,13 +12,13 @@ The project uses Cargo workspace features to build different executables from th
 ### 1. Build Beacon (Host)
 Navigate to the root directory and run:
 ```powershell
-cargo build --release -p lanshare-service --bin beacon --features host
+cargo build --release -p beacon-pulse --bin beacon --features host
 ```
 The executable will be located in `target/release/beacon.exe`.
 
 ### 2. Build Pulse (Player Backend)
 ```powershell
-cargo build --release -p lanshare-service --bin pulse --features player
+cargo build --release -p beacon-pulse --bin pulse --features player
 ```
 
 ### 3. Build Watchdog

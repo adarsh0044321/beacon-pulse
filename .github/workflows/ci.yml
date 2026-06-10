@@ -39,10 +39,10 @@ jobs:
       run: cargo clippy --all-targets --all-features
 
     - name: Build Host (Beacon)
-      run: cargo build --release -p lanshare-service --bin beacon --features host
+      run: cargo build --release -p beacon-pulse --bin beacon --features host
 
     - name: Build Player Backend (Pulse)
-      run: cargo build --release -p lanshare-service --bin pulse --features player
+      run: cargo build --release -p beacon-pulse --bin pulse --features player
 
     - name: Build Watchdog
       run: cargo build --release -p beacon-watchdog
@@ -65,8 +65,8 @@ jobs:
     - name: Build All Release Binaries
       shell: bash
       run: |
-        cargo build --release -p lanshare-service --bin beacon --features host
-        cargo build --release -p lanshare-service --bin pulse --features player
+        cargo build --release -p beacon-pulse --bin beacon --features host
+        cargo build --release -p beacon-pulse --bin pulse --features player
         cargo build --release -p beacon-watchdog
         
     - name: Package Release

@@ -84,7 +84,7 @@ pub struct AppState {
     pub broadcast_cancel: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
-/// Ensure Windows Firewall allows inbound traffic on all LANShare ports.
+/// Ensure Windows Firewall allows inbound traffic on all Beacon/Pulse ports.
 /// Runs silently — failure is non-fatal (elevated rights may not be available).
 #[cfg(windows)]
 pub fn add_firewall_rules() {

@@ -21,7 +21,7 @@ use super::discovery::DiscoveredHost;
 
 // ─── Protocol ────────────────────────────────────────────────────────────────
 
-/// Magic bytes to identify LANShare broadcast packets (ASCII "LANS").
+/// Magic bytes to identify Beacon/Pulse broadcast packets (ASCII "LANS").
 const MAGIC: u32 = 0x4C414E53;
 
 /// UDP port used for broadcast discovery announcements.
@@ -124,7 +124,7 @@ pub fn start_broadcast_advertiser(
 /// Uses SO_REUSEADDR so both the host advertiser and client browser can coexist.
 pub async fn browse_via_broadcast() -> Vec<DiscoveredHost> {
     tokio::task::spawn_blocking(move || {
-        // Try to bind with SO_REUSEADDR so multiple LANShare instances can coexist
+        // Try to bind with SO_REUSEADDR so multiple Beacon/Pulse instances can coexist
         let socket = match bind_broadcast_listener() {
             Some(s) => s,
             None => return Vec::new(),

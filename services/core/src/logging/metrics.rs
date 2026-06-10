@@ -335,7 +335,7 @@ pub async fn metrics_loop(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
 
                 // Structured metrics log entry
                 info!(
-                    target: "lanshare_service::telemetry",
+                    target: "beacon_pulse::telemetry",
                     enc_avg_ms  = %format!("{:.2}", snap.avg_encode_ms()),
                     pipe_avg_ms = %format!("{:.2}", snap.avg_pipeline_ms()),
                     bitrate_mbps = %format!("{:.2}", snap.bitrate_mbps()),

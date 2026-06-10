@@ -1,4 +1,4 @@
-//! mDNS service advertiser and client browser for LANShare LAN discovery.
+//! mDNS service advertiser and client browser for Beacon/Pulse LAN discovery.
 //! Uses the `mdns-sd` crate (Bonjour / DNS-SD compatible).
 
 use anyhow::Result;
@@ -101,7 +101,7 @@ impl MdnsAdvertiser {
 
         let hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "lanshare-host".to_string());
+            .unwrap_or_else(|_| "beacon-host".to_string());
 
         // TXT properties — clients verify `version` for protocol compatibility.
         let mut props = std::collections::HashMap::new();
@@ -150,7 +150,7 @@ impl MdnsAdvertiser {
 
 // ── Browser ───────────────────────────────────────────────────────────────────
 
-/// Discovers LANShare hosts on the LAN via mDNS/DNS-SD.
+/// Discovers Beacon hosts on the LAN via mDNS/DNS-SD.
 ///
 /// Browsing runs in a `spawn_blocking` thread so the `try_recv` poll
 /// loop does not block the async executor.  Returns after `TIMEOUT_SECS`

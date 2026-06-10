@@ -1,4 +1,4 @@
-//! Offline benchmark mode — run with: `lanshare-service.exe benchmark`
+//! Offline benchmark mode — run with: `beacon-pulse.exe benchmark`
 //!
 //! Measures the full capture→encode pipeline WITHOUT networking or UI.
 //! Run this FIRST to establish baseline performance before debugging network issues.
@@ -23,7 +23,7 @@ use crate::telemetry::{now_us, BackendId, FrameMetadata, StatsAccumulator};
 /// Run the benchmark. Duration defaults to 10 seconds.
 pub fn run(duration_secs: u64) -> Result<()> {
     println!("\n╔══════════════════════════════════════════════╗");
-    println!("║        LANShare Window — Benchmark Mode       ║");
+    println!("║        Beacon/Pulse — Benchmark Mode         ║");
     println!("╚══════════════════════════════════════════════╝\n");
 
     // Step 1: Pick a window to capture

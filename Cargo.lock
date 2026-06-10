@@ -70,8 +70,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "beacon-pulse"
+version = "1.0.8"
+dependencies = [
+ "anyhow",
+ "atomic",
+ "base64",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crossbeam-channel",
+ "ctrlc",
+ "dashmap",
+ "dirs-next",
+ "futures-util",
+ "hostname",
+ "mdns-sd",
+ "once_cell",
+ "openh264",
+ "parking_lot",
+ "rand 0.8.6",
+ "rcgen",
+ "ring",
+ "rust-embed",
+ "rustls",
+ "serde",
+ "serde_json",
+ "socket2 0.5.10",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+ "windows",
+ "windows-service",
+]
+
+[[package]]
 name = "beacon-watchdog"
-version = "1.0.6"
+version = "1.0.8"
 
 [[package]]
 name = "bitflags"
@@ -577,47 +618,6 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "lanshare-service"
-version = "1.0.7"
-dependencies = [
- "anyhow",
- "atomic",
- "base64",
- "byteorder",
- "bytes",
- "chrono",
- "crossbeam-channel",
- "ctrlc",
- "dashmap",
- "dirs-next",
- "futures-util",
- "hostname",
- "mdns-sd",
- "once_cell",
- "openh264",
- "parking_lot",
- "rand 0.8.6",
- "rcgen",
- "ring",
- "rust-embed",
- "rustls",
- "serde",
- "serde_json",
- "socket2 0.5.10",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
- "windows",
- "windows-service",
 ]
 
 [[package]]

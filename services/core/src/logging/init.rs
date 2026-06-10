@@ -1,9 +1,9 @@
-//! Logging system initialization for LANShare service.
+//! Logging system initialization for Beacon/Pulse service.
 //!
 //! Debug builds:   pretty colored console + JSON file logging
 //! Release builds: JSON file logging only (console silenced via EnvFilter "off")
 //!
-//! Log directory: %APPDATA%/LANShare/logs/
+//! Log directory: %APPDATA%/Beacon/logs/
 //! Files: service.log, capture.log, network.log, metrics.log
 //! Rotation: daily, max 10 files kept
 
@@ -67,9 +67,9 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
 
     // Default verbosity: debug in dev, info in release. Override via RUST_LOG.
     let default_filter = if cfg!(debug_assertions) {
-        "lanshare_service=debug,info"
+        "beacon_pulse=debug,info"
     } else {
-        "lanshare_service=info,warn"
+        "beacon_pulse=info,warn"
     };
 
     // JSON structured layer — service.log (all subsystems)
@@ -84,7 +84,7 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
     let capture_layer = fmt::layer()
         .json()
         .with_writer(capture_writer)
-        .with_filter(EnvFilter::new("lanshare_service::capture=trace"));
+        .with_filter(EnvFilter::new("beacon_pulse::capture=trace"));
 
     // Network-specific trace file
     let network_layer =
@@ -92,14 +92,14 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
             .json()
             .with_writer(network_writer)
             .with_filter(EnvFilter::new(
-                "lanshare_service::network=trace,lanshare_service::pipeline=trace",
+                "beacon_pulse::network=trace,beacon_pulse::pipeline=trace",
             ));
 
     // Metrics/telemetry file
     let metrics_layer = fmt::layer()
         .json()
         .with_writer(metrics_writer)
-        .with_filter(EnvFilter::new("lanshare_service::telemetry=trace"));
+        .with_filter(EnvFilter::new("beacon_pulse::telemetry=trace"));
 
     // Console layer — always the same concrete type to keep the subscriber
     // stack shape identical in debug and release.  In release builds the

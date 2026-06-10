@@ -19,7 +19,7 @@ mod run {
         service_dispatcher,
     };
 
-    use lanshare_service::{
+    use beacon_pulse::{
         add_firewall_rules, auth::PairingManager, cli_player, ipc::IpcServer, logging,
         logging::session_logger::SessionId, network::session::SessionManager, AppState,
     };
@@ -90,7 +90,7 @@ mod run {
 
         #[cfg(feature = "host")]
         let (_dummy_tx, dummy_rx) =
-            tokio::sync::mpsc::unbounded_channel::<lanshare_service::host_session::HostEvent>();
+            tokio::sync::mpsc::unbounded_channel::<beacon_pulse::host_session::HostEvent>();
 
         let state = Arc::new(AppState {
             session_manager,
@@ -126,7 +126,7 @@ mod run {
             .unwrap_or(false);
         let web_handle = tokio::spawn(async move {
             if let Err(e) =
-                lanshare_service::ipc::run_web_server(web_state, 45200, true, !is_service).await
+                beacon_pulse::ipc::run_web_server(web_state, 45200, true, !is_service).await
             {
                 error!("Web server failed: {}", e);
             }
@@ -155,7 +155,7 @@ mod run {
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("play");
 
         // Read registry setting for UI mode choice (1 = Localhost Web UI, 2 = Headless/Background Terminal)
-        let ui_mode = lanshare_service::registry::read_dword("UiMode").unwrap_or(1);
+        let ui_mode = beacon_pulse::registry::read_dword("UiMode").unwrap_or(1);
         if ui_mode == 2
             || mode == "headless"
             || args

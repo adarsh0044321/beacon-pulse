@@ -88,7 +88,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
     // Initialize tracing/logger for console mode
     tracing_subscriber::fmt()
-        .with_env_filter("lanshare_service=info")
+        .with_env_filter("beacon_pulse=info")
         .with_writer(std::io::stdout)
         .init();
 

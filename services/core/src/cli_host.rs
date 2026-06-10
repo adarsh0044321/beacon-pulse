@@ -1073,7 +1073,7 @@ fn start_sharing_service(
 
     // Initialize tracing (logs go to stderr/files)
     tracing_subscriber::fmt()
-        .with_env_filter("lanshare_service=info")
+        .with_env_filter("beacon_pulse=info")
         .with_writer(std::io::stderr)
         .init();
 

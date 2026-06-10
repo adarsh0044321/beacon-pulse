@@ -7,7 +7,7 @@ First off, thank you for considering contributing to Beacon & Pulse! We apprecia
 ### Reporting Bugs
 - Check if the bug has already been reported in our Issues section.
 - Open a new issue using the "Bug Report" template.
-- Include OS version, logs (`appdata/LANShare/logs`), and clear reproduction steps.
+- Include OS version, logs (`appdata/Beacon/logs`), and clear reproduction steps.
 
 ### Suggesting Enhancements
 - Use the "Feature Request" template.

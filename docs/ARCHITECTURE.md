@@ -7,7 +7,7 @@ Beacon and Pulse prioritize local network performance over everything else. By r
 
 ### 1. Beacon (Host Service)
 - **Role:** Headless or Tray-based background service capturing screens and simulating input.
-- **Implementation:** Rust (`lanshare-service` compiled with `--features host`).
+- **Implementation:** Rust (`beacon-pulse` compiled with `--features host`).
 - **Features:** 
   - DXGI Desktop Duplication for hardware-accelerated screen capturing.
   - Windows Registry hooks for unattended startup.
@@ -24,7 +24,7 @@ Beacon and Pulse prioritize local network performance over everything else. By r
 ### 3. Pulse (Player Client)
 - **Role:** Viewer application allowing the user to see the remote screen and send inputs.
 - **Implementation:** 
-  - Backend: Rust (`lanshare-service` compiled with `--features player`).
+  - Backend: Rust (`beacon-pulse` compiled with `--features player`).
   - Frontend: React + Tauri (`apps/ui`).
 - **Features:**
   - Connects via direct TCP/UDP sockets to the Host IP.

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 45100;
 pub const CONTROL_PORT: u16 = 45101;
-pub const MDNS_SERVICE_TYPE: &str = "_lanshare._udp.local.";
+pub const MDNS_SERVICE_TYPE: &str = "_beacon-pulse._udp.local.";
 
 /// Messages sent over the reliable control channel (JSON over TCP/named pipe)
 #[derive(Debug, Clone, Serialize, Deserialize)]

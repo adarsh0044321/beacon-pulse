@@ -19,7 +19,7 @@ mod run {
         service_dispatcher,
     };
 
-    use lanshare_service::{
+    use beacon_pulse::{
         add_firewall_rules, auth::PairingManager, benchmark, cli_host, host_session,
         ipc::IpcServer, logging, logging::session_logger::SessionId, network,
         network::discovery::MdnsAdvertiser, network::session::SessionManager, AppState,
@@ -153,7 +153,7 @@ mod run {
             .unwrap_or(false);
         let web_handle = tokio::spawn(async move {
             if let Err(e) =
-                lanshare_service::ipc::run_web_server(web_state, 45199, false, !is_service).await
+                beacon_pulse::ipc::run_web_server(web_state, 45199, false, !is_service).await
             {
                 error!("Web server failed: {}", e);
             }
@@ -231,7 +231,7 @@ mod run {
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("host");
 
         // Read registry setting for UI mode choice (1 = Localhost Web UI, 2 = Headless/Background Terminal)
-        let ui_mode = lanshare_service::registry::read_dword("UiMode").unwrap_or(1);
+        let ui_mode = beacon_pulse::registry::read_dword("UiMode").unwrap_or(1);
         if ui_mode == 2
             || mode == "headless"
             || args
@@ -248,7 +248,7 @@ mod run {
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(10);
             tracing_subscriber::fmt()
-                .with_env_filter("lanshare_service=debug")
+                .with_env_filter("beacon_pulse=debug")
                 .with_writer(std::io::stdout)
                 .init();
             return benchmark::run(duration);

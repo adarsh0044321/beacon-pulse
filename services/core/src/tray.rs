@@ -1,4 +1,4 @@
-//! System Tray icon implementation for LANShare Host background mode.
+//! System Tray icon implementation for Beacon Host background mode.
 
 use tokio::sync::broadcast;
 use tracing::{error, info};

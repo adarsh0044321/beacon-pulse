@@ -1,4 +1,4 @@
-//! RTP-style packet format for LANShare UDP stream.
+//! RTP-style packet format for Beacon/Pulse UDP stream.
 //!
 //! Packet layout (little-endian):
 //! ┌──────────────────────────────────────────────────────┐

@@ -472,7 +472,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_clipboard_read_write() {
-        let test_str = "LANShare_Test_String_123";
+        let test_str = "Beacon_Test_String_123";
         assert!(write_clipboard_text(test_str));
         assert_eq!(read_clipboard_text(), Some(test_str.to_string()));
     }

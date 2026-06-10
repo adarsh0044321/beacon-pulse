@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //! ```rust,no_run
-//! # use lanshare_service::logging::session_logger::SessionLogger;
+//! # use beacon_pulse::logging::session_logger::SessionLogger;
 //! # use tracing::info;
 //! let logger = SessionLogger::new("sess_8821", 0x001A09BC, "chrome.exe");
 //! let _guard = logger.enter();
@@ -67,7 +67,7 @@ impl SessionLogger {
 macro_rules! log_backend_switch {
     ($hwnd:expr, $from:expr, $to:expr, $reason:expr) => {
         tracing::info!(
-            target: "lanshare_service::capture",
+            target: "beacon_pulse::capture",
             hwnd = %format!("0x{:08X}", $hwnd),
             from = %format!("{:?}", $from),
             to   = %format!("{:?}", $to),
@@ -82,7 +82,7 @@ macro_rules! log_backend_switch {
 macro_rules! log_render_suspended {
     ($hwnd:expr, $app_kind:expr, $stale_ms:expr) => {
         tracing::warn!(
-            target: "lanshare_service::capture",
+            target: "beacon_pulse::capture",
             hwnd = %format!("0x{:08X}", $hwnd),
             app_kind = %format!("{:?}", $app_kind),
             stale_ms = $stale_ms,
@@ -96,7 +96,7 @@ macro_rules! log_render_suspended {
 macro_rules! log_frame_drop {
     ($frame_id:expr, $stage:expr, $reason:expr) => {
         tracing::debug!(
-            target: "lanshare_service::pipeline",
+            target: "beacon_pulse::pipeline",
             frame_id = $frame_id,
             stage = $stage,
             reason = $reason,
@@ -110,7 +110,7 @@ macro_rules! log_frame_drop {
 macro_rules! log_encoder_fallback {
     ($from:expr, $to:expr, $reason:expr) => {
         tracing::warn!(
-            target: "lanshare_service::encoder",
+            target: "beacon_pulse::encoder",
             from_encoder = $from,
             to_encoder = $to,
             reason = $reason,
@@ -124,7 +124,7 @@ macro_rules! log_encoder_fallback {
 macro_rules! log_network_event {
     ($event:expr, $detail:expr) => {
         tracing::warn!(
-            target: "lanshare_service::network",
+            target: "beacon_pulse::network",
             event = $event,
             detail = $detail,
             "network_event"

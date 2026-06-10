@@ -160,7 +160,7 @@ fn compute_hmac_response(pairing_code: &str, challenge_b64: &str) -> Result<Stri
 // Start client session (async — TCP handshake first, then UDP recv)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Initiate connection to a LANShare host.
+/// Initiate connection to a Beacon host.
 ///
 /// Steps:
 ///   1. TCP connect to host_ip:CONTROL_PORT (45101)
@@ -241,7 +241,7 @@ pub async fn start(
     let client_id = uuid::Uuid::new_v4().to_string();
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "LANShare-Client".to_string());
+        .unwrap_or_else(|_| "Pulse-Client".to_string());
 
     let req = ControlMessage::JoinRequest {
         client_id: client_id.clone(),
