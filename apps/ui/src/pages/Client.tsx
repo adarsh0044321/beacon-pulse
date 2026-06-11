@@ -5,6 +5,7 @@ import { useSessionStore, type DiscoveredHost } from '../store/sessionStore';
 import { useToastStore } from '../store/toastStore';
 import { invoke, listen } from '../store/ipc';
 import { DebugOverlay } from '../components/DebugOverlay';
+import { FileManager } from '../components/FileManager';
 
 interface ClientProps { onNavigate: (p: Page) => void; }
 
@@ -27,73 +28,114 @@ interface ParsedLog {
 // WebCodecs decoder hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-function useWebCodecsDecoder(canvasRef: React.RefObject<HTMLCanvasElement>) {
-  const decoderRef = useRef<VideoDecoder | null>(null);
-  const frameCountRef = useRef(0);
-  const lastFpsCheck = useRef(Date.now());
-  const [stats, setStats] = useState<DecoderStats>({ fps: 0, decodeMs: 0, frames: 0, keyframes: 0 });
-  const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+function useMultiWebCodecsDecoder() {
+  const decodersRef = useRef<Map<number, {
+    decoder: VideoDecoder | null;
+    canvas: HTMLCanvasElement | null;
+    frameCount: number;
+    lastFpsCheck: number;
+    stats: DecoderStats;
+  }>>(new Map());
+  const [displayStats, setDisplayStats] = useState<Record<number, DecoderStats>>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
 
-  const initDecoder = useCallback((width: number, height: number) => {
-    if (decoderRef.current && decoderRef.current.state !== 'closed') {
-      decoderRef.current.close();
+  const registerCanvas = useCallback((displayId: number, canvas: HTMLCanvasElement | null) => {
+    let instance = decodersRef.current.get(displayId);
+    if (!instance) {
+      instance = {
+        decoder: null,
+        canvas: null,
+        frameCount: 0,
+        lastFpsCheck: Date.now(),
+        stats: { fps: 0, decodeMs: 0, frames: 0, keyframes: 0 },
+      };
+      decodersRef.current.set(displayId, instance);
+    }
+    
+    if (instance.canvas !== canvas) {
+      instance.canvas = canvas;
+      if (instance.decoder) {
+        instance.decoder.close();
+        instance.decoder = null;
+      }
+    }
+  }, []);
+
+  const initDecoder = useCallback((displayId: number, width: number, height: number) => {
+    let instance = decodersRef.current.get(displayId);
+    if (!instance || !instance.canvas) return;
+
+    if (instance.decoder && instance.decoder.state !== 'closed') {
+      instance.decoder.close();
     }
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvas = instance.canvas;
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d')!;
 
     const decoder = new VideoDecoder({
       output: (frame: VideoFrame) => {
-        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+        if (instance.canvas) {
+          ctx.drawImage(frame, 0, 0, instance.canvas.width, instance.canvas.height);
+        }
         frame.close();
-        frameCountRef.current++;
+        instance.frameCount++;
 
         const now = Date.now();
-        if (now - lastFpsCheck.current >= 1000) {
-          const elapsed = (now - lastFpsCheck.current) / 1000;
-          setStats(prev => ({
+        if (now - instance.lastFpsCheck >= 1000) {
+          const elapsed = (now - instance.lastFpsCheck) / 1000;
+          const fps = Math.round(instance.frameCount / elapsed);
+          instance.stats = {
+            ...instance.stats,
+            fps,
+            frames: instance.stats.frames + instance.frameCount,
+          };
+          setDisplayStats(prev => ({
             ...prev,
-            fps: Math.round(frameCountRef.current / elapsed),
-            frames: prev.frames + frameCountRef.current,
+            [displayId]: { ...instance.stats }
           }));
-          frameCountRef.current = 0;
-          lastFpsCheck.current = now;
+          instance.frameCount = 0;
+          instance.lastFpsCheck = now;
         }
       },
       error: (e: DOMException) => {
-        console.error('[WebCodecs] Decoder error:', e);
-        setError(`Decoder error: ${e.message}`);
+        console.error(`[WebCodecs] Decoder error on display ${displayId}:`, e);
+        setErrors(prev => ({ ...prev, [displayId]: `Decoder error: ${e.message}` }));
       },
     });
 
     decoder.configure({
-      codec: 'avc1.42C033',           // Constrained Baseline H.264, Level 5.1
+      codec: 'avc1.42C033', // Constrained Baseline H.264, Level 5.1
       codedWidth: width,
       codedHeight: height,
-      optimizeForLatency: true,        // Critical for streaming
+      optimizeForLatency: true,
       hardwareAcceleration: 'prefer-hardware',
     });
 
-    decoderRef.current = decoder;
-    setReady(true);
-    setError(null);
-  }, [canvasRef]);
+    instance.decoder = decoder;
+    setErrors(prev => {
+      const copy = { ...prev };
+      delete copy[displayId];
+      return copy;
+    });
+  }, []);
 
   const feedChunk = useCallback((
+    displayId: number,
     data: string,
     timestampUs: number,
     isKeyframe: boolean,
     width: number,
     height: number,
   ) => {
-    if (!decoderRef.current || decoderRef.current.state === 'closed') {
-      initDecoder(width, height);
+    let instance = decodersRef.current.get(displayId);
+    if (!instance || !instance.canvas) return;
+
+    if (!instance.decoder || instance.decoder.state === 'closed') {
+      initDecoder(displayId, width, height);
     }
-    const decoder = decoderRef.current!;
+    const decoder = instance.decoder!;
     if (decoder.state !== 'configured') return;
 
     const raw = atob(data);
@@ -110,28 +152,45 @@ function useWebCodecsDecoder(canvasRef: React.RefObject<HTMLCanvasElement>) {
       const startDecode = performance.now();
       decoder.decode(chunk);
       const endDecode = performance.now();
-      
+
       if (isKeyframe) {
-        setStats(prev => ({ 
-          ...prev, 
-          keyframes: prev.keyframes + 1,
-          decodeMs: Math.round(endDecode - startDecode)
+        instance.stats = {
+          ...instance.stats,
+          keyframes: instance.stats.keyframes + 1,
+          decodeMs: Math.round(endDecode - startDecode),
+        };
+        setDisplayStats(prev => ({
+          ...prev,
+          [displayId]: { ...instance.stats }
         }));
       }
     } catch (e) {
-      console.warn('[WebCodecs] decode() failed:', e);
+      console.warn(`[WebCodecs] decode() failed for display ${displayId}:`, e);
     }
   }, [initDecoder]);
 
-  const closeDecoder = useCallback(() => {
-    if (decoderRef.current && decoderRef.current.state !== 'closed') {
-      decoderRef.current.close();
-      decoderRef.current = null;
+  const closeDecoder = useCallback((displayId: number) => {
+    const instance = decodersRef.current.get(displayId);
+    if (instance) {
+      if (instance.decoder && instance.decoder.state !== 'closed') {
+        instance.decoder.close();
+      }
+      instance.decoder = null;
     }
-    setReady(false);
   }, []);
 
-  return { feedChunk, closeDecoder, initDecoder, stats, error, ready };
+  const closeAllDecoders = useCallback(() => {
+    decodersRef.current.forEach((instance) => {
+      if (instance.decoder && instance.decoder.state !== 'closed') {
+        instance.decoder.close();
+      }
+      instance.decoder = null;
+    });
+    setDisplayStats({});
+    setErrors({});
+  }, []);
+
+  return { feedChunk, registerCanvas, closeDecoder, closeAllDecoders, displayStats, errors };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,9 +318,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
   const { addToast } = useToastStore();
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { feedChunk, closeDecoder, stats: decodeStats, error: decodeError } =
-    useWebCodecsDecoder(canvasRef as React.RefObject<HTMLCanvasElement>);
+  const [activeDisplays, setActiveDisplays] = useState<number[]>([0]);
+  const [activeDisplayTab, setActiveDisplayTab] = useState<number | 'grid'>(0);
+
+  const { feedChunk, registerCanvas, closeDecoder, closeAllDecoders, displayStats, errors: decodeErrors } =
+    useMultiWebCodecsDecoder();
+
+  const activeStatsId = typeof activeDisplayTab === 'number' ? activeDisplayTab : 0;
+  const decodeStats = displayStats[activeStatsId] || { fps: 0, decodeMs: 0, frames: 0, keyframes: 0 };
+  const decodeError = decodeErrors[activeStatsId] || null;
 
   const [tab, setTab] = useState<'join' | 'stream' | 'performance' | 'logs' | 'remote_manager'>('join');
   const [pairingInput, setPairingInput] = useState('');
@@ -278,11 +343,130 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [wolStatus, setWolStatus] = useState('');
   const pressedKeysRef = useRef<Map<string, { keyCode: number; scan: number; extended: boolean }>>(new Map());
   const [packetLossPct, setPacketLossPct] = useState(0);
+  const [playerMemoryBytes, setPlayerMemoryBytes] = useState<number>(0);
   const [recentConnections, setRecentConnections] = useState<DiscoveredHost[]>([]);
   const [scalingMode, setScalingMode] = useState<'fit' | 'stretch' | 'original'>('fit');
   const [processSearch, setProcessSearch] = useState('');
+  const [remoteSubTab, setRemoteSubTab] = useState<'processes' | 'files'>('processes');
   const [killConfirmPid, setKillConfirmPid] = useState<number | null>(null);
   const [killConfirmName, setKillConfirmName] = useState('');
+
+  // Session Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const startRecording = () => {
+    const activeStatsId = typeof activeDisplayTab === 'number' ? activeDisplayTab : 0;
+    const canvas = document.getElementById(`stream-canvas-${activeStatsId}`) as HTMLCanvasElement;
+    if (!canvas) {
+      addToast('Recording Error', 'No active stream viewport found.', 'error');
+      return;
+    }
+
+    try {
+      recordingChunksRef.current = [];
+      const stream = canvas.captureStream(30);
+      
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9'
+      });
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordingChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `Session-Recording-${timestamp}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        addToast('Recording Saved', 'Session recording has been downloaded.', 'success');
+      };
+
+      recorder.start(1000);
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(t => t + 1);
+      }, 1000);
+
+      addToast('Recording Started', 'Capturing screen stream.', 'success');
+    } catch (err) {
+      console.error('Failed to start MediaRecorder:', err);
+      try {
+        const stream = canvas.captureStream(30);
+        const recorder = new MediaRecorder(stream);
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            recordingChunksRef.current.push(e.data);
+          }
+        };
+        recorder.onstop = () => {
+          const blob = new Blob(recordingChunksRef.current, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          a.download = `Session-Recording-${timestamp}.webm`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          addToast('Recording Saved', 'Session recording has been downloaded.', 'success');
+        };
+        recorder.start(1000);
+        mediaRecorderRef.current = recorder;
+        setIsRecording(true);
+        setRecordingTime(0);
+
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingTime(t => t + 1);
+        }, 1000);
+
+        addToast('Recording Started', 'Capturing screen stream (compatibility mode).', 'success');
+      } catch (fallbackErr: any) {
+        addToast('Recording Failed', `Could not initialize media recorder: ${fallbackErr.message}`, 'error');
+      }
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
 
   // Load recent connections on load/tab switch
   useEffect(() => {
@@ -304,6 +488,23 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   // Performance history accumulator
   const [statsHistory, setStatsHistory] = useState<{ fps: number; decode: number; latency: number }[]>([]);
   const chartCanvasRef = useRef<HTMLCanvasElement>(null);
+  const hudChartCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [showHudDiagnostics, setShowHudDiagnostics] = useState(false);
+  const [showStreamSettings, setShowStreamSettings] = useState(false);
+  const [targetFps, setTargetFps] = useState(60);
+  const [targetScale, setTargetScale] = useState(1.0);
+  const [targetBitrateMbps, setTargetBitrateMbps] = useState(4.0);
+
+  const handleUpdateStreamSettings = (fps: number, scale: number, bitrateMbps: number) => {
+    invoke('update_stream_settings', {
+      fps,
+      scale,
+      bitrateBps: Math.round(bitrateMbps * 1_000_000)
+    }).catch(err => {
+      console.error("Failed to update stream settings:", err);
+      addToast('Settings Error', 'Could not apply settings to host: ' + err, 'error');
+    });
+  };
 
   // Auto-discover hosts periodic scan
   useEffect(() => {
@@ -346,8 +547,12 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       is_keyframe: boolean;
       width: number;
       height: number;
+      display_id: number;
     }>('video_chunk', (event) => {
+      const dId = event.payload.display_id ?? 0;
+      setActiveDisplays(prev => prev.includes(dId) ? prev : [...prev, dId].sort());
       feedChunk(
+        dId,
         event.payload.data,
         event.payload.timestamp_us,
         event.payload.is_keyframe,
@@ -380,7 +585,9 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     const unlistenDisconnected = listen<{ reason: string }>('stream_disconnected', () => {
       setStreamConnected(false);
       setTab('join');
-      closeDecoder();
+      closeAllDecoders();
+      setActiveDisplays([0]);
+      setActiveDisplayTab(0);
       addToast('Stream Disconnected', 'Connection with host terminated.', 'info');
     });
 
@@ -405,14 +612,21 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       });
     });
 
+    const unlistenMetrics = listen<{
+      process_memory_bytes: number;
+    }>('metrics_update', (event) => {
+      setPlayerMemoryBytes(event.payload.process_memory_bytes);
+    });
+
     return () => {
       unlistenVideoChunk.then(f => f());
       unlistenConnected.then(f => f());
       unlistenDisconnected.then(f => f());
       unlistenCursorChanged.then(f => f());
       unlistenRecvStats.then(f => f());
+      unlistenMetrics.then(f => f());
     };
-  }, [feedChunk, closeDecoder, addToast]);
+  }, [feedChunk, closeAllDecoders, addToast]);
 
   // Logs polling
   const fetchLogs = useCallback(async () => {
@@ -517,9 +731,69 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     ctx.stroke();
   }, [statsHistory]);
 
+  // Render HUD mini diagnostics graph
+  useEffect(() => {
+    const canvas = hudChartCanvasRef.current;
+    if (!canvas || statsHistory.length < 2) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Mini Grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 3; i++) {
+      const y = (h / 3) * i;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Draw Decode FPS (Green)
+    ctx.beginPath();
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 1.5;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.fps, 75) / 75) * (h - 12) - 6;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw Decode Delay (Purple)
+    ctx.beginPath();
+    ctx.strokeStyle = '#818cf8';
+    ctx.lineWidth = 1;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.decode, 20) / 20) * (h - 12) - 6;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw RTT Network Latency (Blue)
+    ctx.beginPath();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1;
+    statsHistory.forEach((item, index) => {
+      const x = (index / (statsHistory.length - 1)) * w;
+      const y = h - (Math.min(item.latency, 40) / 40) * (h - 12) - 6;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }, [statsHistory, showHudDiagnostics]);
+
   // Input Forwarding event handlers
-  const getRelativeMouseCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
+  const getRelativeMouseCoords = (e: React.MouseEvent<HTMLCanvasElement>, displayId?: number) => {
+    const dId = displayId ?? 0;
+    const canvas = document.getElementById(`stream-canvas-${dId}`) as HTMLCanvasElement;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
 
@@ -582,9 +856,9 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     };
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>, displayId?: number) => {
     if (!streamConnected) return;
-    const coords = getRelativeMouseCoords(e);
+    const coords = getRelativeMouseCoords(e, displayId);
     if (!coords) return;
     invoke('send_input', {
       event: {
@@ -592,14 +866,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         x: coords.x,
         y: coords.y,
         viewport_w: coords.w,
-        viewport_h: coords.h
+        viewport_h: coords.h,
+        display_id: displayId,
       }
     }).catch(console.error);
   };
 
-  const handleMouseButton = (e: React.MouseEvent<HTMLCanvasElement>, pressed: boolean) => {
+  const handleMouseButton = (e: React.MouseEvent<HTMLCanvasElement>, pressed: boolean, displayId?: number) => {
     if (!streamConnected) return;
-    const coords = getRelativeMouseCoords(e);
+    const coords = getRelativeMouseCoords(e, displayId);
     if (!coords) return;
 
     let btn = 0;
@@ -616,19 +891,21 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         x: coords.x,
         y: coords.y,
         viewport_w: coords.w,
-        viewport_h: coords.h
+        viewport_h: coords.h,
+        display_id: displayId,
       }
     }).catch(console.error);
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>, displayId?: number) => {
     if (!streamConnected) return;
     const deltaY = -Math.sign(e.deltaY);
     invoke('send_input', {
       event: {
         kind: 'mouse_scroll',
         delta_x: 0.0,
-        delta_y: deltaY
+        delta_y: deltaY,
+        display_id: displayId
       }
     }).catch(console.error);
   };
@@ -710,13 +987,15 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   // Cleanup decoder on unmount to prevent WebCodecs resource leak
   useEffect(() => {
     return () => {
-      closeDecoder();
+      closeAllDecoders();
     };
-  }, [closeDecoder]);
+  }, [closeAllDecoders]);
 
   // Fullscreen toggle
   const toggleFullscreen = () => {
-    const el = canvasRef.current?.parentElement;
+    const activeStatsId = typeof activeDisplayTab === 'number' ? activeDisplayTab : 0;
+    const canvas = document.getElementById(`stream-canvas-${activeStatsId}`);
+    const el = canvas?.parentElement;
     if (!el) return;
     if (!document.fullscreenElement) {
       el.requestFullscreen().then(() => setFullscreen(true));
@@ -767,7 +1046,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   };
 
   const handleDisconnect = async () => {
-    closeDecoder();
+    closeAllDecoders();
     setStreamConnected(false);
     disconnectFromHost();
     setTab('join');
@@ -1077,27 +1356,118 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
           {/* TAB 2: Active Stream Canvas Render */}
           {tab === 'stream' && streamConnected && (
-            <div style={{ width: '100%', height: 'calc(100vh - 120px)', background: '#000', position: 'relative', overflow: scalingMode === 'original' ? 'auto' : 'hidden' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: 'calc(100vh - 120px)', background: '#000', position: 'relative' }}>
               
-              {/* HTML5 Video Decoder Canvas */}
-              <canvas
-                ref={canvasRef}
-                id="stream-canvas"
-                style={{
-                  width: scalingMode === 'original' ? `${canvasRef.current?.width || 1920}px` : '100%',
-                  height: scalingMode === 'original' ? `${canvasRef.current?.height || 1080}px` : '100%',
-                  objectFit: scalingMode === 'fit' ? 'contain' : scalingMode === 'stretch' ? 'fill' : 'none',
-                  display: 'block',
-                  cursor: cursorShape
-                }}
-                onMouseMove={handleMouseMove}
-                onMouseDown={(e) => handleMouseButton(e, true)}
-                onMouseUp={(e) => handleMouseButton(e, false)}
-                onWheel={handleWheel}
-                onContextMenu={(e) => e.preventDefault()}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-              />
+              {/* Display Tab Selector */}
+              {activeDisplays.length > 1 && (
+                <div style={{
+                  display: 'flex',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  background: 'rgba(10, 8, 20, 0.85)',
+                  borderBottom: '1px solid var(--border)',
+                  backdropFilter: 'blur(12px)',
+                  zIndex: 10
+                }}>
+                  {activeDisplays.map(dId => (
+                    <button
+                      key={dId}
+                      className={`btn btn-sm ${activeDisplayTab === dId ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => setActiveDisplayTab(dId)}
+                      style={{ padding: '6px 12px', fontSize: '0.8rem', fontWeight: 600 }}
+                    >
+                      🖥️ Screen {dId + 1}
+                    </button>
+                  ))}
+                  <button
+                    className={`btn btn-sm ${activeDisplayTab === 'grid' ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setActiveDisplayTab('grid')}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', fontWeight: 600 }}
+                  >
+                    🥞 Split Grid
+                  </button>
+                </div>
+              )}
+
+              {/* HTML5 Video Decoder Canvas Viewport(s) */}
+              <div style={{
+                flex: 1,
+                width: '100%',
+                position: 'relative',
+                overflow: activeDisplayTab === 'grid' ? 'auto' : (scalingMode === 'original' ? 'auto' : 'hidden')
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? 'repeat(auto-fit, minmax(640px, 1fr))' : '1fr',
+                  gap: '16px',
+                  width: '100%',
+                  height: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? 'auto' : '100%',
+                  padding: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? '20px' : '0',
+                  boxSizing: 'border-box'
+                }}>
+                  {activeDisplays.map(dId => {
+                    const isVisible = activeDisplayTab === 'grid' || activeDisplayTab === dId;
+                    if (!isVisible) return null;
+
+                    const canvasWidth = document.getElementById(`stream-canvas-${dId}`)?.getAttribute('width') || '1920';
+                    const canvasHeight = document.getElementById(`stream-canvas-${dId}`)?.getAttribute('height') || '1080';
+
+                    return (
+                      <div
+                        key={dId}
+                        style={{
+                          position: 'relative',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          height: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? '420px' : '100%',
+                          border: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? '1px solid var(--border)' : 'none',
+                          borderRadius: activeDisplays.length > 1 && activeDisplayTab === 'grid' ? 'var(--radius-lg)' : '0',
+                          overflow: 'hidden',
+                          background: '#000'
+                        }}
+                      >
+                        {activeDisplays.length > 1 && activeDisplayTab === 'grid' && (
+                          <div style={{
+                            padding: '6px 12px',
+                            background: 'rgba(0,0,0,0.5)',
+                            borderBottom: '1px solid var(--border)',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: 'var(--text-secondary)',
+                            display: 'flex',
+                            justifyContent: 'space-between'
+                          }}>
+                            <span>Display {dId + 1}</span>
+                            {displayStats[dId] && (
+                              <span>{displayStats[dId].fps} FPS</span>
+                            )}
+                          </div>
+                        )}
+                        <div style={{ flex: 1, position: 'relative', height: '100%' }}>
+                          <canvas
+                            ref={(el) => registerCanvas(dId, el)}
+                            id={`stream-canvas-${dId}`}
+                            style={{
+                              width: scalingMode === 'original' && activeDisplayTab !== 'grid' ? `${canvasWidth}px` : '100%',
+                              height: scalingMode === 'original' && activeDisplayTab !== 'grid' ? `${canvasHeight}px` : '100%',
+                              objectFit: scalingMode === 'fit' ? 'contain' : scalingMode === 'stretch' ? 'fill' : 'none',
+                              display: 'block',
+                              cursor: cursorShape
+                            }}
+                            onMouseMove={(e) => handleMouseMove(e, dId)}
+                            onMouseDown={(e) => handleMouseButton(e, true, dId)}
+                            onMouseUp={(e) => handleMouseButton(e, false, dId)}
+                            onWheel={(e) => handleWheel(e, dId)}
+                            onContextMenu={(e) => e.preventDefault()}
+                            onDragOver={handleDragOver}
+                            onDrop={handleDrop}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               {/* File Transfer Progress Overlay */}
               {fileTransferring && (
@@ -1138,7 +1508,14 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   display: 'flex', gap: '16px', alignItems: 'center',
                   fontSize: '0.78rem', color: '#fff', backdropFilter: 'var(--glass-blur)',
                 }}>
-                  <Activity size={14} style={{ color: '#10b981' }} />
+                  {isRecording ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--danger)' }}>
+                      <div className="pulse-dot" style={{ background: 'var(--danger)', boxShadow: '0 0 8px var(--danger)', animation: 'pulse-danger 2s ease-in-out infinite' }} />
+                      <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>REC {formatTime(recordingTime)}</span>
+                    </div>
+                  ) : (
+                    <Activity size={14} style={{ color: '#10b981' }} />
+                  )}
                   <span style={{ fontFamily: 'monospace' }}>FPS: {decodeStats.fps}</span>
                   <span style={{ fontFamily: 'monospace' }}>RTT: {sessionStats.latency_ms}ms</span>
                   <span style={{ fontFamily: 'monospace' }}>Bitrate: {(sessionStats.bitrate_kbps / 1000).toFixed(1)} Mbps</span>
@@ -1172,6 +1549,36 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   </div>
 
                   <button 
+                    className={`btn ${isRecording ? 'btn-danger' : 'btn-ghost'} btn-sm`}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    style={{ height: '32px', background: isRecording ? undefined : 'rgba(10, 8, 20, 0.7)', backdropFilter: isRecording ? undefined : 'var(--glass-blur)' }}
+                  >
+                    {isRecording ? 'Stop REC' : 'Record'}
+                  </button>
+
+                   <button 
+                    className={`btn ${showHudDiagnostics ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+                    onClick={() => {
+                      setShowHudDiagnostics(!showHudDiagnostics);
+                      if (showStreamSettings) setShowStreamSettings(false);
+                    }}
+                    style={{ height: '32px', background: showHudDiagnostics ? undefined : 'rgba(10, 8, 20, 0.7)', backdropFilter: showHudDiagnostics ? undefined : 'var(--glass-blur)' }}
+                  >
+                    Diagnostics
+                  </button>
+
+                  <button 
+                    className={`btn ${showStreamSettings ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+                    onClick={() => {
+                      setShowStreamSettings(!showStreamSettings);
+                      if (showHudDiagnostics) setShowHudDiagnostics(false);
+                    }}
+                    style={{ height: '32px', background: showStreamSettings ? undefined : 'rgba(10, 8, 20, 0.7)', backdropFilter: showStreamSettings ? undefined : 'var(--glass-blur)' }}
+                  >
+                    Stream Settings
+                  </button>
+
+                  <button 
                     className="btn btn-ghost btn-sm"
                     onClick={() => invoke('request_keyframe').then(() => addToast('Keyframe Requested', 'Sent IDR request to host.', 'info')).catch(console.error)}
                     style={{ background: 'rgba(10, 8, 20, 0.7)', backdropFilter: 'var(--glass-blur)', height: '32px' }}
@@ -1196,6 +1603,122 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   </button>
                 </div>
               </div>
+
+              {showStreamSettings && (
+                <div style={{
+                  position: 'absolute', top: '64px', right: '16px',
+                  background: 'rgba(10, 8, 20, 0.85)', borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)', padding: '14px 16px',
+                  display: 'flex', flexDirection: 'column', gap: '14px',
+                  width: '280px', pointerEvents: 'auto', zIndex: 10,
+                  backdropFilter: 'var(--glass-blur)', color: '#fff',
+                  boxShadow: 'var(--shadow-lg)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px' }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#fff' }}>Stream Settings</span>
+                    <button 
+                      className="btn btn-ghost btn-xs" 
+                      onClick={() => setShowStreamSettings(false)} 
+                      style={{ minHeight: 'unset', height: '18px', padding: '0 4px', color: 'var(--text-secondary)' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.74rem', color: '#ccc', display: 'block', marginBottom: '6px' }}>
+                      Target FPS: <strong style={{ color: '#fff', fontFamily: 'monospace' }}>{targetFps} FPS</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={15} max={60} step={5}
+                      value={targetFps}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setTargetFps(v);
+                        handleUpdateStreamSettings(v, targetScale, targetBitrateMbps);
+                      }}
+                      style={{ width: '100%', display: 'block', accentColor: 'var(--primary)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.74rem', color: '#ccc', display: 'block', marginBottom: '6px' }}>
+                      Resolution Scale: <strong style={{ color: '#fff', fontFamily: 'monospace' }}>{Math.round(targetScale * 100)}%</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.25} max={1.0} step={0.25}
+                      value={targetScale}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setTargetScale(v);
+                        handleUpdateStreamSettings(targetFps, v, targetBitrateMbps);
+                      }}
+                      style={{ width: '100%', display: 'block', accentColor: 'var(--primary)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.74rem', color: '#ccc', display: 'block', marginBottom: '6px' }}>
+                      Max Bitrate: <strong style={{ color: '#fff', fontFamily: 'monospace' }}>{targetBitrateMbps.toFixed(1)} Mbps</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.5} max={30.0} step={0.5}
+                      value={targetBitrateMbps}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setTargetBitrateMbps(v);
+                        handleUpdateStreamSettings(targetFps, targetScale, v);
+                      }}
+                      style={{ width: '100%', display: 'block', accentColor: 'var(--primary)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {showHudDiagnostics && (
+                <div style={{
+                  position: 'absolute', top: '64px', right: '16px',
+                  background: 'rgba(10, 8, 20, 0.85)', borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)', padding: '12px 16px',
+                  display: 'flex', flexDirection: 'column', gap: '10px',
+                  width: '280px', pointerEvents: 'auto', zIndex: 10,
+                  backdropFilter: 'var(--glass-blur)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#fff' }}>Real-Time Diagnostics</span>
+                    <button 
+                      className="btn btn-ghost btn-xs" 
+                      onClick={() => setShowHudDiagnostics(false)} 
+                      style={{ minHeight: 'unset', height: '18px', padding: '0 4px', color: 'var(--text-secondary)' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <canvas ref={hudChartCanvasRef} width={250} height={100} style={{ width: '100%', height: '100px', display: 'block', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px', fontSize: '0.68rem' }}>
+                    <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '2px' }}>■ FPS</span>
+                    <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: '2px' }}>■ Delay</span>
+                    <span style={{ color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '2px' }}>■ Ping</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.72rem', color: 'var(--text-secondary)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Packets Loss:</span>
+                      <span style={{ color: packetLossPct > 2 ? 'var(--danger)' : '#fff', fontFamily: 'monospace' }}>
+                        {packetLossPct?.toFixed(1) || '0.0'}%
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Client Memory:</span>
+                      <span style={{ color: '#fff', fontFamily: 'monospace' }}>
+                        {playerMemoryBytes ? `${(playerMemoryBytes / 1024 / 1024).toFixed(1)} MB` : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Decoder errors */}
               {decodeError && (
@@ -1269,10 +1792,44 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
             </div>
           )}
 
-          {/* TAB 5: Remote Task Manager */}
+          {/* TAB 5: Remote Task Manager & File Browser */}
           {tab === 'remote_manager' && streamConnected && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
+              
+              {/* Segmented Picker for Remote Manager Sub-Tabs */}
+              <div style={{
+                display: 'flex',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '4px',
+                gap: '4px',
+                width: '320px'
+              }}>
+                <button
+                  className={`btn btn-sm ${remoteSubTab === 'processes' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, border: 'none', padding: '6px 12px' }}
+                  onClick={() => {
+                    setRemoteSubTab('processes');
+                    fetchHostProcesses();
+                  }}
+                >
+                  Task Manager
+                </button>
+                <button
+                  className={`btn btn-sm ${remoteSubTab === 'files' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, border: 'none', padding: '6px 12px' }}
+                  onClick={() => setRemoteSubTab('files')}
+                >
+                  File Browser
+                </button>
+              </div>
+
+              {remoteSubTab === 'files' ? (
+                <FileManager />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <RefreshCw 
                     size={16} 
@@ -1381,6 +1938,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
               )}
             </div>
           )}
+        </div>
+      )}
 
           {/* TAB 4: Logs */}
           {tab === 'logs' && (
@@ -1441,8 +2000,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
             decodeStats,
             sessionStats,
             packetLossPct,
-            width: canvasRef.current?.width || 0,
-            height: canvasRef.current?.height || 0
+            width: document.getElementById(`stream-canvas-${activeStatsId}`) ? (document.getElementById(`stream-canvas-${activeStatsId}`) as HTMLCanvasElement).width : 0,
+            height: document.getElementById(`stream-canvas-${activeStatsId}`) ? (document.getElementById(`stream-canvas-${activeStatsId}`) as HTMLCanvasElement).height : 0
           }}
         />
       )}

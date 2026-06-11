@@ -17,6 +17,8 @@ pub struct EncodedPacket {
     /// Original frame dimensions
     pub width: u32,
     pub height: u32,
+    /// Target monitor index
+    pub display_id: u8,
 }
 
 /// Encoder configuration
@@ -67,6 +69,9 @@ pub trait VideoEncoder: Send {
 
     /// Update target bitrate dynamically
     fn set_bitrate(&mut self, bps: u32);
+
+    /// Update target FPS dynamically
+    fn set_fps(&mut self, fps: u32);
 
     #[allow(dead_code)]
     fn codec(&self) -> VideoCodec;
@@ -175,6 +180,11 @@ impl VideoEncoder for FallbackEncoder {
     fn set_bitrate(&mut self, bps: u32) {
         self.config.bitrate_bps = bps;
         self.inner.set_bitrate(bps);
+    }
+
+    fn set_fps(&mut self, fps: u32) {
+        self.config.fps = fps;
+        self.inner.set_fps(fps);
     }
 
     fn codec(&self) -> VideoCodec {

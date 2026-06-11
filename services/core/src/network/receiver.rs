@@ -88,6 +88,7 @@ pub struct ReceivedFrame {
     pub rtt_ms: u32,
     #[allow(dead_code)]
     pub received_at: Instant,
+    pub display_id: u8,
 }
 
 /// Client-side UDP receiver that reassembles RTP/FEC fragments into frames.
@@ -208,11 +209,11 @@ impl UdpReceiver {
             let is_parity = pkt.flags & super::rtp::FLAG_PARITY != 0;
 
             // Reassembler handles both data fragments and parity packets
-            if let Some((ts, is_keyframe, nal_data)) = self.reassembler.feed(pkt) {
+            if let Some((ts, display_id, is_keyframe, nal_data)) = self.reassembler.feed(pkt) {
                 if is_parity {
                     // This completion was triggered by a parity packet — it's an FEC recovery
                     self.fec_recoveries += 1;
-                    debug!(ts, "FEC parity triggered frame completion / recovery");
+                    debug!(ts, display_id, "FEC parity triggered frame completion / recovery");
                 }
                 let loss_pct = if self.seq_tracker.packets_expected > 0 {
                     (self.seq_tracker.packets_lost as f32
@@ -232,6 +233,7 @@ impl UdpReceiver {
                         .latest_rtt_ms
                         .load(std::sync::atomic::Ordering::Relaxed),
                     received_at: Instant::now(),
+                    display_id,
                 };
                 self.frames_received += 1;
                 METRICS

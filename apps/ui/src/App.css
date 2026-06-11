@@ -304,6 +304,11 @@ p  { line-height: 1.6; color: var(--text-secondary); font-size: 0.9rem; }
   50%       { opacity: 0.4; transform: scale(0.85); box-shadow: 0 0 2px var(--success); }
 }
 
+@keyframes pulse-danger {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 8px var(--danger); }
+  50%       { opacity: 0.4; transform: scale(0.85); box-shadow: 0 0 2px var(--danger); }
+}
+
 /* ─── Stats Bar ───────────────────────────────────────────── */
 .stats-bar {
   display: flex;

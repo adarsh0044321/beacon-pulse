@@ -19,6 +19,7 @@ struct HostArgs {
     display_handle: Option<isize>,
     multi_windows: Option<Vec<isize>>,
     dual_windows: Option<(isize, isize)>,
+    multi_displays: Option<Vec<isize>>,
     port: Option<u16>,
     code: Option<String>,
     control_port: Option<u16>,
@@ -155,6 +156,15 @@ fn spawn_background_process(
                 cmd.arg("--dual-window");
                 cmd.arg(format!("{},{}", h1, h2));
             }
+            crate::CaptureTarget::MultiDisplay(handles) => {
+                cmd.arg("--multi-display");
+                let handles_str = handles
+                    .iter()
+                    .map(|h| h.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                cmd.arg(handles_str);
+            }
         }
 
         if let Some(port) = host_args.port {
@@ -211,6 +221,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
         display_handle: None,
         multi_windows: None,
         dual_windows: None,
+        multi_displays: None,
         port: None,
         code: None,
         control_port: None,
@@ -268,6 +279,18 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     i += 2;
                 } else {
                     return Err(anyhow::anyhow!("Missing value for --dual-window"));
+                }
+            }
+            "--multi-display" | "-md" => {
+                if i + 1 < args.len() {
+                    let handles = args[i + 1]
+                        .split(',')
+                        .map(|part| part.trim().parse::<isize>().context("Invalid display handle"))
+                        .collect::<Result<Vec<isize>>>()?;
+                    host_args.multi_displays = Some(handles);
+                    i += 2;
+                } else {
+                    return Err(anyhow::anyhow!("Missing value for --multi-display"));
                 }
             }
             "--port" | "-p" => {
@@ -1156,6 +1179,8 @@ fn start_sharing_service(
             initial_target = Some(crate::CaptureTarget::MultiWindow(hwnds.clone()));
         } else if let Some((h1, h2)) = host_args.dual_windows {
             initial_target = Some(crate::CaptureTarget::DualWindow(h1, h2));
+        } else if let Some(ref handles) = host_args.multi_displays {
+            initial_target = Some(crate::CaptureTarget::MultiDisplay(handles.clone()));
         }
 
         // ── Output setup info ──────────────────────────────────────────
@@ -1175,6 +1200,9 @@ fn start_sharing_service(
                 }
                 Some(crate::CaptureTarget::DualWindow(h1, h2)) => {
                     println!("  │  Dual:    {:30}  │", truncate_str(&format!("{} & {}", h1, h2), 30));
+                }
+                Some(crate::CaptureTarget::MultiDisplay(handles)) => {
+                    println!("  │  Displays: {:29}  │", truncate_str(&format!("{} displays", handles.len()), 29));
                 }
                 None => {
                     println!("  │  Window:  [Idle Mode - No Active Share]   │");

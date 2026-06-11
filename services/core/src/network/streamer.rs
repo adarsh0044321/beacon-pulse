@@ -168,6 +168,7 @@ impl UdpStreamer {
             packet.width as u16,
             packet.height as u16,
             packet.is_keyframe,
+            packet.display_id,
         );
         let frag_total = rtp_packets.len() as u16;
 
@@ -192,6 +193,7 @@ impl UdpStreamer {
             packet.height as u16,
             &frag_payloads,
             frag_total,
+            packet.display_id,
         );
         let parity_wire = parity_pkt.to_bytes();
 

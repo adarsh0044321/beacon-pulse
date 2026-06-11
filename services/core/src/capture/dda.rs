@@ -34,6 +34,7 @@ pub struct DdaCapture {
     height: u32,
     running: bool,
     mode: DdaMode,
+    scale: f32,
 
     #[cfg(windows)]
     dxgi: Option<DxgiState>,
@@ -63,6 +64,7 @@ impl DdaCapture {
             height: 0,
             running: false,
             mode: DdaMode::PrintWindow, // start conservative; upgrade in start()
+            scale: 1.0,
             #[cfg(windows)]
             dxgi: None,
         }
@@ -423,6 +425,10 @@ impl WindowCapture for DdaCapture {
             DdaMode::PrintWindow => CaptureBackend::PrintWindow,
         }
     }
+
+    fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
+    }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -433,7 +439,7 @@ impl DdaCapture {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros() as u64;
-        CapturedFrame {
+        let mut frame = CapturedFrame {
             data,
             width: self.width,
             height: self.height,
@@ -442,7 +448,17 @@ impl DdaCapture {
             is_stale: false,
             #[cfg(windows)]
             gpu_texture: None,
+        };
+        if self.scale != 1.0 {
+            let dst_w = (((self.width as f32 * self.scale).round() as u32) / 2) * 2;
+            let dst_h = (((self.height as f32 * self.scale).round() as u32) / 2) * 2;
+            let dst_w = dst_w.max(64);
+            let dst_h = dst_h.max(64);
+            frame.data = super::resize_bgra_nearest(&frame.data, self.width, self.height, dst_w, dst_h);
+            frame.width = dst_w;
+            frame.height = dst_h;
         }
+        frame
     }
 
     #[cfg(windows)]

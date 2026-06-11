@@ -106,6 +106,26 @@ pub enum UiCommand {
     KillHostProcess {
         pid: u32,
     },
+    #[cfg(feature = "player")]
+    ListHostDirectory {
+        path: String,
+    },
+    #[cfg(feature = "player")]
+    DownloadHostFile {
+        path: String,
+    },
+    #[cfg(feature = "player")]
+    HostFileAction {
+        action: String,
+        path: String,
+        new_path: Option<String>,
+    },
+    #[cfg(feature = "player")]
+    UpdateStreamSettings {
+        fps: Option<u32>,
+        scale: Option<f32>,
+        bitrate_bps: Option<u32>,
+    },
 }
 
 /// Messages sent from Service → UI
@@ -201,6 +221,7 @@ pub enum ServiceEvent {
         is_keyframe: bool,
         width: u16,
         height: u16,
+        display_id: u8,
     },
     #[cfg(feature = "player")]
     StreamConnected {
@@ -229,6 +250,28 @@ pub enum ServiceEvent {
     HostProcessKilled {
         pid: u32,
         success: bool,
+    },
+    #[cfg(feature = "player")]
+    HostDirectoryList {
+        path: String,
+        entries: Vec<crate::network::FileEntry>,
+        error: Option<String>,
+    },
+    #[cfg(feature = "player")]
+    FileDownloadStart {
+        name: String,
+        size: u64,
+    },
+    #[cfg(feature = "player")]
+    FileDownloadChunk {
+        data: String,
+    },
+    #[cfg(feature = "player")]
+    FileDownloadEnd,
+    #[cfg(feature = "player")]
+    FileActionFinished {
+        success: bool,
+        error: Option<String>,
     },
 
     /// Phase 3: sent immediately after hardware encoder activates
@@ -564,7 +607,47 @@ async fn dispatch_cmd(
                 tokio::sync::mpsc::unbounded_channel::<crate::client_session::ClientEvent>();
             let push = push_tx.clone();
             tokio::spawn(async move {
+                let mut current_file: Option<(String, std::fs::File)> = None;
                 while let Some(ev) = client_ev_rx.recv().await {
+                    match &ev {
+                        crate::client_session::ClientEvent::FileDownloadStart { name, size } => {
+                            info!("File download started: {}, size: {}", name, size);
+                            let mut dest_path = dirs_next::download_dir()
+                                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                            dest_path.push(name);
+                            match std::fs::File::create(&dest_path) {
+                                Ok(file) => {
+                                    info!("Creating download file at {:?}", dest_path);
+                                    current_file = Some((name.clone(), file));
+                                }
+                                Err(e) => {
+                                    error!("Failed to create download file at {:?}: {}", dest_path, e);
+                                    current_file = None;
+                                }
+                            }
+                        }
+                        crate::client_session::ClientEvent::FileDownloadChunk { data } => {
+                            if let Some((ref name, ref mut file)) = current_file {
+                                use base64::prelude::*;
+                                if let Ok(bytes) = BASE64_STANDARD.decode(data) {
+                                    use std::io::Write;
+                                    if let Err(e) = file.write_all(&bytes) {
+                                        error!("Failed to write chunk to download file {}: {}", name, e);
+                                    }
+                                } else {
+                                    error!("Failed to decode base64 chunk for download {}", name);
+                                }
+                            }
+                        }
+                        crate::client_session::ClientEvent::FileDownloadEnd => {
+                            if let Some((name, mut file)) = current_file.take() {
+                                use std::io::Write;
+                                let _ = file.flush();
+                                info!("Download completed successfully: {}", name);
+                            }
+                        }
+                        _ => {}
+                    }
                     let se = client_event_to_service(ev);
                     if push.send(se).is_err() {
                         break;
@@ -893,6 +976,82 @@ async fn dispatch_cmd(
                 bitrate_kbps: 0,
             }
         }
+
+        #[cfg(feature = "player")]
+        UiCommand::ListHostDirectory { path } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::BrowseDirectoryRequest { path }) {
+                    error!(error = %e, "Failed to send BrowseDirectoryRequest request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::DownloadHostFile { path } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::DownloadFileRequest { path }) {
+                    error!(error = %e, "Failed to send DownloadFileRequest request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::HostFileAction { action, path, new_path } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::FileActionRequest { action, path, new_path }) {
+                    error!(error = %e, "Failed to send FileActionRequest request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::UpdateStreamSettings { fps, scale, bitrate_bps } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::UpdateStreamSettings { fps, scale, bitrate_bps }) {
+                    error!(error = %e, "Failed to send UpdateStreamSettings request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
     }
 }
 
@@ -977,12 +1136,14 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
             is_keyframe,
             width,
             height,
+            display_id,
         } => ServiceEvent::VideoChunk {
             data,
             timestamp_us,
             is_keyframe,
             width,
             height,
+            display_id,
         },
         client_session::ClientEvent::Connected {
             host_addr,
@@ -1013,6 +1174,21 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         }
         client_session::ClientEvent::HostProcessKilled { pid, success } => {
             ServiceEvent::HostProcessKilled { pid, success }
+        }
+        client_session::ClientEvent::HostDirectoryList { path, entries, error } => {
+            ServiceEvent::HostDirectoryList { path, entries, error }
+        }
+        client_session::ClientEvent::FileDownloadStart { name, size } => {
+            ServiceEvent::FileDownloadStart { name, size }
+        }
+        client_session::ClientEvent::FileDownloadChunk { data } => {
+            ServiceEvent::FileDownloadChunk { data }
+        }
+        client_session::ClientEvent::FileDownloadEnd => {
+            ServiceEvent::FileDownloadEnd
+        }
+        client_session::ClientEvent::FileActionFinished { success, error } => {
+            ServiceEvent::FileActionFinished { success, error }
         }
     }
 }

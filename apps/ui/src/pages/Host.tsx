@@ -36,7 +36,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   const [selectedHwnd, setSelectedHwnd] = useState<number | null>(null);
   const [selectedMonitor, setSelectedMonitor] = useState<number | null>(null);
   const [selectedHwnds, setSelectedHwnds] = useState<number[]>([]);
-  const [shareMode, setShareMode] = useState<'single' | 'display' | 'multi' | 'dual'>('single');
+  const [shareMode, setShareMode] = useState<'single' | 'display' | 'multi' | 'dual' | 'all_displays'>('single');
   const [codeTimer, setCodeTimer] = useState(0);
   const [windowSearch, setWindowSearch] = useState('');
   
@@ -76,7 +76,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     const tryFetch = async () => {
       while (!cancelled && retries < maxRetries) {
         try {
-          if (shareMode === 'display') {
+          if (shareMode === 'display' || shareMode === 'all_displays') {
             await fetchMonitors();
             const state = useSessionStore.getState();
             if (state.availableMonitors.length > 0) {
@@ -106,7 +106,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
         intervalId = setInterval(() => {
           const state = useSessionStore.getState();
           if (!state.isSharing && tab === 'share') {
-            if (shareMode === 'display') {
+            if (shareMode === 'display' || shareMode === 'all_displays') {
               fetchMonitors().catch(console.error);
             } else {
               fetchWindows().catch(console.error);
@@ -269,6 +269,9 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     } else if (shareMode === 'display') {
       if (!selectedMonitor) return;
       target = { kind: 'display', data: selectedMonitor };
+    } else if (shareMode === 'all_displays') {
+      const handles = availableMonitors.map(m => m.handle);
+      target = { kind: 'multi_display', data: handles };
     } else if (shareMode === 'multi') {
       if (selectedHwnds.length === 0) return;
       target = { kind: 'multi_window', data: selectedHwnds };
@@ -423,6 +426,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                     {[
                       { id: 'single', label: 'Single Window', icon: '🪟' },
                       { id: 'display', label: 'Entire Display', icon: '🖥️' },
+                      { id: 'all_displays', label: 'All Displays', icon: '🖥️🖥️' },
                       { id: 'multi', label: 'Multi-Window', icon: '🥞' },
                       { id: 'dual', label: 'Dual Window', icon: '👥' },
                     ].map(mode => (
@@ -448,7 +452,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                     ))}
                   </div>
 
-                  {shareMode !== 'display' ? (
+                  {shareMode !== 'display' && shareMode !== 'all_displays' ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
                       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <input
@@ -489,7 +493,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                   )}
 
                   {/* Mode UI Renders */}
-                  {shareMode === 'display' ? (
+                  {shareMode === 'display' || shareMode === 'all_displays' ? (
                     monitorsLoading ? (
                       <div className="empty-state" style={{ flex: 1 }}>
                         <div className="spinner" />
@@ -504,31 +508,53 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                         </button>
                       </div>
                     ) : (
-                      <div className="window-grid" style={{ overflowY: 'auto', flex: 1, maxHeight: 'calc(100vh - 280px)' }}>
-                        {availableMonitors.map(mon => (
-                          <div
-                            key={mon.handle}
-                            id={`monitor-card-${mon.handle}`}
-                            className={`window-card ${selectedMonitor === mon.handle ? 'selected' : ''}`}
-                            onClick={() => setSelectedMonitor(mon.handle)}
-                          >
-                            <div className="window-thumb">🖥️</div>
-                            <div className="window-info">
-                              <span className="window-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                Display {mon.index}
-                                {mon.is_primary && (
-                                  <span className="badge badge-active" style={{ fontSize: '0.62rem', padding: '1px 5px', textTransform: 'uppercase' }}>
-                                    Primary
-                                  </span>
-                                )}
-                              </span>
-                              <span className="window-process">{mon.name}</span>
-                              <span className="window-process" style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '4px' }}>
-                                {mon.width}×{mon.height} @ {mon.refresh_rate}Hz
-                              </span>
-                            </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                        {shareMode === 'all_displays' && (
+                          <div style={{
+                            padding: '12px',
+                            background: 'rgba(255, 255, 255, 0.02)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-md)',
+                            fontSize: '0.85rem',
+                            color: 'var(--text-secondary)'
+                          }}>
+                            All active display monitors will be streamed simultaneously in a responsive grid.
                           </div>
-                        ))}
+                        )}
+                        <div className="window-grid" style={{ overflowY: 'auto', flex: 1, maxHeight: 'calc(100vh - 320px)' }}>
+                          {availableMonitors.map(mon => (
+                            <div
+                              key={mon.handle}
+                              id={`monitor-card-${mon.handle}`}
+                              className={`window-card ${shareMode === 'all_displays' ? 'active' : selectedMonitor === mon.handle ? 'selected' : ''}`}
+                              onClick={() => {
+                                if (shareMode !== 'all_displays') {
+                                  setSelectedMonitor(mon.handle);
+                                }
+                              }}
+                              style={{
+                                cursor: shareMode === 'all_displays' ? 'default' : 'pointer',
+                                opacity: shareMode === 'all_displays' ? 0.9 : 1
+                              }}
+                            >
+                              <div className="window-thumb">🖥️</div>
+                              <div className="window-info">
+                                <span className="window-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  Display {mon.index}
+                                  {mon.is_primary && (
+                                    <span className="badge badge-active" style={{ fontSize: '0.62rem', padding: '1px 5px', textTransform: 'uppercase' }}>
+                                      Primary
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="window-process">{mon.name}</span>
+                                <span className="window-process" style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '4px' }}>
+                                  {mon.width}×{mon.height} @ {mon.refresh_rate}Hz
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )
                   ) : (
@@ -610,6 +636,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                       (shareMode === 'display' && !selectedMonitor) ||
                       (shareMode === 'multi' && selectedHwnds.length === 0) ||
                       (shareMode === 'dual' && selectedHwnds.length !== 2) ||
+                      (shareMode === 'all_displays' && availableMonitors.length === 0) ||
                       windowsLoading || monitorsLoading
                     }
                     onClick={handleStartShare}
@@ -618,6 +645,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                     <Play size={16} />
                     {shareMode === 'single' && 'Broadcast Selected Window'}
                     {shareMode === 'display' && 'Broadcast Entire Display'}
+                    {shareMode === 'all_displays' && 'Broadcast All Displays'}
                     {shareMode === 'multi' && `Broadcast Selected Windows (${selectedHwnds.length})`}
                     {shareMode === 'dual' && `Broadcast Dual Windows (${selectedHwnds.length}/2)`}
                   </button>

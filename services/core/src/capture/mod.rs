@@ -105,6 +105,32 @@ pub trait WindowCapture: Send + Sync {
     fn stop(&mut self);
     fn resize_hint(&mut self, width: u32, height: u32);
     fn backend(&self) -> CaptureBackend;
+    fn set_scale(&mut self, _scale: f32) {}
+}
+
+/// Dynamic nearest-neighbor scaling helper for CPU-side BGRA frames
+pub fn resize_bgra_nearest(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    if src_w == dst_w && src_h == dst_h {
+        return src.to_vec();
+    }
+    let mut dst = vec![0u8; (dst_w * dst_h * 4) as usize];
+    for y in 0..dst_h {
+        let sy = (y * src_h) / dst_h;
+        let src_row_offset = (sy * src_w * 4) as usize;
+        let dst_row_offset = (y * dst_w * 4) as usize;
+        for x in 0..dst_w {
+            let sx = (x * src_w) / dst_w;
+            let src_idx = src_row_offset + (sx * 4) as usize;
+            let dst_idx = dst_row_offset + (x * 4) as usize;
+            if src_idx + 3 < src.len() && dst_idx + 3 < dst.len() {
+                dst[dst_idx] = src[src_idx];
+                dst[dst_idx + 1] = src[src_idx + 1];
+                dst[dst_idx + 2] = src[src_idx + 2];
+                dst[dst_idx + 3] = src[src_idx + 3];
+            }
+        }
+    }
+    dst
 }
 
 /// Notification events about the capture state

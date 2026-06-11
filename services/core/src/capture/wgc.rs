@@ -52,6 +52,7 @@ pub struct WgcCapture {
     inner: Option<WgcInner>,
     target: Option<crate::CaptureTarget>,
     shared_device: Option<SharedGpuDeviceArc>,
+    scale: std::sync::Arc<parking_lot::RwLock<f32>>,
 }
 
 #[cfg(windows)]
@@ -104,6 +105,7 @@ impl WgcCapture {
             inner: None,
             target: None,
             shared_device: None,
+            scale: std::sync::Arc::new(parking_lot::RwLock::new(1.0)),
         }
     }
 
@@ -220,6 +222,7 @@ impl WgcCapture {
         let gpu_pending_cb = gpu_pending.clone();
         let use_gpu_path_cb = use_gpu_path;
         let device_cb = SendWrapper(device.clone());
+        let scale_cb = self.scale.clone();
 
         // Cache the CPU-readable staging texture to avoid high-frequency allocations (VRAM leaks)
         let cached_staging: std::sync::Arc<
@@ -258,6 +261,12 @@ impl WgcCapture {
                     windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
                 unsafe { src_tex.GetDesc(&mut desc) };
 
+                let scale = *scale_cb.read();
+                let output_w = (((desc.Width as f32 * scale).round() as u32) / 2) * 2;
+                let output_h = (((desc.Height as f32 * scale).round() as u32) / 2) * 2;
+                let output_w = output_w.max(64);
+                let output_h = output_h.max(64);
+
                 // ── Phase 4c: GPU zero-copy path ──────────────────────────
                 if use_gpu_path_cb {
                     let ts = SystemTime::now()
@@ -265,13 +274,13 @@ impl WgcCapture {
                         .unwrap_or_default()
                         .as_micros() as u64;
                     if let Ok(nv12) =
-                        blit_bgra_to_nv12(&device_cb.0, &src_tex, desc.Width, desc.Height, &cached_processor_cb)
+                        blit_bgra_to_nv12(&device_cb.0, &src_tex, desc.Width, desc.Height, output_w, output_h, &cached_processor_cb)
                     {
                         if let Ok(mut g) = gpu_pending_cb.lock() {
                             *g = Some(GpuRawFrame {
                                 nv12_tex: nv12,
-                                width: desc.Width,
-                                height: desc.Height,
+                                width: output_w,
+                                height: output_h,
                                 timestamp_us: ts,
                             });
                         }
@@ -365,6 +374,12 @@ impl WgcCapture {
                     );
                 }
 
+                let scaled_data = if scale != 1.0 {
+                    super::resize_bgra_nearest(&out, desc.Width, desc.Height, output_w, output_h)
+                } else {
+                    out
+                };
+
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -372,9 +387,9 @@ impl WgcCapture {
 
                 if let Ok(mut guard) = pending_cb.lock() {
                     *guard = Some(RawFrame {
-                        data: out,
-                        width: w as u32,
-                        height: h as u32,
+                        data: scaled_data,
+                        width: output_w,
+                        height: output_h,
                         timestamp_us: ts,
                     });
                 }
@@ -530,6 +545,10 @@ impl WindowCapture for WgcCapture {
     fn backend(&self) -> CaptureBackend {
         CaptureBackend::WGC
     }
+
+    fn set_scale(&mut self, scale: f32) {
+        *self.scale.write() = scale;
+    }
 }
 
 #[cfg(windows)]
@@ -547,8 +566,10 @@ struct VideoProcessorCache {
 fn blit_bgra_to_nv12(
     device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
     src_tex: &windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-    w: u32,
-    h: u32,
+    input_w: u32,
+    input_h: u32,
+    output_w: u32,
+    output_h: u32,
     cache: &std::sync::Arc<std::sync::Mutex<Option<VideoProcessorCache>>>,
 ) -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> {
     use windows::core::Interface;
@@ -558,8 +579,8 @@ fn blit_bgra_to_nv12(
 
     // NV12 render-target texture (GPU-only)
     let nv12_desc = D3D11_TEXTURE2D_DESC {
-        Width: w,
-        Height: h,
+        Width: output_w,
+        Height: output_h,
         MipLevels: 1,
         ArraySize: 1,
         Format: DXGI_FORMAT_NV12,
@@ -586,7 +607,7 @@ fn blit_bgra_to_nv12(
 
     if let Ok(mut guard) = cache.lock() {
         if let Some(ref c) = *guard {
-            if c.width == w && c.height == h {
+            if c.width == output_w && c.height == output_h {
                 processor = Some(c.processor.clone());
                 vp_enum = Some(c.enumerator.clone());
             }
@@ -596,10 +617,10 @@ fn blit_bgra_to_nv12(
             // Video processor
             let cdesc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
                 InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-                InputWidth: w,
-                InputHeight: h,
-                OutputWidth: w,
-                OutputHeight: h,
+                InputWidth: input_w,
+                InputHeight: input_h,
+                OutputWidth: output_w,
+                OutputHeight: output_h,
                 Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
                 ..Default::default()
             };
@@ -609,8 +630,8 @@ fn blit_bgra_to_nv12(
             processor = Some(proc_new.clone());
             vp_enum = Some(enum_new.clone());
             *guard = Some(VideoProcessorCache {
-                width: w,
-                height: h,
+                width: output_w,
+                height: output_h,
                 processor: proc_new,
                 enumerator: enum_new,
             });

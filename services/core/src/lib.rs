@@ -59,6 +59,7 @@ pub enum CaptureTarget {
     Display(isize),
     MultiWindow(Vec<isize>),
     DualWindow(isize, isize),
+    MultiDisplay(Vec<isize>),
 }
 
 /// Global shared application state.

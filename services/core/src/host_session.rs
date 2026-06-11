@@ -56,6 +56,12 @@ enum SessionCmd {
     SetBitrate {
         bps: u32,
     },
+    SetFps {
+        fps: u32,
+    },
+    SetScale {
+        scale: f32,
+    },
 }
 
 impl HostSessionHandle {
@@ -96,6 +102,12 @@ impl HostSessionHandle {
     }
     pub fn set_bitrate(&self, bps: u32) {
         let _ = self.cmd_tx.send(SessionCmd::SetBitrate { bps });
+    }
+    pub fn set_fps(&self, fps: u32) {
+        let _ = self.cmd_tx.send(SessionCmd::SetFps { fps });
+    }
+    pub fn set_scale(&self, scale: f32) {
+        let _ = self.cmd_tx.send(SessionCmd::SetScale { scale });
     }
 }
 
@@ -277,6 +289,17 @@ async fn capture_encode_loop(
             app_kind: AppKind::Unknown,
             suspends_render_when_minimized: false,
         },
+        crate::CaptureTarget::MultiDisplay(handles) => WindowInfo {
+            hwnd: 0,
+            title: format!("MultiDisplay {:?}", handles),
+            process_name: "MultiDisplay".to_string(),
+            process_id: 0,
+            width: 1920,
+            height: 1080,
+            is_minimized: false,
+            app_kind: AppKind::Unknown,
+            suspends_render_when_minimized: false,
+        },
     };
     // Create encoder configuration — allow override from env (set by CLI flags)
     let enc_cfg = {
@@ -326,6 +349,7 @@ async fn capture_encode_loop(
     let is_multi = match &target_val {
         crate::CaptureTarget::MultiWindow(hwnds) if hwnds.len() > 1 => true,
         crate::CaptureTarget::DualWindow(_, _) => true,
+        crate::CaptureTarget::MultiDisplay(_) => true,
         _ => false,
     };
 
@@ -404,8 +428,8 @@ async fn capture_encode_loop(
         }
     };
 
-    let target_fps = enc_cfg.fps as u64;
-    let frame_budget = Duration::from_micros(1_000_000 / target_fps);
+    let mut target_fps = enc_cfg.fps as u64;
+    let mut frame_budget = Duration::from_micros(1_000_000 / target_fps);
     let mut last_frame = Instant::now();
     let stats_interval = Duration::from_millis(500);
     let mut last_stats = Instant::now();
@@ -419,7 +443,9 @@ async fn capture_encode_loop(
     #[cfg(windows)]
     METRICS.set_gpu_path_active(hw_enc.is_some() && gpu_dev.is_some());
 
-    info!(target = ?target_val, fps = target_fps, "Capture-encode loop running");
+    info!(target = ?target_val, port = stream_port, "Capture-encode loop running");
+
+    let mut encoders: std::collections::HashMap<u8, Box<dyn VideoEncoder>> = std::collections::HashMap::new();
 
     loop {
         tokio::task::yield_now().await;
@@ -437,6 +463,9 @@ async fn capture_encode_loop(
                 }
                 SessionCmd::RequestKeyframe => {
                     encoder.request_keyframe();
+                    for enc in encoders.values_mut() {
+                        enc.request_keyframe();
+                    }
                     #[cfg(windows)]
                     if let Some(ref mut hw) = hw_enc {
                         hw.request_keyframe();
@@ -444,10 +473,28 @@ async fn capture_encode_loop(
                 }
                 SessionCmd::SetBitrate { bps } => {
                     encoder.set_bitrate(bps);
+                    for enc in encoders.values_mut() {
+                        enc.set_bitrate(bps);
+                    }
                     #[cfg(windows)]
                     if let Some(ref mut hw) = hw_enc {
                         hw.set_bitrate(bps);
                     }
+                }
+                SessionCmd::SetFps { fps } => {
+                    target_fps = fps as u64;
+                    frame_budget = Duration::from_micros(1_000_000 / target_fps);
+                    encoder.set_fps(fps);
+                    for enc in encoders.values_mut() {
+                        enc.set_fps(fps);
+                    }
+                    #[cfg(windows)]
+                    if let Some(ref mut hw) = hw_enc {
+                        hw.set_fps(fps);
+                    }
+                }
+                SessionCmd::SetScale { scale } => {
+                    cap.set_scale(scale);
                 }
                 _ => {}
             }
@@ -500,7 +547,91 @@ async fn capture_encode_loop(
         }
         last_frame = Instant::now();
 
-        // Poll capture (returns Option<CapturedFrame> directly)
+        // Poll capture (returns Option<CapturedFrame> directly or calls display polling)
+        if let crate::CaptureTarget::MultiDisplay(_) = &target_val {
+            let frames = cap.poll_display_frames();
+            if frames.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                continue;
+            }
+
+            if !announced {
+                announced = true;
+                force_keyframe = true;
+                let (_, raw) = &frames[0];
+                let _ = event_tx.send(HostEvent::StreamStarted {
+                    target: target_val.clone(),
+                    width: raw.width,
+                    height: raw.height,
+                    port: stream_port,
+                });
+                METRICS
+                    .frame_width
+                    .store(raw.width, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .frame_height
+                    .store(raw.height, std::sync::atomic::Ordering::Relaxed);
+            }
+
+            for (display_id, raw) in frames {
+                let display_encoder = encoders.entry(display_id).or_insert_with(|| {
+                    create_encoder(enc_cfg.clone()).expect("Failed to create encoder for display")
+                });
+
+                if force_keyframe {
+                    display_encoder.request_keyframe();
+                }
+
+                let enc_start = Instant::now();
+                METRICS.inc_captured();
+
+                let encoded_opt = match display_encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(display_id, error=%e, "Encode error for display");
+                        METRICS.inc_dropped_enc();
+                        continue;
+                    }
+                };
+
+                let mut encoded = match encoded_opt {
+                    Some(p) => p,
+                    None => {
+                        METRICS.inc_dropped_enc();
+                        continue;
+                    }
+                };
+
+                encoded.display_id = display_id;
+
+                let encode_us = enc_start.elapsed().as_micros() as u64;
+                encode_us_sum += encode_us;
+                METRICS.record_encode_us(encode_us);
+                METRICS.inc_encoded();
+                if encoded.is_keyframe {
+                    METRICS.inc_keyframe();
+                }
+
+                match enc_tx.try_send(encoded) {
+                    Ok(_) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        warn!("Streamer backlogged: dropping encoded display frame");
+                        METRICS.inc_dropped_enc();
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        warn!("Streamer channel closed — stopping capture loop");
+                        break;
+                    }
+                }
+            }
+
+            if force_keyframe {
+                force_keyframe = false;
+            }
+            frames_since_stats += 1;
+            continue;
+        }
+
         let raw = match cap.poll_frame() {
             Some(f) => f,
             None => {

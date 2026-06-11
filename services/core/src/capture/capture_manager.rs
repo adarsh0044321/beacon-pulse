@@ -79,6 +79,7 @@ pub struct CaptureManager {
     /// Phase 4d: shared GPU device injected into WgcCapture for zero-copy frames.
     #[cfg(windows)]
     gpu_device: Option<SharedGpuDeviceArc>,
+    current_scale: f32,
 }
 
 impl CaptureManager {
@@ -92,6 +93,14 @@ impl CaptureManager {
             event_tx,
             #[cfg(windows)]
             gpu_device: None,
+            current_scale: 1.0,
+        }
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.current_scale = scale;
+        for active in &mut self.actives {
+            active.backend.set_scale(scale);
         }
     }
 
@@ -207,7 +216,8 @@ impl CaptureManager {
                     crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
                     _ => return Err(anyhow!("Unsupported target variant")),
                 };
-                let backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
+                let mut backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
+                backend.set_scale(mgr.current_scale);
                 Ok(ActiveCapture {
                     target: t,
                     info: win_info,
@@ -241,6 +251,13 @@ impl CaptureManager {
             crate::CaptureTarget::DualWindow(h1, h2) => {
                 for hwnd in [h1, h2] {
                     if let Ok(act) = create_active(crate::CaptureTarget::Window(hwnd), self) {
+                        new_actives.push(act);
+                    }
+                }
+            }
+            crate::CaptureTarget::MultiDisplay(handles) => {
+                for hmonitor in handles {
+                    if let Ok(act) = create_active(crate::CaptureTarget::Display(hmonitor), self) {
                         new_actives.push(act);
                     }
                 }
@@ -505,6 +522,87 @@ impl CaptureManager {
         })
     }
 
+    /// Poll all active displays independently without compositing them,
+    /// returning a vector of display frames tagged with their index.
+    pub fn poll_display_frames(&mut self) -> Vec<(u8, CapturedFrame)> {
+        let mut results = Vec::new();
+        if self.actives.is_empty() {
+            return results;
+        }
+
+        for idx in 0..self.actives.len() {
+            self.update_active_window_state(idx);
+
+            let active = match self.actives.get_mut(idx) {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let frame_result = active.backend.next_frame();
+            match frame_result {
+                Ok(Some(frame)) => {
+                    active.consecutive_failures = 0;
+                    active.stale_notified = false;
+                    active.last_frame_time = Instant::now();
+                    active.last_frame = Some(CapturedFrame {
+                        data: frame.data.clone(),
+                        width: frame.width,
+                        height: frame.height,
+                        timestamp_us: frame.timestamp_us,
+                        source: frame.source,
+                        is_stale: false,
+                        #[cfg(windows)]
+                        gpu_texture: frame.gpu_texture.clone(),
+                    });
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    active.consecutive_failures += 1;
+                }
+            }
+
+            let failures = active.consecutive_failures;
+            if failures >= 3 {
+                let now = Instant::now();
+                let should_recover = match active.last_recovery_attempt {
+                    Some(last) => now.duration_since(last) >= Duration::from_secs(2),
+                    None => true,
+                };
+                if should_recover {
+                    active.last_recovery_attempt = Some(now);
+                    active.consecutive_failures = 0;
+                    // For simplicity, we just reset failures. If needed, full backend recovery could be done here
+                }
+            }
+
+            if let Some(ref f) = active.last_frame {
+                let ts = if active.last_frame_time.elapsed() > STALL_TIMEOUT {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_micros() as u64
+                } else {
+                    f.timestamp_us
+                };
+
+                results.push((
+                    idx as u8,
+                    CapturedFrame {
+                        data: f.data.clone(),
+                        width: f.width,
+                        height: f.height,
+                        timestamp_us: ts,
+                        source: f.source,
+                        is_stale: active.last_frame_time.elapsed() > STALL_TIMEOUT,
+                        #[cfg(windows)]
+                        gpu_texture: f.gpu_texture.clone(),
+                    },
+                ));
+            }
+        }
+        results
+    }
+
     fn update_active_window_state(&mut self, idx: usize) {
         #[cfg(windows)]
         {
@@ -633,6 +731,7 @@ impl CaptureManager {
                 Box::new(DdaCapture::new())
             }
         };
+        new_backend.set_scale(self.current_scale);
 
         match new_backend.start(target.clone()) {
             Ok(_) => {
@@ -677,6 +776,7 @@ impl CaptureManager {
                 CaptureBackend::WGC => Box::new(WgcCapture::new()),
                 _ => Box::new(DdaCapture::new()),
             };
+            nb.set_scale(self.current_scale);
             if nb.start(target.clone()).is_ok() {
                 active.backend.stop();
                 active.backend = nb;

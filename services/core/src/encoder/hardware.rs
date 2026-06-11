@@ -521,6 +521,7 @@ impl MfHardwareEncoder {
                     is_keyframe,
                     width: w,
                     height: h,
+                    display_id: 0,
                 }));
             }
         }
@@ -673,6 +674,7 @@ impl MfHardwareEncoder {
                     is_keyframe,
                     width: w,
                     height: h,
+                    display_id: 0,
                 }));
             }
         }
@@ -729,6 +731,15 @@ impl VideoEncoder for MfHardwareEncoder {
         }
     }
 
+    fn set_fps(&mut self, fps: u32) {
+        #[cfg(windows)]
+        {
+            self.inner.config.fps = fps;
+            self.inner.config.keyframe_interval = fps;
+            let _ = self.reinit();
+        }
+    }
+
     fn codec(&self) -> VideoCodec {
         VideoCodec::H264
     }
@@ -774,6 +785,9 @@ macro_rules! vendor_encoder {
             }
             fn set_bitrate(&mut self, bps: u32) {
                 self.0.set_bitrate(bps);
+            }
+            fn set_fps(&mut self, fps: u32) {
+                self.0.set_fps(fps);
             }
             fn codec(&self) -> VideoCodec {
                 VideoCodec::H264

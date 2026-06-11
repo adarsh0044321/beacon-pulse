@@ -99,6 +99,41 @@ pub enum ControlMessage {
         pid: u32,
         success: bool,
     },
+    // File Manager
+    BrowseDirectoryRequest {
+        path: String,
+    },
+    DownloadFileRequest {
+        path: String,
+    },
+    FileActionRequest {
+        action: String,
+        path: String,
+        new_path: Option<String>,
+    },
+    BrowseDirectoryResponse {
+        path: String,
+        entries: Vec<FileEntry>,
+        error: Option<String>,
+    },
+    DownloadFileStart {
+        name: String,
+        size: u64,
+    },
+    DownloadFileChunk {
+        data: String,
+    },
+    DownloadFileEnd,
+    FileActionResponse {
+        success: bool,
+        error: Option<String>,
+    },
+    // Stream Settings
+    UpdateStreamSettings {
+        fps: Option<u32>,
+        scale: Option<f32>,
+        bitrate_bps: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -116,6 +151,14 @@ pub struct ProcessInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InputMsg {
     MouseMove {
@@ -123,6 +166,8 @@ pub enum InputMsg {
         y: f32,
         viewport_w: u32,
         viewport_h: u32,
+        #[serde(default)]
+        display_id: Option<u8>,
     },
     MouseButton {
         button: u8,
@@ -131,6 +176,8 @@ pub enum InputMsg {
         y: f32,
         viewport_w: u32,
         viewport_h: u32,
+        #[serde(default)]
+        display_id: Option<u8>,
     },
     MouseScroll {
         delta_x: f32,

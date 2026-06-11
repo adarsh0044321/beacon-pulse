@@ -96,6 +96,7 @@ pub enum ClientEvent {
         is_keyframe: bool,
         width: u16,
         height: u16,
+        display_id: u8,
     },
     Connected {
         host_addr: String,
@@ -119,6 +120,23 @@ pub enum ClientEvent {
     HostProcessKilled {
         pid: u32,
         success: bool,
+    },
+    HostDirectoryList {
+        path: String,
+        entries: Vec<crate::network::FileEntry>,
+        error: Option<String>,
+    },
+    FileDownloadStart {
+        name: String,
+        size: u64,
+    },
+    FileDownloadChunk {
+        data: String,
+    },
+    FileDownloadEnd,
+    FileActionFinished {
+        success: bool,
+        error: Option<String>,
     },
 }
 
@@ -389,6 +407,21 @@ pub async fn start(
                                     ControlMessage::HostProcessKilled { pid, success } => {
                                         let _ = fwd_event_tx_loop.send(ClientEvent::HostProcessKilled { pid, success });
                                     }
+                                    ControlMessage::BrowseDirectoryResponse { path, entries, error } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::HostDirectoryList { path, entries, error });
+                                    }
+                                    ControlMessage::DownloadFileStart { name, size } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::FileDownloadStart { name, size });
+                                    }
+                                    ControlMessage::DownloadFileChunk { data } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::FileDownloadChunk { data });
+                                    }
+                                    ControlMessage::DownloadFileEnd => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::FileDownloadEnd);
+                                    }
+                                    ControlMessage::FileActionResponse { success, error } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::FileActionFinished { success, error });
+                                    }
                                     _ => {}
                                 }
                             }
@@ -471,6 +504,7 @@ async fn forward_frames(
             is_keyframe: frame.is_keyframe,
             width: frame.width,
             height: frame.height,
+            display_id: frame.display_id,
         };
 
         if event_tx.send(ev).is_err() {

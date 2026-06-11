@@ -204,6 +204,31 @@ impl PipelineMetrics {
         let pkts = self.packets_sent.swap(0, Ordering::Relaxed);
         let lost = self.packets_lost.swap(0, Ordering::Relaxed);
 
+        let mem = {
+            #[cfg(windows)]
+            {
+                use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+                use windows::Win32::System::Threading::GetCurrentProcess;
+                
+                unsafe {
+                    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+                    if GetProcessMemoryInfo(
+                        GetCurrentProcess(),
+                        &mut counters,
+                        std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                    ).is_ok() {
+                        counters.WorkingSetSize as u64
+                    } else {
+                        0
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                0
+            }
+        };
+
         MetricsSnapshot {
             frames_captured: self.frames_captured.load(Ordering::Relaxed),
             frames_encoded: self.frames_encoded.load(Ordering::Relaxed),
@@ -223,6 +248,7 @@ impl PipelineMetrics {
             gpu_frames_encoded: self.gpu_frames_encoded.load(Ordering::Relaxed),
             gpu_encode_errors: self.gpu_encode_errors.swap(0, Ordering::Relaxed),
             gpu_path_active: self.gpu_path_active.load(Ordering::Relaxed) != 0,
+            process_memory_bytes: mem,
         }
     }
 }
@@ -250,6 +276,7 @@ pub struct MetricsSnapshot {
     /// GPU encode errors since last snapshot (windowed, resets each 500ms).
     pub gpu_encode_errors: u64,
     pub gpu_path_active: bool,
+    pub process_memory_bytes: u64,
 }
 
 impl MetricsSnapshot {

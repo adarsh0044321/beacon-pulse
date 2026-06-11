@@ -200,6 +200,18 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
     case 'send_file_end':
       payload = { cmd: 'send_file_end' };
       break;
+    case 'list_host_dir':
+      payload = { cmd: 'list_host_directory', path: args.path };
+      break;
+    case 'download_host_file':
+      payload = { cmd: 'download_host_file', path: args.path };
+      break;
+    case 'host_file_action':
+      payload = { cmd: 'host_file_action', action: args.action, path: args.path, new_path: args.newPath || null };
+      break;
+    case 'update_stream_settings':
+      payload = { cmd: 'update_stream_settings', fps: args.fps || null, scale: args.scale || null, bitrate_bps: args.bitrateBps || null };
+      break;
     default:
       return Promise.reject(new Error(`Unknown command: ${cmd}`));
   }

@@ -5,6 +5,7 @@
 //! │  Magic     [4]  = 0x4C414E53 ("LANS")                │
 //! │  Version   [1]  = 1                                   │
 //! │  Flags     [1]  = bit0: keyframe, bit1: fragment_end  │
+//! │  DisplayId [1]  = display index (e.g. 0 or 1)         │
 //! │  SeqNum    [2]  = packet sequence (wraps at 65535)    │
 //! │  Timestamp [8]  = microseconds since epoch            │
 //! │  Width     [2]  = frame width in pixels               │
@@ -14,14 +15,14 @@
 //! │  DataLen   [2]  = payload length                      │
 //! │  Payload  [N]   = H.264 Annex-B data chunk            │
 //! └──────────────────────────────────────────────────────┘
-//! Total header = 26 bytes.  Max payload per packet = 1374 bytes (fits 1400 MTU).
+//! Total header = 27 bytes.  Max payload per packet = 1373 bytes (fits 1400 MTU).
 
 use anyhow::{anyhow, Result};
 
 pub const MAGIC: u32 = 0x4C414E53; // "LANS"
 pub const VERSION: u8 = 1;
-pub const HEADER_SIZE: usize = 26;
-pub const MAX_PAYLOAD: usize = 1374;
+pub const HEADER_SIZE: usize = 27;
+pub const MAX_PAYLOAD: usize = 1373;
 pub const FLAG_KEYFRAME: u8 = 0x01;
 pub const FLAG_FRAG_END: u8 = 0x02;
 pub const FLAG_PARITY: u8 = 0x04; // FEC parity packet marker
@@ -66,6 +67,7 @@ pub struct RtpPacket {
     pub frag_idx: u16,
     pub frag_total: u16,
     pub payload: Vec<u8>,
+    pub display_id: u8,
 }
 
 impl RtpPacket {
@@ -83,6 +85,7 @@ impl RtpPacket {
         buf.extend_from_slice(&MAGIC.to_le_bytes());
         buf.push(VERSION);
         buf.push(self.flags);
+        buf.push(self.display_id);
         buf.extend_from_slice(&self.seq.to_le_bytes());
         buf.extend_from_slice(&self.timestamp_us.to_le_bytes());
         buf.extend_from_slice(&self.width.to_le_bytes());
@@ -108,13 +111,14 @@ impl RtpPacket {
             return Err(anyhow!("Unsupported version: {}", version));
         }
         let flags = data[5];
-        let seq = u16::from_le_bytes(data[6..8].try_into()?);
-        let ts = u64::from_le_bytes(data[8..16].try_into()?);
-        let width = u16::from_le_bytes(data[16..18].try_into()?);
-        let height = u16::from_le_bytes(data[18..20].try_into()?);
-        let frag_idx = u16::from_le_bytes(data[20..22].try_into()?);
-        let frag_tot = u16::from_le_bytes(data[22..24].try_into()?);
-        let data_len = u16::from_le_bytes(data[24..26].try_into()?) as usize;
+        let display_id = data[6];
+        let seq = u16::from_le_bytes(data[7..9].try_into()?);
+        let ts = u64::from_le_bytes(data[9..17].try_into()?);
+        let width = u16::from_le_bytes(data[17..19].try_into()?);
+        let height = u16::from_le_bytes(data[19..21].try_into()?);
+        let frag_idx = u16::from_le_bytes(data[21..23].try_into()?);
+        let frag_tot = u16::from_le_bytes(data[23..25].try_into()?);
+        let data_len = u16::from_le_bytes(data[25..27].try_into()?) as usize;
 
         if data.len() < HEADER_SIZE + data_len {
             return Err(anyhow!("Truncated payload"));
@@ -128,6 +132,7 @@ impl RtpPacket {
             frag_idx,
             frag_total: frag_tot,
             payload: data[HEADER_SIZE..HEADER_SIZE + data_len].to_vec(),
+            display_id,
         })
     }
 }
@@ -140,6 +145,7 @@ pub fn packetize(
     width: u16,
     height: u16,
     is_keyframe: bool,
+    display_id: u8,
 ) -> Vec<RtpPacket> {
     let chunks: Vec<&[u8]> = nal_data.chunks(MAX_PAYLOAD).collect();
     let total = chunks.len() as u16;
@@ -163,6 +169,7 @@ pub fn packetize(
             frag_idx: i as u16,
             frag_total: total,
             payload: chunk.to_vec(),
+            display_id,
         });
         *seq = seq.wrapping_add(1);
     }
@@ -185,6 +192,7 @@ pub fn build_parity_packet(
     height: u16,
     frags: &[Vec<u8>],
     frag_total: u16,
+    display_id: u8,
 ) -> RtpPacket {
     let n = frags.len();
     let max_len = frags.iter().map(|p| p.len()).max().unwrap_or(0);
@@ -211,18 +219,19 @@ pub fn build_parity_packet(
         frag_idx: frag_total, // index = N (one past last data frag)
         frag_total,
         payload,
+        display_id,
     };
     *seq = seq.wrapping_add(1);
     pkt
 }
 
 pub struct Reassembler {
-    frags: std::collections::HashMap<(u64, u16), Vec<u8>>,
-    pending_total: std::collections::HashMap<u64, u16>,
-    pending_keyframe: std::collections::HashMap<u64, bool>,
-    arrival_us: std::collections::HashMap<u64, u64>,
+    frags: std::collections::HashMap<(u64, u8, u16), Vec<u8>>,
+    pending_total: std::collections::HashMap<(u64, u8), u16>,
+    pending_keyframe: std::collections::HashMap<(u64, u8), bool>,
+    arrival_us: std::collections::HashMap<(u64, u8), u64>,
     /// FEC: (lengths_of_each_covered_frag, xor_data)
-    parity: std::collections::HashMap<u64, (Vec<u16>, Vec<u8>)>,
+    parity: std::collections::HashMap<(u64, u8), (Vec<u16>, Vec<u8>)>,
 }
 
 /// Fragments older than this are considered permanently lost and evicted.
@@ -240,37 +249,39 @@ impl Reassembler {
     }
 
     /// Feed a received packet (data or parity).
-    /// Returns `Some((timestamp_us, is_keyframe, nal_data))` when a frame is complete.
-    pub fn feed(&mut self, pkt: RtpPacket) -> Option<(u64, bool, Vec<u8>)> {
+    /// Returns `Some((timestamp_us, display_id, is_keyframe, nal_data))` when a frame is complete.
+    pub fn feed(&mut self, pkt: RtpPacket) -> Option<(u64, u8, bool, Vec<u8>)> {
         let ts = pkt.timestamp_us;
+        let display_id = pkt.display_id;
+        let key = (ts, display_id);
 
         // ── FEC parity packet ─────────────────────────────────────────────
         if pkt.flags & FLAG_PARITY != 0 {
             let total = pkt.frag_total;
-            self.pending_total.insert(ts, total);
+            self.pending_total.insert(key, total);
             self.arrival_us
-                .entry(ts)
+                .entry(key)
                 .or_insert_with(crate::telemetry::now_us);
             if let Some((lens, xor)) = Self::parse_parity_payload(&pkt.payload) {
-                self.parity.insert(ts, (lens, xor));
+                self.parity.insert(key, (lens, xor));
             }
             // Parity arrived — maybe we can now recover exactly one missing frag
-            return self.try_recover(ts);
+            return self.try_recover(ts, display_id);
         }
 
         // ── Normal data fragment ──────────────────────────────────────────
-        self.pending_total.insert(ts, pkt.frag_total);
+        self.pending_total.insert(key, pkt.frag_total);
         if pkt.is_keyframe() {
-            self.pending_keyframe.insert(ts, true);
+            self.pending_keyframe.insert(key, true);
         }
         self.arrival_us
-            .entry(ts)
+            .entry(key)
             .or_insert_with(crate::telemetry::now_us);
-        self.frags.insert((ts, pkt.frag_idx), pkt.payload);
+        self.frags.insert((ts, display_id, pkt.frag_idx), pkt.payload);
 
         // Evict stale incomplete frames
         let now = crate::telemetry::now_us();
-        let stale: Vec<u64> = self
+        let stale: Vec<(u64, u8)> = self
             .arrival_us
             .iter()
             .filter(|(_, &arr)| now.saturating_sub(arr) > STALE_TTL_US)
@@ -279,23 +290,23 @@ impl Reassembler {
         for s in stale {
             let tot = self.pending_total.remove(&s).unwrap_or(0);
             for i in 0..tot {
-                self.frags.remove(&(s, i));
+                self.frags.remove(&(s.0, s.1, i));
             }
             self.pending_keyframe.remove(&s);
             self.arrival_us.remove(&s);
             self.parity.remove(&s);
-            tracing::debug!(ts = s, "Reassembler: evicted stale frame");
+            tracing::debug!(ts = s.0, display_id = s.1, "Reassembler: evicted stale frame");
         }
 
-        let total = *self.pending_total.get(&ts)?;
-        let complete = (0..total).all(|i| self.frags.contains_key(&(ts, i)));
+        let total = *self.pending_total.get(&key)?;
+        let complete = (0..total).all(|i| self.frags.contains_key(&(ts, display_id, i)));
         if complete {
-            return self.assemble(ts);
+            return self.assemble(ts, display_id);
         }
 
         // One frag missing + parity available → try XOR recovery
-        if self.parity.contains_key(&ts) {
-            return self.try_recover(ts);
+        if self.parity.contains_key(&key) {
+            return self.try_recover(ts, display_id);
         }
         None
     }
@@ -317,12 +328,13 @@ impl Reassembler {
         Some((lens, data[1 + n * 2..].to_vec()))
     }
 
-    fn try_recover(&mut self, ts: u64) -> Option<(u64, bool, Vec<u8>)> {
-        let total = *self.pending_total.get(&ts)?;
-        let (lens, xor) = self.parity.get(&ts)?.clone();
+    fn try_recover(&mut self, ts: u64, display_id: u8) -> Option<(u64, u8, bool, Vec<u8>)> {
+        let key = (ts, display_id);
+        let total = *self.pending_total.get(&key)?;
+        let (lens, xor) = self.parity.get(&key)?.clone();
 
         let missing: Vec<u16> = (0..total)
-            .filter(|&i| !self.frags.contains_key(&(ts, i)))
+            .filter(|&i| !self.frags.contains_key(&(ts, display_id, i)))
             .collect();
         if missing.len() != 1 {
             return None;
@@ -338,7 +350,7 @@ impl Reassembler {
             if i as usize == m {
                 continue;
             }
-            if let Some(f) = self.frags.get(&(ts, i)) {
+            if let Some(f) = self.frags.get(&(ts, display_id, i)) {
                 for (d, &s) in recovered.iter_mut().zip(f.iter()) {
                     *d ^= s;
                 }
@@ -348,26 +360,28 @@ impl Reassembler {
 
         tracing::debug!(
             ts,
+            display_id,
             missing_frag = m,
             recovered_len = recovered.len(),
             "FEC: recovered missing fragment via XOR parity"
         );
-        self.frags.insert((ts, missing[0]), recovered);
-        self.assemble(ts)
+        self.frags.insert((ts, display_id, missing[0]), recovered);
+        self.assemble(ts, display_id)
     }
 
-    fn assemble(&mut self, ts: u64) -> Option<(u64, bool, Vec<u8>)> {
-        let total = self.pending_total.remove(&ts)?;
+    fn assemble(&mut self, ts: u64, display_id: u8) -> Option<(u64, u8, bool, Vec<u8>)> {
+        let key = (ts, display_id);
+        let total = self.pending_total.remove(&key)?;
         let mut nal = Vec::new();
         for i in 0..total {
-            if let Some(f) = self.frags.remove(&(ts, i)) {
+            if let Some(f) = self.frags.remove(&(ts, display_id, i)) {
                 nal.extend_from_slice(&f);
             }
         }
-        self.arrival_us.remove(&ts);
-        self.parity.remove(&ts);
-        let kf = self.pending_keyframe.remove(&ts).unwrap_or(false);
-        Some((ts, kf, nal))
+        self.arrival_us.remove(&key);
+        self.parity.remove(&key);
+        let kf = self.pending_keyframe.remove(&key).unwrap_or(false);
+        Some((ts, display_id, kf, nal))
     }
 }
 
@@ -404,10 +418,10 @@ mod tests {
         ts: u64,
         is_kf: bool,
     ) -> (Vec<RtpPacket>, RtpPacket) {
-        let pkts = packetize(nal, seq, ts, 1920, 1080, is_kf);
+        let pkts = packetize(nal, seq, ts, 1920, 1080, is_kf, 0);
         let payloads: Vec<Vec<u8>> = pkts.iter().map(|p| p.payload.clone()).collect();
         let total = pkts.len() as u16;
-        let parity = build_parity_packet(seq, ts, 1920, 1080, &payloads, total);
+        let parity = build_parity_packet(seq, ts, 1920, 1080, &payloads, total, 0);
         (pkts, parity)
     }
 
@@ -420,7 +434,7 @@ mod tests {
         for frame_id in 0u64..200 {
             let ts = frame_id * 16_667;
             let nal = make_frame(2800, frame_id as u8);
-            let pkts = packetize(&nal, &mut seq, ts, 1920, 1080, false);
+            let pkts = packetize(&nal, &mut seq, ts, 1920, 1080, false, 0);
             for p in pkts {
                 if r.feed(p).is_some() {
                     done += 1;
@@ -454,7 +468,7 @@ mod tests {
                     }
                 }
                 if !recovered {
-                    if let Some((_, _, got)) = r.feed(parity.clone()) {
+                    if let Some((_, _, _, got)) = r.feed(parity.clone()) {
                         assert_eq!(
                             got, nal,
                             "FEC data mismatch frame={frame_id} drop={drop_idx}"
@@ -531,8 +545,9 @@ mod tests {
             }
 
             match result {
-                Some((got_ts, _, got_data)) => {
+                Some((got_ts, got_display, _, got_data)) => {
                     assert_eq!(got_ts, ts, "Timestamp mismatch frame {frame_id}");
+                    assert_eq!(got_display, 0, "Display ID mismatch frame {frame_id}");
                     if n_dropped <= 1 {
                         assert_eq!(
                             got_data, nal,
@@ -590,7 +605,8 @@ mod tests {
             }
         }
 
-        let (_, is_kf, got) = result.expect("Out-of-order frame must complete");
+        let (_, got_display, is_kf, got) = result.expect("Out-of-order frame must complete");
+        assert_eq!(got_display, 0, "Display ID mismatch");
         assert!(is_kf, "Keyframe flag must survive reordering");
         assert_eq!(got, nal, "Reordered data must be intact");
     }

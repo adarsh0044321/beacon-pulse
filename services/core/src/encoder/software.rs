@@ -135,6 +135,7 @@ impl VideoEncoder for SoftwareEncoder {
             is_keyframe: is_keyframe || has_idr,
             width,
             height,
+            display_id: 0,
         }))
     }
 
@@ -146,6 +147,12 @@ impl VideoEncoder for SoftwareEncoder {
 
     fn set_bitrate(&mut self, bps: u32) {
         self.config.bitrate_bps = bps;
+        let _ = self.reinit();
+    }
+
+    fn set_fps(&mut self, fps: u32) {
+        self.config.fps = fps;
+        self.config.keyframe_interval = fps;
         let _ = self.reinit();
     }
 

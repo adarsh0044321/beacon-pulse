@@ -207,6 +207,7 @@ fn main() {
             send_file_end,
             list_host_processes,
             kill_host_process,
+            update_stream_settings,
         ])
         // ── Graceful shutdown on window close ─────────────────────────────
         // Kill watchdog + service when the user closes the last window.
@@ -593,5 +594,23 @@ async fn list_host_processes(state: State<'_, AppData>) -> Result<Value, String>
 #[tauri::command]
 async fn kill_host_process(pid: u32, state: State<'_, AppData>) -> Result<Value, String> {
     ipc_send(&state, serde_json::json!({ "cmd": "kill_host_process", "pid": pid }))
+}
+
+#[tauri::command]
+async fn update_stream_settings(
+    fps: Option<u32>,
+    scale: Option<f32>,
+    bitrate_bps: Option<u32>,
+    state: State<'_, AppData>,
+) -> Result<Value, String> {
+    ipc_send(
+        &state,
+        serde_json::json!({
+            "cmd": "update_stream_settings",
+            "fps": fps,
+            "scale": scale,
+            "bitrate_bps": bitrate_bps,
+        }),
+    )
 }
 

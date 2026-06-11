@@ -276,6 +276,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                         }
                         ClientEvent::HostProcessList { .. } => {}
                         ClientEvent::HostProcessKilled { .. } => {}
+                        _ => {}
                     }
                 }
                 Some(_) = window_shutdown_rx.recv() => {
@@ -530,6 +531,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             y: y_rel,
                             viewport_w: rw as u32,
                             viewport_h: rh as u32,
+                            display_id: None,
                         },
                     });
                 }
@@ -579,6 +581,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             y: y_rel,
                             viewport_w: rw as u32,
                             viewport_h: rh as u32,
+                            display_id: None,
                         },
                     });
                 }

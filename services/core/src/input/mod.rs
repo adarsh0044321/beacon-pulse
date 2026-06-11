@@ -37,7 +37,8 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
             y,
             viewport_w,
             viewport_h,
-        } => inject_mouse_move(x, y, viewport_w, viewport_h, target),
+            display_id,
+        } => inject_mouse_move(x, y, viewport_w, viewport_h, display_id, target),
         InputMsg::MouseButton {
             button,
             pressed,
@@ -45,7 +46,8 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
             y,
             viewport_w,
             viewport_h,
-        } => inject_mouse_button(button, pressed, x, y, viewport_w, viewport_h, target),
+            display_id,
+        } => inject_mouse_button(button, pressed, x, y, viewport_w, viewport_h, display_id, target),
         InputMsg::MouseScroll {
             delta_x: _,
             delta_y,
@@ -62,6 +64,7 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
 #[cfg(windows)]
 fn get_target_rect(
     target: Option<crate::CaptureTarget>,
+    display_id: Option<u8>,
 ) -> Option<windows::Win32::Foundation::RECT> {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -95,6 +98,26 @@ fn get_target_rect(
                     }
                 }
             }
+            crate::CaptureTarget::MultiDisplay(handles) => {
+                let idx = display_id.unwrap_or(0) as usize;
+                if idx < handles.len() {
+                    let hmon = handles[idx];
+                    let mut info = MONITORINFO {
+                        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                        ..Default::default()
+                    };
+                    unsafe {
+                        if GetMonitorInfoW(
+                            windows::Win32::Graphics::Gdi::HMONITOR(hmon as *mut _),
+                            &mut info,
+                        )
+                        .as_bool()
+                        {
+                            return Some(info.rcMonitor);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -115,6 +138,7 @@ fn screen_coords(
     norm_y: f32,
     viewport_w: u32,
     viewport_h: u32,
+    display_id: Option<u8>,
     target: Option<crate::CaptureTarget>,
 ) -> (
     i32,
@@ -132,7 +156,7 @@ fn screen_coords(
     let v_width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
     let v_height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
 
-    let rect = get_target_rect(target).unwrap_or(windows::Win32::Foundation::RECT {
+    let rect = get_target_rect(target, display_id).unwrap_or(windows::Win32::Foundation::RECT {
         left: 0,
         top: 0,
         right: v_width,
@@ -162,9 +186,10 @@ fn inject_mouse_move(
     y: f32,
     vw: u32,
     vh: u32,
+    display_id: Option<u8>,
     target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
-    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, target);
+    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, display_id, target);
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
@@ -192,9 +217,10 @@ fn inject_mouse_button(
     y: f32,
     vw: u32,
     vh: u32,
+    display_id: Option<u8>,
     target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
-    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, target);
+    let (sx, sy, vdesk_flag) = screen_coords(x, y, vw, vh, display_id, target);
     let flags = match (button, pressed) {
         (0, true) => MOUSEEVENTF_LEFTDOWN,
         (0, false) => MOUSEEVENTF_LEFTUP,

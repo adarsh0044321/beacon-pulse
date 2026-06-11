@@ -485,6 +485,211 @@ where
                     }
                 }
 
+                ControlMessage::BrowseDirectoryRequest { path } => {
+                    let path_to_read = if path.is_empty() {
+                        dirs_next::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+                    } else {
+                        std::path::PathBuf::from(&path)
+                    };
+                    
+                    let mut entries = Vec::new();
+                    let mut err_str = None;
+                    
+                    match std::fs::read_dir(&path_to_read) {
+                        Ok(dir_entries) => {
+                            for entry_res in dir_entries {
+                                if let Ok(entry) = entry_res {
+                                    let name = entry.file_name().to_string_lossy().to_string();
+                                    let metadata = entry.metadata();
+                                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                                    let modified = metadata.as_ref().ok()
+                                        .and_then(|m| m.modified().ok())
+                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                        
+                                    entries.push(super::FileEntry {
+                                        name,
+                                        is_dir,
+                                        size,
+                                        modified,
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            err_str = Some(e.to_string());
+                        }
+                    }
+                    
+                    let response = ControlMessage::BrowseDirectoryResponse {
+                        path: path_to_read.to_string_lossy().to_string(),
+                        entries,
+                        error: err_str,
+                    };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                }
+
+                ControlMessage::FileActionRequest { action, path, new_path } => {
+                    let mut success = false;
+                    let mut error_msg = None;
+                    
+                    let file_transfer_enabled = crate::registry::read_dword("FileTransfer").unwrap_or(1) == 1;
+                    if !file_transfer_enabled {
+                        error_msg = Some("File transfers disabled by host policy".to_string());
+                    } else if action == "delete" {
+                        let file_delete_allowed = crate::registry::read_dword("FileDeleteAllowed").unwrap_or(1) == 1;
+                        if !file_delete_allowed {
+                            error_msg = Some("File deletion disabled by host policy".to_string());
+                        } else {
+                            let p = std::path::Path::new(&path);
+                            if p.is_dir() {
+                                match std::fs::remove_dir_all(p) {
+                                    Ok(_) => success = true,
+                                    Err(e) => error_msg = Some(e.to_string()),
+                                }
+                            } else {
+                                match std::fs::remove_file(p) {
+                                    Ok(_) => success = true,
+                                    Err(e) => error_msg = Some(e.to_string()),
+                                }
+                            }
+                        }
+                    } else if action == "create_dir" {
+                        let p = std::path::Path::new(&path);
+                        match std::fs::create_dir_all(p) {
+                            Ok(_) => success = true,
+                            Err(e) => error_msg = Some(e.to_string()),
+                        }
+                    } else if action == "rename" {
+                        if let Some(ref new_p_str) = new_path {
+                            let from = std::path::Path::new(&path);
+                            let to = std::path::Path::new(new_p_str);
+                            match std::fs::rename(from, to) {
+                                Ok(_) => success = true,
+                                Err(e) => error_msg = Some(e.to_string()),
+                            }
+                        } else {
+                            error_msg = Some("Missing new path parameter for rename action".to_string());
+                        }
+                    } else {
+                        error_msg = Some(format!("Unknown file action: {}", action));
+                    }
+                    
+                    let response = ControlMessage::FileActionResponse {
+                        success,
+                        error: error_msg,
+                    };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                }
+
+                ControlMessage::DownloadFileRequest { path } => {
+                    let file_transfer_enabled = crate::registry::read_dword("FileTransfer").unwrap_or(1) == 1;
+                    if !file_transfer_enabled {
+                        let response = ControlMessage::FileActionResponse {
+                            success: false,
+                            error: Some("File transfers disabled by host policy".to_string()),
+                        };
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            let mut w = writer_shared.lock().await;
+                            let _ = w.write_all((json + "\n").as_bytes()).await;
+                        }
+                    } else {
+                        let p = std::path::PathBuf::from(&path);
+                        let writer_clone = Arc::clone(&writer_shared);
+                        
+                        tokio::spawn(async move {
+                            match std::fs::File::open(&p) {
+                                Ok(mut file) => {
+                                    use std::io::Read;
+                                    let file_name = p.file_name()
+                                        .and_then(|f| f.to_str())
+                                        .unwrap_or("downloaded_file")
+                                        .to_string();
+                                    let metadata = p.metadata().ok();
+                                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                                    
+                                    let start_msg = ControlMessage::DownloadFileStart {
+                                        name: file_name,
+                                        size,
+                                    };
+                                    if let Ok(json) = serde_json::to_string(&start_msg) {
+                                        let mut w = writer_clone.lock().await;
+                                        if w.write_all((json + "\n").as_bytes()).await.is_ok() {
+                                            drop(w); // release lock
+                                            
+                                            let mut buffer = vec![0u8; 64 * 1024];
+                                            use base64::prelude::*;
+                                            
+                                            loop {
+                                                match file.read(&mut buffer) {
+                                                    Ok(0) => break,
+                                                    Ok(n) => {
+                                                        let b64_chunk = BASE64_STANDARD.encode(&buffer[..n]);
+                                                        let chunk_msg = ControlMessage::DownloadFileChunk {
+                                                            data: b64_chunk,
+                                                        };
+                                                        if let Ok(json_chunk) = serde_json::to_string(&chunk_msg) {
+                                                            let mut w = writer_clone.lock().await;
+                                                            if w.write_all((json_chunk + "\n").as_bytes()).await.is_err() {
+                                                                break;
+                                                            }
+                                                        } else {
+                                                            break;
+                                                        }
+                                                    }
+                                                    Err(_) => break,
+                                                }
+                                            }
+                                            
+                                            let end_msg = ControlMessage::DownloadFileEnd;
+                                            if let Ok(json_end) = serde_json::to_string(&end_msg) {
+                                                let mut w = writer_clone.lock().await;
+                                                let _ = w.write_all((json_end + "\n").as_bytes()).await;
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let err_msg = ControlMessage::FileActionResponse {
+                                        success: false,
+                                        error: Some(e.to_string()),
+                                    };
+                                    if let Ok(json) = serde_json::to_string(&err_msg) {
+                                        let mut w = writer_clone.lock().await;
+                                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+
+                ControlMessage::UpdateStreamSettings { fps, scale, bitrate_bps } => {
+                    if let Some(bps) = bitrate_bps {
+                        let hs = state.host_session.lock().await;
+                        if let Some(ref handle) = *hs {
+                            handle.set_bitrate(bps);
+                        }
+                    }
+                    let hs = state.host_session.lock().await;
+                    if let Some(ref handle) = *hs {
+                        if let Some(f) = fps {
+                            handle.set_fps(f);
+                        }
+                        if let Some(s) = scale {
+                            handle.set_scale(s);
+                        }
+                    }
+                }
+
                 _ => {}
             }
         }
