@@ -499,6 +499,23 @@ async fn dispatch_cmd(
                         }
                     };
                     if let Some(c) = code {
+                        let pairing_code_str = c.clone();
+                        let signaling_url = crate::registry::read_string("SignalingServer")
+                            .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
+                        let stun_server = crate::registry::read_string("StunServer")
+                            .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+                        
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::network::signaling::run_host_signaling_loop(
+                                signaling_url,
+                                pairing_code_str,
+                                crate::network::CONTROL_PORT,
+                                stun_server,
+                            ).await {
+                                tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                            }
+                        });
+
                         let _ = push_tx.send(ServiceEvent::PairingCode {
                             code: if unattended {
                                 "********".to_string()
@@ -592,8 +609,39 @@ async fn dispatch_cmd(
             pairing_code,
             tls,
         } => {
+            let mut resolved_host_ip = host_ip.clone();
+            let mut resolved_stream_port = stream_port;
+
+            // Check if it is a 6-digit WAN pairing code
+            let is_wan_code = host_ip.len() == 6 && host_ip.chars().all(|c| c.is_ascii_digit());
+
+            if is_wan_code {
+                info!("WAN connection requested via pairing code: {}. Connecting to signaling server...", host_ip);
+                let signaling_url = crate::registry::read_string("SignalingServer")
+                    .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
+                
+                let local_proxy_port = 45105;
+                match crate::network::signaling::run_player_signaling_loop(
+                    signaling_url,
+                    host_ip.clone(),
+                    local_proxy_port,
+                ).await {
+                    Ok(public_host_addr) => {
+                        info!("Successfully traversed NAT. Host public address is: {}", public_host_addr);
+                        resolved_host_ip = "127.0.0.1".to_string();
+                        resolved_stream_port = local_proxy_port;
+                    }
+                    Err(e) => {
+                        error!("WAN Traversal failed: {}", e);
+                        return ServiceEvent::Error {
+                            message: format!("WAN Traversal failed: {}", e),
+                        };
+                    }
+                }
+            }
+
             let host_addr: std::net::SocketAddr =
-                match format!("{}:{}", host_ip, stream_port).parse() {
+                match format!("{}:{}", resolved_host_ip, resolved_stream_port).parse() {
                     Ok(a) => a,
                     Err(_) => {
                         return ServiceEvent::Error {
