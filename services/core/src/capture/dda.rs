@@ -454,7 +454,8 @@ impl DdaCapture {
             let dst_h = (((self.height as f32 * self.scale).round() as u32) / 2) * 2;
             let dst_w = dst_w.max(64);
             let dst_h = dst_h.max(64);
-            frame.data = super::resize_bgra_nearest(&frame.data, self.width, self.height, dst_w, dst_h);
+            frame.data =
+                super::resize_bgra_nearest(&frame.data, self.width, self.height, dst_w, dst_h);
             frame.width = dst_w;
             frame.height = dst_h;
         }

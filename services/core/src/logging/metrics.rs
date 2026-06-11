@@ -207,16 +207,20 @@ impl PipelineMetrics {
         let mem = {
             #[cfg(windows)]
             {
-                use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+                use windows::Win32::System::ProcessStatus::{
+                    GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+                };
                 use windows::Win32::System::Threading::GetCurrentProcess;
-                
+
                 unsafe {
                     let mut counters = PROCESS_MEMORY_COUNTERS::default();
                     if GetProcessMemoryInfo(
                         GetCurrentProcess(),
                         &mut counters,
                         std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-                    ).is_ok() {
+                    )
+                    .is_ok()
+                    {
                         counters.WorkingSetSize as u64
                     } else {
                         0

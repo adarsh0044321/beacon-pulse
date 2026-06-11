@@ -192,44 +192,45 @@ impl CaptureManager {
             _ => {}
         }
 
-        let create_active =
-            |t: crate::CaptureTarget, mgr: &mut CaptureManager| -> Result<ActiveCapture> {
-                let win_info = match &t {
-                    crate::CaptureTarget::Window(hwnd) => {
-                        #[cfg(windows)]
-                        {
-                            use windows::Win32::Foundation::HWND;
-                            use windows::Win32::UI::WindowsAndMessaging::{
-                                IsIconic, ShowWindow, SW_RESTORE,
-                            };
-                            let win_hwnd = HWND(*hwnd as *mut _);
-                            if unsafe { IsIconic(win_hwnd) }.as_bool() {
-                                debug!("Auto-restoring minimized target window HWND=0x{:x}", hwnd);
-                                unsafe {
-                                    let _ = ShowWindow(win_hwnd, SW_RESTORE);
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(150));
+        let create_active = |t: crate::CaptureTarget,
+                             mgr: &mut CaptureManager|
+         -> Result<ActiveCapture> {
+            let win_info = match &t {
+                crate::CaptureTarget::Window(hwnd) => {
+                    #[cfg(windows)]
+                    {
+                        use windows::Win32::Foundation::HWND;
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            IsIconic, ShowWindow, SW_RESTORE,
+                        };
+                        let win_hwnd = HWND(*hwnd as *mut _);
+                        if unsafe { IsIconic(win_hwnd) }.as_bool() {
+                            debug!("Auto-restoring minimized target window HWND=0x{:x}", hwnd);
+                            unsafe {
+                                let _ = ShowWindow(win_hwnd, SW_RESTORE);
                             }
+                            std::thread::sleep(std::time::Duration::from_millis(150));
                         }
-                        mgr.get_window_info(*hwnd)?
                     }
-                    crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
-                    _ => return Err(anyhow!("Unsupported target variant")),
-                };
-                let mut backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
-                backend.set_scale(mgr.current_scale);
-                Ok(ActiveCapture {
-                    target: t,
-                    info: win_info,
-                    backend,
-                    last_frame: None,
-                    last_frame_time: Instant::now(),
-                    stale_notified: false,
-                    window_lost_notified: false,
-                    consecutive_failures: 0,
-                    last_recovery_attempt: None,
-                })
+                    mgr.get_window_info(*hwnd)?
+                }
+                crate::CaptureTarget::Display(hmon) => mgr.get_display_info(*hmon)?,
+                _ => return Err(anyhow!("Unsupported target variant")),
             };
+            let mut backend = mgr.create_best_backend_extended(t.clone(), &win_info, !is_multi)?;
+            backend.set_scale(mgr.current_scale);
+            Ok(ActiveCapture {
+                target: t,
+                info: win_info,
+                backend,
+                last_frame: None,
+                last_frame_time: Instant::now(),
+                stale_notified: false,
+                window_lost_notified: false,
+                consecutive_failures: 0,
+                last_recovery_attempt: None,
+            })
+        };
 
         match target {
             crate::CaptureTarget::Window(hwnd) => {

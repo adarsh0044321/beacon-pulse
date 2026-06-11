@@ -277,7 +277,8 @@ impl Reassembler {
         self.arrival_us
             .entry(key)
             .or_insert_with(crate::telemetry::now_us);
-        self.frags.insert((ts, display_id, pkt.frag_idx), pkt.payload);
+        self.frags
+            .insert((ts, display_id, pkt.frag_idx), pkt.payload);
 
         // Evict stale incomplete frames
         let now = crate::telemetry::now_us();
@@ -295,7 +296,11 @@ impl Reassembler {
             self.pending_keyframe.remove(&s);
             self.arrival_us.remove(&s);
             self.parity.remove(&s);
-            tracing::debug!(ts = s.0, display_id = s.1, "Reassembler: evicted stale frame");
+            tracing::debug!(
+                ts = s.0,
+                display_id = s.1,
+                "Reassembler: evicted stale frame"
+            );
         }
 
         let total = *self.pending_total.get(&key)?;

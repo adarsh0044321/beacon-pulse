@@ -47,7 +47,9 @@ pub fn dispatch_input(event: InputMsg, target: Option<crate::CaptureTarget>) -> 
             viewport_w,
             viewport_h,
             display_id,
-        } => inject_mouse_button(button, pressed, x, y, viewport_w, viewport_h, display_id, target),
+        } => inject_mouse_button(
+            button, pressed, x, y, viewport_w, viewport_h, display_id, target,
+        ),
         InputMsg::MouseScroll {
             delta_x: _,
             delta_y,

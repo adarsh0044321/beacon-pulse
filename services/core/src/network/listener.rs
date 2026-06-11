@@ -491,10 +491,10 @@ where
                     } else {
                         std::path::PathBuf::from(&path)
                     };
-                    
+
                     let mut entries = Vec::new();
                     let mut err_str = None;
-                    
+
                     match std::fs::read_dir(&path_to_read) {
                         Ok(dir_entries) => {
                             for entry_res in dir_entries {
@@ -508,7 +508,7 @@ where
                                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                         .map(|d| d.as_millis() as u64)
                                         .unwrap_or(0);
-                                        
+
                                     entries.push(super::FileEntry {
                                         name,
                                         is_dir,
@@ -522,7 +522,7 @@ where
                             err_str = Some(e.to_string());
                         }
                     }
-                    
+
                     let response = ControlMessage::BrowseDirectoryResponse {
                         path: path_to_read.to_string_lossy().to_string(),
                         entries,
@@ -537,7 +537,7 @@ where
                 ControlMessage::FileActionRequest { action, path, new_path } => {
                     let mut success = false;
                     let mut error_msg = None;
-                    
+
                     let file_transfer_enabled = crate::registry::read_dword("FileTransfer").unwrap_or(1) == 1;
                     if !file_transfer_enabled {
                         error_msg = Some("File transfers disabled by host policy".to_string());
@@ -579,7 +579,7 @@ where
                     } else {
                         error_msg = Some(format!("Unknown file action: {}", action));
                     }
-                    
+
                     let response = ControlMessage::FileActionResponse {
                         success,
                         error: error_msg,
@@ -604,7 +604,7 @@ where
                     } else {
                         let p = std::path::PathBuf::from(&path);
                         let writer_clone = Arc::clone(&writer_shared);
-                        
+
                         tokio::spawn(async move {
                             match std::fs::File::open(&p) {
                                 Ok(mut file) => {
@@ -615,7 +615,7 @@ where
                                         .to_string();
                                     let metadata = p.metadata().ok();
                                     let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                                    
+
                                     let start_msg = ControlMessage::DownloadFileStart {
                                         name: file_name,
                                         size,
@@ -624,10 +624,10 @@ where
                                         let mut w = writer_clone.lock().await;
                                         if w.write_all((json + "\n").as_bytes()).await.is_ok() {
                                             drop(w); // release lock
-                                            
+
                                             let mut buffer = vec![0u8; 64 * 1024];
                                             use base64::prelude::*;
-                                            
+
                                             loop {
                                                 match file.read(&mut buffer) {
                                                     Ok(0) => break,
@@ -648,7 +648,7 @@ where
                                                     Err(_) => break,
                                                 }
                                             }
-                                            
+
                                             let end_msg = ControlMessage::DownloadFileEnd;
                                             if let Ok(json_end) = serde_json::to_string(&end_msg) {
                                                 let mut w = writer_clone.lock().await;

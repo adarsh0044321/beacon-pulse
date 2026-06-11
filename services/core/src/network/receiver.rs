@@ -213,7 +213,10 @@ impl UdpReceiver {
                 if is_parity {
                     // This completion was triggered by a parity packet — it's an FEC recovery
                     self.fec_recoveries += 1;
-                    debug!(ts, display_id, "FEC parity triggered frame completion / recovery");
+                    debug!(
+                        ts,
+                        display_id, "FEC parity triggered frame completion / recovery"
+                    );
                 }
                 let loss_pct = if self.seq_tracker.packets_expected > 0 {
                     (self.seq_tracker.packets_lost as f32

@@ -285,7 +285,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 if i + 1 < args.len() {
                     let handles = args[i + 1]
                         .split(',')
-                        .map(|part| part.trim().parse::<isize>().context("Invalid display handle"))
+                        .map(|part| {
+                            part.trim()
+                                .parse::<isize>()
+                                .context("Invalid display handle")
+                        })
                         .collect::<Result<Vec<isize>>>()?;
                     host_args.multi_displays = Some(handles);
                     i += 2;

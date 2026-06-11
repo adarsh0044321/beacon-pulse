@@ -504,14 +504,16 @@ async fn dispatch_cmd(
                             .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
                         let stun_server = crate::registry::read_string("StunServer")
                             .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
-                        
+
                         tokio::spawn(async move {
                             if let Err(e) = crate::network::signaling::run_host_signaling_loop(
                                 signaling_url,
                                 pairing_code_str,
                                 crate::network::CONTROL_PORT,
                                 stun_server,
-                            ).await {
+                            )
+                            .await
+                            {
                                 tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
                             }
                         });
@@ -619,15 +621,20 @@ async fn dispatch_cmd(
                 info!("WAN connection requested via pairing code: {}. Connecting to signaling server...", host_ip);
                 let signaling_url = crate::registry::read_string("SignalingServer")
                     .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
-                
+
                 let local_proxy_port = 45105;
                 match crate::network::signaling::run_player_signaling_loop(
                     signaling_url,
                     host_ip.clone(),
                     local_proxy_port,
-                ).await {
+                )
+                .await
+                {
                     Ok(public_host_addr) => {
-                        info!("Successfully traversed NAT. Host public address is: {}", public_host_addr);
+                        info!(
+                            "Successfully traversed NAT. Host public address is: {}",
+                            public_host_addr
+                        );
                         resolved_host_ip = "127.0.0.1".to_string();
                         resolved_stream_port = local_proxy_port;
                     }
@@ -669,7 +676,10 @@ async fn dispatch_cmd(
                                     current_file = Some((name.clone(), file));
                                 }
                                 Err(e) => {
-                                    error!("Failed to create download file at {:?}: {}", dest_path, e);
+                                    error!(
+                                        "Failed to create download file at {:?}: {}",
+                                        dest_path, e
+                                    );
                                     current_file = None;
                                 }
                             }
@@ -680,7 +690,10 @@ async fn dispatch_cmd(
                                 if let Ok(bytes) = BASE64_STANDARD.decode(data) {
                                     use std::io::Write;
                                     if let Err(e) = file.write_all(&bytes) {
-                                        error!("Failed to write chunk to download file {}: {}", name, e);
+                                        error!(
+                                            "Failed to write chunk to download file {}: {}",
+                                            name, e
+                                        );
                                     }
                                 } else {
                                     error!("Failed to decode base64 chunk for download {}", name);
@@ -991,7 +1004,8 @@ async fn dispatch_cmd(
         UiCommand::ListHostProcesses => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::ListHostProcesses) {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::ListHostProcesses)
+                {
                     error!(error = %e, "Failed to send ListHostProcesses request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1010,7 +1024,9 @@ async fn dispatch_cmd(
         UiCommand::KillHostProcess { pid } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::KillHostProcess { pid }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::KillHostProcess { pid })
+                {
                     error!(error = %e, "Failed to send KillHostProcess request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1029,7 +1045,9 @@ async fn dispatch_cmd(
         UiCommand::ListHostDirectory { path } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::BrowseDirectoryRequest { path }) {
+                if let Err(e) = handle
+                    .send_input(crate::network::ControlMessage::BrowseDirectoryRequest { path })
+                {
                     error!(error = %e, "Failed to send BrowseDirectoryRequest request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1048,7 +1066,9 @@ async fn dispatch_cmd(
         UiCommand::DownloadHostFile { path } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::DownloadFileRequest { path }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::DownloadFileRequest { path })
+                {
                     error!(error = %e, "Failed to send DownloadFileRequest request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1064,10 +1084,20 @@ async fn dispatch_cmd(
         }
 
         #[cfg(feature = "player")]
-        UiCommand::HostFileAction { action, path, new_path } => {
+        UiCommand::HostFileAction {
+            action,
+            path,
+            new_path,
+        } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::FileActionRequest { action, path, new_path }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::FileActionRequest {
+                        action,
+                        path,
+                        new_path,
+                    })
+                {
                     error!(error = %e, "Failed to send FileActionRequest request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1083,10 +1113,20 @@ async fn dispatch_cmd(
         }
 
         #[cfg(feature = "player")]
-        UiCommand::UpdateStreamSettings { fps, scale, bitrate_bps } => {
+        UiCommand::UpdateStreamSettings {
+            fps,
+            scale,
+            bitrate_bps,
+        } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::UpdateStreamSettings { fps, scale, bitrate_bps }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::UpdateStreamSettings {
+                        fps,
+                        scale,
+                        bitrate_bps,
+                    })
+                {
                     error!(error = %e, "Failed to send UpdateStreamSettings request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1223,18 +1263,22 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         client_session::ClientEvent::HostProcessKilled { pid, success } => {
             ServiceEvent::HostProcessKilled { pid, success }
         }
-        client_session::ClientEvent::HostDirectoryList { path, entries, error } => {
-            ServiceEvent::HostDirectoryList { path, entries, error }
-        }
+        client_session::ClientEvent::HostDirectoryList {
+            path,
+            entries,
+            error,
+        } => ServiceEvent::HostDirectoryList {
+            path,
+            entries,
+            error,
+        },
         client_session::ClientEvent::FileDownloadStart { name, size } => {
             ServiceEvent::FileDownloadStart { name, size }
         }
         client_session::ClientEvent::FileDownloadChunk { data } => {
             ServiceEvent::FileDownloadChunk { data }
         }
-        client_session::ClientEvent::FileDownloadEnd => {
-            ServiceEvent::FileDownloadEnd
-        }
+        client_session::ClientEvent::FileDownloadEnd => ServiceEvent::FileDownloadEnd,
         client_session::ClientEvent::FileActionFinished { success, error } => {
             ServiceEvent::FileActionFinished { success, error }
         }
@@ -1638,10 +1682,10 @@ async fn handle_ws_client(
 
 #[cfg(windows)]
 pub fn list_processes() -> Vec<crate::network::ProcessInfo> {
+    use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
     };
-    use windows::Win32::Foundation::CloseHandle;
 
     let mut processes = Vec::new();
     unsafe {
@@ -1655,7 +1699,11 @@ pub fn list_processes() -> Vec<crate::network::ProcessInfo> {
 
             if Process32First(snapshot, &mut entry).is_ok() {
                 loop {
-                    let name_len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                    let name_len = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
                     let name_bytes: Vec<u8> = entry.szExeFile[..name_len]
                         .iter()
                         .map(|&c| c as u8)
@@ -1686,10 +1734,8 @@ pub fn list_processes() -> Vec<crate::network::ProcessInfo> {
 
 #[cfg(windows)]
 pub fn kill_process(pid: u32) -> bool {
-    use windows::Win32::System::Threading::{
-        OpenProcess, TerminateProcess, PROCESS_TERMINATE,
-    };
     use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
     unsafe {
         let handle = OpenProcess(PROCESS_TERMINATE, false, pid);

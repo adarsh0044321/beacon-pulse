@@ -445,7 +445,8 @@ async fn capture_encode_loop(
 
     info!(target = ?target_val, port = stream_port, "Capture-encode loop running");
 
-    let mut encoders: std::collections::HashMap<u8, Box<dyn VideoEncoder>> = std::collections::HashMap::new();
+    let mut encoders: std::collections::HashMap<u8, Box<dyn VideoEncoder>> =
+        std::collections::HashMap::new();
 
     loop {
         tokio::task::yield_now().await;
@@ -585,7 +586,12 @@ async fn capture_encode_loop(
                 let enc_start = Instant::now();
                 METRICS.inc_captured();
 
-                let encoded_opt = match display_encoder.encode_bgra(&raw.data, raw.width, raw.height, raw.timestamp_us) {
+                let encoded_opt = match display_encoder.encode_bgra(
+                    &raw.data,
+                    raw.width,
+                    raw.height,
+                    raw.timestamp_us,
+                ) {
                     Ok(r) => r,
                     Err(e) => {
                         warn!(display_id, error=%e, "Encode error for display");
