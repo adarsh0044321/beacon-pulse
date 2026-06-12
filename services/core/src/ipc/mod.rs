@@ -1477,11 +1477,24 @@ pub async fn run_web_server(
 pub fn open_browser(url: &str) {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("cmd")
-            .args(["/c", "start", url])
-            .creation_flags(0x0800_0000)
-            .spawn();
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
+
+        let url_wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+        let open_wide: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let _ = ShellExecuteW(
+                HWND::default(),
+                PCWSTR(open_wide.as_ptr()),
+                PCWSTR(url_wide.as_ptr()),
+                PCWSTR(std::ptr::null()),
+                PCWSTR(std::ptr::null()),
+                SHOW_WINDOW_CMD(1), // SW_SHOWNORMAL
+            );
+        }
     }
     #[cfg(not(windows))]
     {
