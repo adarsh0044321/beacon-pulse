@@ -121,10 +121,12 @@ pub fn run(duration_secs: u64) -> Result<()> {
             }
             Ok(None) => {
                 dropped += 1;
+                stats.dropped += 1;
             }
             Err(e) => {
                 warn!("[BENCH] Encode error: {}", e);
                 dropped += 1;
+                stats.dropped += 1;
             }
         }
 
