@@ -73,6 +73,12 @@ function initWebSocket() {
   socket.onclose = () => {
     console.warn('[IPC] Backend WebSocket disconnected. Reconnecting in 1s...');
     ws = null;
+    while (requestQueue.length > 0) {
+      const req = requestQueue.shift();
+      if (req) {
+        req.reject(new Error('Connection to backend lost'));
+      }
+    }
     setTimeout(initWebSocket, 1000);
   };
 
