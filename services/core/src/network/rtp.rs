@@ -197,8 +197,8 @@ pub fn build_parity_packet(
     let n = frags.len();
     let max_len = frags.iter().map(|p| p.len()).max().unwrap_or(0);
 
-    let mut payload = Vec::with_capacity(1 + n * 2 + max_len);
-    payload.push(n as u8);
+    let mut payload = Vec::with_capacity(2 + n * 2 + max_len);
+    payload.extend_from_slice(&(n as u16).to_le_bytes());
     for f in frags {
         payload.extend_from_slice(&(f.len() as u16).to_le_bytes());
     }
@@ -319,18 +319,18 @@ impl Reassembler {
     // ── Private helpers ───────────────────────────────────────────────────
 
     fn parse_parity_payload(data: &[u8]) -> Option<(Vec<u16>, Vec<u8>)> {
-        if data.is_empty() {
+        if data.len() < 2 {
             return None;
         }
-        let n = data[0] as usize;
-        if data.len() < 1 + n * 2 {
+        let n = u16::from_le_bytes([data[0], data[1]]) as usize;
+        if data.len() < 2 + n * 2 {
             return None;
         }
         let mut lens = Vec::with_capacity(n);
         for i in 0..n {
-            lens.push(u16::from_le_bytes([data[1 + i * 2], data[2 + i * 2]]));
+            lens.push(u16::from_le_bytes([data[2 + i * 2], data[3 + i * 2]]));
         }
-        Some((lens, data[1 + n * 2..].to_vec()))
+        Some((lens, data[2 + n * 2..].to_vec()))
     }
 
     fn try_recover(&mut self, ts: u64, display_id: u8) -> Option<(u64, u8, bool, Vec<u8>)> {
