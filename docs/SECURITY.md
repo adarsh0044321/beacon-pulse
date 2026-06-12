@@ -20,3 +20,6 @@ Instead, please email the maintainers directly or use GitHub's private vulnerabi
 - Authentication bypass (connecting without permission).
 - Remote Code Execution (RCE) via custom protocol flaws.
 - Privilege escalation via the Watchdog service.
+- Network-level threats: Man-in-the-Middle (MitM) eavesdropping on unencrypted UDP/TCP streams when TLS is disabled.
+- Pairing code brute-forcing or offline dictionary attacks.
+- Signaling server hijacking or session interception during WAN traversal.
