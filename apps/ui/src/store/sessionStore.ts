@@ -251,19 +251,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const now = Date.now();
       const existing = get().discoveredHosts;
       
-      // Map of key (address:port) to host
+      // Map of key (name) to host
       const hostMap = new Map<string, DiscoveredHost>();
       
       // 1. Populate map with existing hosts
       existing.forEach(h => {
-        const key = `${h.address}:${h.port}`;
-        hostMap.set(key, h);
+        hostMap.set(h.name, h);
       });
       
       // 2. Add or update with newly discovered hosts
       hosts.forEach(h => {
-        const key = `${h.address}:${h.port}`;
-        hostMap.set(key, {
+        hostMap.set(h.name, {
           ...h,
           lastSeen: now
         });
