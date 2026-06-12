@@ -31,7 +31,9 @@ impl UdpStreamer {
     }
 
     pub fn add_peer(&mut self, addr: SocketAddr) {
-        self.peers.push(addr);
+        if !self.peers.contains(&addr) {
+            self.peers.push(addr);
+        }
     }
 
     pub fn remove_peer(&mut self, addr: &SocketAddr) {

@@ -14,7 +14,7 @@ pub static CURSOR_CHANNEL: Lazy<tokio::sync::broadcast::Sender<ControlMessage>> 
     tx
 });
 
-pub static CLIPBOARD_CHANNEL: Lazy<tokio::sync::broadcast::Sender<ControlMessage>> =
+pub static CLIPBOARD_CHANNEL: Lazy<tokio::sync::broadcast::Sender<(String, ControlMessage)>> =
     Lazy::new(|| {
         let (tx, _) = tokio::sync::broadcast::channel(16);
         tx
@@ -117,6 +117,9 @@ where
     let mut lines = BufReader::new(reader).lines();
     let peer_ip = peer_addr.ip();
 
+    let session_id_shared = Arc::new(std::sync::Mutex::new(String::new()));
+    let session_id_clone = Arc::clone(&session_id_shared);
+
     let mut cursor_rx = CURSOR_CHANNEL.subscribe();
     let mut clipboard_rx = CLIPBOARD_CHANNEL.subscribe();
     let writer_clone = Arc::clone(&writer_shared);
@@ -132,13 +135,16 @@ where
                         }
                     }
                 }
-                Ok(clipboard_msg) = clipboard_rx.recv() => {
-                    let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
-                    if clipboard_enabled {
-                        if let Ok(json) = serde_json::to_string(&clipboard_msg) {
-                            let mut w = writer_clone.lock().await;
-                            if w.write_all((json + "\n").as_bytes()).await.is_err() {
-                                break;
+                Ok((sender_id, clipboard_msg)) = clipboard_rx.recv() => {
+                    let my_id = session_id_clone.lock().unwrap().clone();
+                    if sender_id != my_id {
+                        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+                        if clipboard_enabled {
+                            if let Ok(json) = serde_json::to_string(&clipboard_msg) {
+                                let mut w = writer_clone.lock().await;
+                                if w.write_all((json + "\n").as_bytes()).await.is_err() {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -243,6 +249,7 @@ where
 
                     // Accept: generate session, reply with UDP stream port
                     session_id = uuid::Uuid::new_v4().to_string();
+                    *session_id_shared.lock().unwrap() = session_id.clone();
                     let stream_port = {
                         let hs = state.host_session.lock().await;
                         if let Some(ref handle) = *hs {
@@ -462,7 +469,7 @@ where
                                 *last_written = text.clone();
                             }
                             crate::input::write_clipboard_text(&text);
-                            let _ = CLIPBOARD_CHANNEL.send(ControlMessage::ClipboardSync { text });
+                            let _ = CLIPBOARD_CHANNEL.send((session_id.clone(), ControlMessage::ClipboardSync { text }));
                         }
                     }
                 }

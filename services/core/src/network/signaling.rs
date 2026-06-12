@@ -43,14 +43,19 @@ pub enum SignalingMessage {
 /// Sends a Binding Request and parses the response for `MAPPED-ADDRESS` (0x0001)
 /// or `XOR-MAPPED-ADDRESS` (0x0020) attributes.
 pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
+    let mut resolved_addr = server_addr.to_string();
+    if !resolved_addr.contains(':') {
+        resolved_addr.push_str(":3478");
+    }
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
     // Resolve STUN server address
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(server_addr).await?.collect();
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&resolved_addr).await?.collect();
     let dest = addrs
-        .first()
-        .ok_or_else(|| anyhow!("Failed to resolve STUN server address"))?;
-    socket.connect(dest).await?;
+        .iter()
+        .find(|addr| addr.is_ipv4())
+        .ok_or_else(|| anyhow!("Failed to resolve STUN server IPv4 address"))?;
+    socket.connect(*dest).await?;
 
     // RFC 5389 STUN binding request header (20 bytes)
     // - STUN Message Type: 0x0001 (Binding Request)

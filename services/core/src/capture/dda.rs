@@ -518,7 +518,7 @@ impl DdaCapture {
             };
             let stride = (w * 4) as usize;
             let mut pixels = vec![0u8; stride * h as usize];
-            GetDIBits(
+            let scanlines = GetDIBits(
                 hdc_mem,
                 hbm,
                 0,
@@ -527,6 +527,14 @@ impl DdaCapture {
                 &mut bmi,
                 DIB_RGB_COLORS,
             );
+
+            if scanlines == 0 {
+                SelectObject(hdc_mem, old_obj);
+                let _ = DeleteObject(hbm);
+                let _ = DeleteDC(hdc_mem);
+                ReleaseDC(hwnd, hdc_window);
+                return Err(anyhow!("GetDIBits failed to copy scanlines"));
+            }
 
             SelectObject(hdc_mem, old_obj);
             let _ = DeleteObject(hbm);

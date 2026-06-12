@@ -110,6 +110,9 @@ pub trait WindowCapture: Send + Sync {
 
 /// Dynamic nearest-neighbor scaling helper for CPU-side BGRA frames
 pub fn resize_bgra_nearest(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    if dst_w == 0 || dst_h == 0 || src_w == 0 || src_h == 0 {
+        return Vec::new();
+    }
     if src_w == dst_w && src_h == dst_h {
         return src.to_vec();
     }

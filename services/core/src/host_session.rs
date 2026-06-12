@@ -901,7 +901,7 @@ async fn clipboard_polling_loop(running: Arc<std::sync::atomic::AtomicBool>) {
                     if text != *last_written {
                         *last_written = text.clone();
                         let msg = crate::network::ControlMessage::ClipboardSync { text };
-                        let _ = crate::network::listener::CLIPBOARD_CHANNEL.send(msg);
+                        let _ = crate::network::listener::CLIPBOARD_CHANNEL.send(("host".to_string(), msg));
                     }
                 }
             }

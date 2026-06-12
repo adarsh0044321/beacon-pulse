@@ -71,6 +71,8 @@ impl SeqTracker {
     }
 
     pub fn reset_interval(&mut self) {
+        self.max_seq = None;
+        self.received_mask = 0;
         self.packets_expected = 0;
         self.packets_lost = 0;
     }

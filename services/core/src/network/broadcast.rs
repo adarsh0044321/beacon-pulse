@@ -230,8 +230,8 @@ fn get_broadcast_addresses() -> Vec<String> {
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
-                    let ip_str = ip_str.trim();
-                    if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+                    let clean_ip = ip_str.trim().split('(').next().unwrap_or(ip_str).trim();
+                    if let Ok(ip) = clean_ip.parse::<std::net::Ipv4Addr>() {
                         let octets = ip.octets();
                         // Skip loopback and APIPA
                         if octets[0] == 127 || (octets[0] == 169 && octets[1] == 254) {
@@ -278,9 +278,9 @@ fn get_local_ips() -> Vec<String> {
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
-                    let ip = ip_str.trim().to_string();
-                    if !ips.contains(&ip) {
-                        ips.push(ip);
+                    let clean_ip = ip_str.trim().split('(').next().unwrap_or(ip_str).trim().to_string();
+                    if !ips.contains(&clean_ip) {
+                        ips.push(clean_ip);
                     }
                 }
             }
