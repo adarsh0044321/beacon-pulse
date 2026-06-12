@@ -156,7 +156,11 @@ impl StatsAccumulator {
         } else {
             enc.iter().sum::<u64>() / enc.len() as u64
         };
-        let p99_enc = enc.get(enc.len() * 99 / 100).copied().unwrap_or(0);
+        let p99_enc = if enc.is_empty() {
+            0
+        } else {
+            enc[enc.len().saturating_sub(1).min(enc.len() * 99 / 100)]
+        };
 
         let avg_pipe = if self.pipeline_latencies.is_empty() {
             0
