@@ -1299,11 +1299,13 @@ fn start_sharing_service(
         );
         *state.broadcast_cancel.lock().await = Some(cancel_tx);
 
-        // Handle Ctrl+C shutdown
+        // Handle Ctrl+C shutdown (non-fatal if console handles are missing/detached in background mode)
         let tx = shutdown_tx.clone();
-        ctrlc::set_handler(move || {
+        if let Err(e) = ctrlc::set_handler(move || {
             let _ = tx.send(());
-        })?;
+        }) {
+            tracing::warn!("Failed to set Ctrl+C handler: {}", e);
+        }
 
         // ── Spawn System Tray Icon ───────────────────────────────────
         if is_bg_service {

@@ -211,11 +211,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
         let SendHwnd(hwnd) = hwnd_rx.recv().context("Failed to receive window HWND from window thread")?;
 
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        // Handle Ctrl+C shutdown (non-fatal if console handles are missing/detached in background mode)
         let shutdown_tx_ctrlc = shutdown_tx.clone();
-        ctrlc::set_handler(move || {
+        if let Err(e) = ctrlc::set_handler(move || {
             info!("Ctrl+C received — shutting down player client");
             let _ = shutdown_tx_ctrlc.send(());
-        })?;
+        }) {
+            warn!("Failed to set Ctrl+C handler: {}", e);
+        }
 
         let mut decoder = Decoder::new().context("Failed to initialize OpenH264 decoder")?;
         let mut shutdown_rx = shutdown_tx.subscribe();
