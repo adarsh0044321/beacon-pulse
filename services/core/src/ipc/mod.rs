@@ -1474,7 +1474,7 @@ pub async fn run_web_server(
     Ok(())
 }
 
-fn open_browser(url: &str) {
+pub fn open_browser(url: &str) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

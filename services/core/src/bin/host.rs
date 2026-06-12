@@ -266,8 +266,11 @@ mod run {
             let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
-                // Another service instance is running — exit silently
-                eprintln!("[Beacon] Another host instance is already running. Exiting.");
+                if ui_mode == 1 {
+                    beacon_pulse::ipc::open_browser("http://localhost:45199");
+                } else {
+                    eprintln!("[Beacon] Another host instance is already running. Exiting.");
+                }
                 std::process::exit(0);
             }
             h // Keep handle alive for process lifetime

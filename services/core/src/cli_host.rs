@@ -1274,6 +1274,19 @@ fn start_sharing_service(
             }
         });
 
+        // Start web / WebSocket server if Web UI mode (1) is active
+        let ui_mode = registry::read_dword("UiMode").unwrap_or(1);
+        if ui_mode == 1 {
+            let web_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::ipc::run_web_server(web_state, 45199, false, false).await
+                {
+                    error!("Web server failed: {}", e);
+                }
+            });
+        }
+
         // Start UDP broadcast advertiser
         let hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())

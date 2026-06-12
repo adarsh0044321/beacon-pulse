@@ -283,7 +283,7 @@ function updateTaskbarPills() {
       pill.className = 'task-pill px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 cursor-pointer hover:bg-white/10 active:scale-95 transition';
     } else {
       if (targetWin.classList.contains('os-window-active')) {
-        pill.className = 'task-pill px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold cursor-pointer transition';
+        pill.className = 'task-pill px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold cursor-pointer transition';
       } else {
         pill.className = 'task-pill px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-slate-200 cursor-pointer hover:bg-white/15 transition';
       }
@@ -399,19 +399,19 @@ function setSimStatus(state: 'offline' | 'scanning' | 'pairing' | 'connected') {
     if (state === 'offline') {
       simStatusIndicator.className = 'w-2 h-2 rounded-full bg-rose-500';
       simStatusText.innerText = 'Offline';
-      simStatusText.className = 'text-[9px] uppercase tracking-wider text-rose-500 font-mono';
+      simStatusText.className = 'text-[9px] uppercase tracking-wider text-rose-500 font-bold font-mono';
     } else if (state === 'scanning') {
       simStatusIndicator.className = 'w-2 h-2 rounded-full bg-cyan-500 animate-pulse';
       simStatusText.innerText = 'Scanning';
-      simStatusText.className = 'text-[9px] uppercase tracking-wider text-cyan-500 font-mono';
+      simStatusText.className = 'text-[9px] uppercase tracking-wider text-cyan-500 font-bold font-mono';
     } else if (state === 'pairing') {
       simStatusIndicator.className = 'w-2 h-2 rounded-full bg-amber-500';
       simStatusText.innerText = 'Auth Handshake';
-      simStatusText.className = 'text-[9px] uppercase tracking-wider text-amber-500 font-mono';
+      simStatusText.className = 'text-[9px] uppercase tracking-wider text-amber-500 font-bold font-mono';
     } else if (state === 'connected') {
       simStatusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
       simStatusText.innerText = 'Streaming';
-      simStatusText.className = 'text-[9px] uppercase tracking-wider text-emerald-500 font-mono';
+      simStatusText.className = 'text-[9px] uppercase tracking-wider text-emerald-500 font-bold font-mono';
     }
   }
 
@@ -649,7 +649,7 @@ function startConnectedSimulators() {
       frame++;
       
       // Wallpaper Background
-      ctx.fillStyle = '#08080c';
+      ctx.fillStyle = '#030305';
       ctx.fillRect(0, 0, w, h);
       
       // Desktop Grid overlay lines
@@ -687,7 +687,7 @@ function startConnectedSimulators() {
       if (windowY < 15 || windowY > h - 100) speedY *= -1;
       
       // Render window
-      ctx.fillStyle = '#040406';
+      ctx.fillStyle = '#050508';
       ctx.beginPath();
       ctx.roundRect(windowX, windowY, 120, 70, 6);
       ctx.fill();
@@ -695,7 +695,7 @@ function startConnectedSimulators() {
       ctx.stroke();
       
       // Window header tab
-      ctx.fillStyle = '#09090c';
+      ctx.fillStyle = '#08080c';
       ctx.beginPath();
       ctx.roundRect(windowX, windowY, 120, 14, [6, 6, 0, 0]);
       ctx.fill();
@@ -734,7 +734,7 @@ function startConnectedSimulators() {
       }
 
       // Windows OS Dock Taskbar
-      ctx.fillStyle = '#050508';
+      ctx.fillStyle = '#030305';
       ctx.fillRect(0, h - 14, w, 14);
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.fillRect(6, h - 11, 8, 8);
@@ -898,7 +898,7 @@ let clipboardVal = true;
 
 cliTabHost?.addEventListener('click', () => {
   cliMode = 'host';
-  cliTabHost.className = 'flex-grow py-1.5 text-[9px] font-bold rounded-md bg-purple-600 text-white transition-all';
+  cliTabHost.className = 'flex-grow py-1.5 text-[9px] font-bold rounded-md bg-amber-600 text-white transition-all';
   cliTabPlayer!.className = 'flex-grow py-1.5 text-[9px] font-bold rounded-md text-slate-400 hover:text-white transition-all';
   cliOptTarget?.classList.remove('hidden');
   updateCliCommand();
@@ -926,12 +926,12 @@ cliInputBitrate?.addEventListener('input', (e) => {
 cliBtnFps.forEach(btn => {
   btn.addEventListener('click', () => {
     cliBtnFps.forEach(b => {
-      b.classList.remove('border-purple-500', 'border-cyan-500', 'bg-purple-950/20', 'bg-cyan-950/20', 'text-purple-400', 'text-cyan-400');
-      b.classList.add('border-white/5', 'bg-[#03060f]', 'text-slate-400');
+      b.classList.remove('border-amber-500', 'border-cyan-500', 'bg-amber-950/20', 'bg-cyan-950/20', 'text-amber-400', 'text-cyan-400');
+      b.classList.add('border-white/5', 'bg-[#030305]', 'text-zinc-400');
     });
     
     fpsVal = parseInt(btn.getAttribute('data-value') || '60');
-    const activeColor = cliMode === 'host' ? 'border-purple-500 bg-purple-950/20 text-purple-400' : 'border-cyan-500 bg-cyan-950/20 text-cyan-400';
+    const activeColor = cliMode === 'host' ? 'border-amber-500 bg-amber-950/20 text-amber-400' : 'border-cyan-500 bg-cyan-950/20 text-cyan-400';
     btn.className = `cli-btn-fps py-1.5 text-[9px] rounded-lg border font-bold ${activeColor}`;
     
     updateCliCommand();
@@ -943,10 +943,10 @@ cliToggleClipboard?.addEventListener('click', () => {
   const toggleSpan = cliToggleClipboard.querySelector('span');
   
   if (clipboardVal) {
-    cliToggleClipboard.className = 'w-8 h-4.5 rounded-full bg-purple-600 p-0.5 transition-all focus:outline-none flex items-center justify-end';
+    cliToggleClipboard.className = 'w-8 h-4.5 rounded-full bg-amber-600 p-0.5 transition-all focus:outline-none flex items-center justify-end';
     toggleSpan?.classList.remove('-translate-x-3.5');
   } else {
-    cliToggleClipboard.className = 'w-8 h-4.5 rounded-full bg-slate-700 p-0.5 transition-all focus:outline-none flex items-center justify-start';
+    cliToggleClipboard.className = 'w-8 h-4.5 rounded-full bg-zinc-700 p-0.5 transition-all focus:outline-none flex items-center justify-start';
     toggleSpan?.classList.add('translate-x-0');
   }
   

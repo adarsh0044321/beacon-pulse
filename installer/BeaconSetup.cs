@@ -229,6 +229,12 @@ class BeaconSetup {
       Process.Start(new ProcessStartInfo(Path.Combine(dir, "beacon-watchdog.exe")) {
         WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true
       });
+      if (uiMode == 1) {
+        System.Threading.Thread.Sleep(500); // Give the background web server a moment to bind
+        Process.Start(new ProcessStartInfo("cmd", "/c start http://localhost:45199") {
+          CreateNoWindow = true, UseShellExecute = false
+        });
+      }
     } catch { }
 
     // ── Done ─────────────────────────────────────────────────────────────
