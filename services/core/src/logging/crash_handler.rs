@@ -131,6 +131,7 @@ fn get_windows_version() -> String {
     #[cfg(windows)]
     {
         // Read from registry — works on all Windows 10/11 versions
+        use std::os::windows::process::CommandExt;
         use std::process::Command;
         let out = Command::new("reg")
             .args([
@@ -139,6 +140,7 @@ fn get_windows_version() -> String {
                 "/v",
                 "CurrentBuildNumber",
             ])
+            .creation_flags(0x0800_0000)
             .output();
         if let Ok(o) = out {
             let s = String::from_utf8_lossy(&o.stdout);
