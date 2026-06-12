@@ -231,8 +231,8 @@ class BeaconSetup {
       });
       if (uiMode == 1) {
         System.Threading.Thread.Sleep(500); // Give the background web server a moment to bind
-        Process.Start(new ProcessStartInfo("cmd", "/c start http://localhost:45199") {
-          CreateNoWindow = true, UseShellExecute = false
+        Process.Start(new ProcessStartInfo("http://localhost:45199") {
+          UseShellExecute = true
         });
       }
     } catch { }
