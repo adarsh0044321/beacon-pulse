@@ -367,6 +367,7 @@ fn inject_mouse_move(
     _y: f32,
     _vw: u32,
     _vh: u32,
+    _display_id: Option<u8>,
     _target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
     Ok(())
@@ -379,6 +380,7 @@ fn inject_mouse_button(
     _y: f32,
     _vw: u32,
     _vh: u32,
+    _display_id: Option<u8>,
     _target: Option<crate::CaptureTarget>,
 ) -> Result<()> {
     Ok(())
