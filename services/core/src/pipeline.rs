@@ -95,8 +95,8 @@ pub fn push_raw_frame(tx: &Sender<RawFrame>, rx: &Receiver<RawFrame>, mut frame:
                 }
             }
             Err(TrySendError::Disconnected(_)) => {
-                warn!("Pipeline raw_tx disconnected");
-                return 0;
+                warn!("Pipeline raw_tx disconnected — frame dropped");
+                return 1;
             }
         }
     }
