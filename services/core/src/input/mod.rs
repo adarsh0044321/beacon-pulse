@@ -407,7 +407,7 @@ pub static LAST_WRITTEN_CLIPBOARD: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new
 pub fn read_clipboard_text() -> Option<String> {
     use windows::Win32::Foundation::{HGLOBAL, HWND};
     use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
     unsafe {
         if OpenClipboard(HWND::default()).is_err() {
@@ -419,11 +419,13 @@ pub fn read_clipboard_text() -> Option<String> {
         if let Ok(handle) = GetClipboardData(13) {
             if !handle.is_invalid() {
                 let hglobal = HGLOBAL(handle.0);
+                let max_size = GlobalSize(hglobal);
+                let max_len = max_size / 2;
                 let ptr = GlobalLock(hglobal);
                 if !ptr.is_null() {
                     let wide_ptr = ptr as *const u16;
                     let mut len = 0;
-                    while *wide_ptr.add(len) != 0 {
+                    while len < max_len && *wide_ptr.add(len) != 0 {
                         len += 1;
                     }
                     let slice = std::slice::from_raw_parts(wide_ptr, len);
