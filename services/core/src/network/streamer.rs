@@ -170,6 +170,9 @@ impl UdpStreamer {
             packet.is_keyframe,
             packet.display_id,
         );
+        if rtp_packets.is_empty() {
+            return;
+        }
         let frag_total = rtp_packets.len() as u16;
 
         // 2. Snapshot clients before first await
