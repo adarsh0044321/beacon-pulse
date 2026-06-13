@@ -153,7 +153,14 @@ fn get_windows_version() -> String {
             }
         }
     }
-    "Windows (version unknown)".to_string()
+    #[cfg(windows)]
+    {
+        "Windows (version unknown)".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        "macOS/Linux (not Windows)".to_string()
+    }
 }
 
 #[cfg(windows)]
