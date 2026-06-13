@@ -489,7 +489,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                             exe_path
                         };
                         let path_str = startup_exe.to_string_lossy();
-                        if registry::write_startup(&path_str, "") {
+                        if registry::write_startup("BeaconHost", &path_str, "boot beacon.exe") {
                             registry::write_dword("StartupEnabled", 1);
                             println!(
                                 "      ✓ Enabled: Added to Windows startup (with crash recovery)."
@@ -972,7 +972,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     match set_input.trim() {
                         "1" => {
                             if startup {
-                                registry::delete_startup();
+                                registry::delete_startup("BeaconHost");
                                 registry::write_dword("StartupEnabled", 0);
                                 println!("      ✓ Removed from Windows startup.");
                             } else {
@@ -986,7 +986,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
                                         exe_path
                                     };
                                     let path_str = startup_exe.to_string_lossy();
-                                    if registry::write_startup(&path_str, "") {
+                                    if registry::write_startup(
+                                        "BeaconHost",
+                                        &path_str,
+                                        "boot beacon.exe",
+                                    ) {
                                         registry::write_dword("StartupEnabled", 1);
                                         println!("      ✓ Added to Windows startup (with crash recovery).");
                                     } else {

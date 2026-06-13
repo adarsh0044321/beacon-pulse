@@ -29,6 +29,10 @@ pub fn bgra_to_yuv420p(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Ve
     let uv_w = width / 2;
     let uv_h = height / 2;
 
+    if width < 2 || height < 2 || bgra.len() < pixels * 4 {
+        return (vec![0; pixels], vec![0; uv_w * uv_h], vec![0; uv_w * uv_h]);
+    }
+
     let mut y_plane = vec![0u8; pixels];
     let mut u_plane = vec![0u8; uv_w * uv_h];
     let mut v_plane = vec![0u8; uv_w * uv_h];
@@ -119,6 +123,11 @@ pub fn bgra_to_nv12(bgra: &[u8], width: u32, height: u32) -> Vec<u8> {
     let h = height as usize;
     let y_size = w * h;
     let uv_size = w * (h / 2); // interleaved U+V, half height
+
+    if width < 2 || height < 2 || bgra.len() < y_size * 4 {
+        return vec![0; y_size + uv_size];
+    }
+
     let mut out = vec![0u8; y_size + uv_size];
 
     let (y_plane, uv_plane) = out.split_at_mut(y_size);
@@ -291,5 +300,17 @@ mod tests {
         let bgra = vec![128u8; 1920 * 1080 * 4];
         let nv12 = bgra_to_nv12(&bgra, 1920, 1080);
         assert_eq!(nv12.len(), 1920 * 1080 * 3 / 2);
+    }
+
+    #[test]
+    fn test_small_dimensions_no_panic() {
+        let bgra = vec![128u8; 4];
+        let (y, u, v) = bgra_to_yuv420p(&bgra, 1, 1);
+        assert_eq!(y.len(), 1);
+        assert_eq!(u.len(), 0);
+        assert_eq!(v.len(), 0);
+
+        let nv12 = bgra_to_nv12(&bgra, 1, 1);
+        assert_eq!(nv12.len(), 1);
     }
 }

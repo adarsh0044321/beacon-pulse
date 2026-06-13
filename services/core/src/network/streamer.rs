@@ -225,8 +225,21 @@ impl UdpStreamer {
                 }
             }
             // FEC parity
-            if let Err(e) = self.socket.send_to(&parity_wire, client.addr).await {
-                warn!(session_id = %client.session_id, error = %e, "FEC parity send failed");
+            match self.socket.send_to(&parity_wire, client.addr).await {
+                Ok(sent) => {
+                    METRICS
+                        .bytes_sent
+                        .fetch_add(sent as u64, std::sync::atomic::Ordering::Relaxed);
+                    METRICS
+                        .packets_sent
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(e) => {
+                    warn!(session_id = %client.session_id, error = %e, "FEC parity send failed");
+                    METRICS
+                        .send_errors
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
         }
 

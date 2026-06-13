@@ -307,7 +307,7 @@ impl MetricsSnapshot {
     }
 
     /// True if this snapshot contains warning-level conditions
-    pub fn has_warnings(&self) -> Vec<PerformanceWarning> {
+    pub fn has_warnings(&self, last_dropped_cap: u64) -> Vec<PerformanceWarning> {
         let mut warnings = Vec::new();
         if self.packet_loss_pct() > 5.0 {
             warnings.push(PerformanceWarning::PacketLoss {
@@ -324,9 +324,10 @@ impl MetricsSnapshot {
                 ms: self.avg_encode_ms(),
             });
         }
-        if self.frames_dropped_cap > 10 {
+        let dropped_in_window = self.frames_dropped_cap.saturating_sub(last_dropped_cap);
+        if dropped_in_window > 10 {
             warnings.push(PerformanceWarning::FrameDrops {
-                count: self.frames_dropped_cap,
+                count: dropped_in_window,
             });
         }
         warnings
@@ -356,13 +357,15 @@ pub static METRICS_CHANNEL: once_cell::sync::Lazy<tokio::sync::broadcast::Sender
 pub async fn metrics_loop(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
     let mut ticker = interval(Duration::from_millis(500));
     let _low_fps_streak = 0u32;
+    let mut last_dropped_cap = 0u64;
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
                 let snap = METRICS.snapshot();
                 let _ = METRICS_CHANNEL.send(snap.clone());
-                let warnings = snap.has_warnings();
+                let warnings = snap.has_warnings(last_dropped_cap);
+                last_dropped_cap = snap.frames_dropped_cap;
 
                 // Structured metrics log entry
                 info!(

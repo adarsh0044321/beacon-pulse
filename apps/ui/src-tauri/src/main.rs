@@ -400,6 +400,10 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
             lanshare_service::registry::delete_value("PairingCode");
         }
         if let Some(start_with_windows) = settings.get("start_with_windows").and_then(Value::as_bool) {
+            let is_player = is_player_mode();
+            let startup_name = if is_player { "PulsePlayer" } else { "BeaconHost" };
+            let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
+
             if start_with_windows {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let mut watchdog_path = exe_path.clone();
@@ -411,12 +415,13 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
                         exe_path
                     };
                     let path_str = startup_exe.to_string_lossy();
-                    if lanshare_service::registry::write_startup(&path_str, "") {
+                    let args = format!("boot {}", target_bin);
+                    if lanshare_service::registry::write_startup(startup_name, &path_str, &args) {
                         lanshare_service::registry::write_dword("StartupEnabled", 1);
                     }
                 }
             } else {
-                lanshare_service::registry::delete_startup();
+                lanshare_service::registry::delete_startup(startup_name);
                 lanshare_service::registry::write_dword("StartupEnabled", 0);
             }
         }

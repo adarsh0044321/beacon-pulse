@@ -116,9 +116,19 @@ impl VideoEncoder for SoftwareEncoder {
         }
 
         // NAL type 5 = IDR — detect for accurate keyframe flag
-        let has_idr = nal_data
-            .windows(5)
-            .any(|w| w.len() >= 5 && (w[4] & 0x1F) == 5);
+        let mut has_idr = false;
+        let len = nal_data.len();
+        if len >= 4 {
+            for i in 0..len - 3 {
+                if nal_data[i] == 0 && nal_data[i + 1] == 0 && nal_data[i + 2] == 1 {
+                    let nal_type = nal_data[i + 3] & 0x1F;
+                    if nal_type == 5 {
+                        has_idr = true;
+                        break;
+                    }
+                }
+            }
+        }
 
         self.frame_count += 1;
 

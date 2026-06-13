@@ -588,6 +588,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       closeAllDecoders();
       setActiveDisplays([0]);
       setActiveDisplayTab(0);
+      disconnectFromHost();
       addToast('Stream Disconnected', 'Connection with host terminated.', 'info');
     });
 
@@ -626,7 +627,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       unlistenRecvStats.then(f => f());
       unlistenMetrics.then(f => f());
     };
-  }, [feedChunk, closeAllDecoders, addToast]);
+  }, [feedChunk, closeAllDecoders, addToast, disconnectFromHost]);
 
   // Logs polling
   const fetchLogs = useCallback(async () => {

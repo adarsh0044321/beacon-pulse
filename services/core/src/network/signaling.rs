@@ -298,11 +298,18 @@ async fn handle_proxied_connection(
 
     // Read from websocket, write to local TCP
     let t1 = tokio::spawn(async move {
-        while let Some(Ok(Message::Text(txt))) = ws_rx_full.next().await {
-            if let Ok(data) = B64.decode(&txt) {
-                if tcp_write.write_all(&data).await.is_err() {
-                    break;
+        while let Some(msg_res) = ws_rx_full.next().await {
+            match msg_res {
+                Ok(Message::Text(txt)) => {
+                    if let Ok(data) = B64.decode(&txt) {
+                        if tcp_write.write_all(&data).await.is_err() {
+                            break;
+                        }
+                    }
                 }
+                Ok(Message::Close(_)) => break,
+                Err(_) => break,
+                _ => {}
             }
         }
     });
@@ -447,11 +454,18 @@ pub async fn run_player_signaling_loop(
                     let (mut ws_tx_full, mut ws_rx_full) = ws_stream_full.split();
 
                     tokio::spawn(async move {
-                        while let Some(Ok(Message::Text(txt))) = ws_rx_full.next().await {
-                            if let Ok(data) = B64.decode(&txt) {
-                                if tcp_write.write_all(&data).await.is_err() {
-                                    break;
+                        while let Some(msg_res) = ws_rx_full.next().await {
+                            match msg_res {
+                                Ok(Message::Text(txt)) => {
+                                    if let Ok(data) = B64.decode(&txt) {
+                                        if tcp_write.write_all(&data).await.is_err() {
+                                            break;
+                                        }
+                                    }
                                 }
+                                Ok(Message::Close(_)) => break,
+                                Err(_) => break,
+                                _ => {}
                             }
                         }
                     });

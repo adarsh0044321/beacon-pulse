@@ -30,6 +30,7 @@ const CRASH_THRESHOLD_SECS: u64 = 10;
 const HKEY_CURRENT_USER: isize = -2147483647;
 const KEY_READ: u32 = 0x20019;
 const REG_SZ: u32 = 1;
+const REG_DWORD: u32 = 4;
 const ERROR_SUCCESS: i32 = 0;
 
 #[link(name = "advapi32")]
@@ -130,7 +131,7 @@ fn reg_read_dword(name: &str) -> Option<u32> {
             &mut size,
         );
         RegCloseKey(hkey);
-        if res == ERROR_SUCCESS {
+        if res == ERROR_SUCCESS && vtype == REG_DWORD {
             Some(data)
         } else {
             None

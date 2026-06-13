@@ -8,6 +8,7 @@ use tracing::info;
 
 use super::MDNS_SERVICE_TYPE;
 
+#[cfg(windows)]
 #[repr(C)]
 struct IP_ADAPTER_ADDRESSES_LH {
     alignment: u64,
@@ -24,6 +25,7 @@ struct IP_ADAPTER_ADDRESSES_LH {
     physical_address_length: u32,
 }
 
+#[cfg(windows)]
 #[link(name = "iphlpapi")]
 extern "system" {
     fn GetAdaptersAddresses(
@@ -35,6 +37,7 @@ extern "system" {
     ) -> u32;
 }
 
+#[cfg(windows)]
 fn get_local_mac_address() -> Option<String> {
     unsafe {
         let mut size: u32 = 15000;
@@ -73,6 +76,11 @@ fn get_local_mac_address() -> Option<String> {
             }
         }
     }
+    None
+}
+
+#[cfg(not(windows))]
+fn get_local_mac_address() -> Option<String> {
     None
 }
 
@@ -190,7 +198,9 @@ pub async fn browse_for_hosts() -> Result<Vec<DiscoveredHost>> {
                         let port = info.get_port();
 
                         // Deduplicate by (address, port).
-                        if !hosts.iter().any(|h| h.address == addr && h.port == port) {
+                        if !addr.is_empty()
+                            && !hosts.iter().any(|h| h.address == addr && h.port == port)
+                        {
                             hosts.push(DiscoveredHost {
                                 name: info.get_hostname().to_string(),
                                 address: addr,

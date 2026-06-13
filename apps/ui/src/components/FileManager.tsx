@@ -12,6 +12,8 @@ interface FileEntry {
 
 export function FileManager() {
   const [currentPath, setCurrentPath] = useState<string>('');
+  const currentPathRef = React.useRef(currentPath);
+  currentPathRef.current = currentPath;
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export function FileManager() {
       const { success, error: err } = ev.payload;
       if (success) {
         addToast('Action Completed', 'File system operation completed successfully.', 'success');
-        loadDirectory(currentPath);
+        loadDirectory(currentPathRef.current);
       } else {
         addToast('Operation Failed', err || 'File system operation failed.', 'error');
       }
@@ -107,7 +109,7 @@ export function FileManager() {
         addToast('Download Completed', `Successfully downloaded file ${prev.name} to your local Downloads folder.`, 'success');
         return { type: null, name: '', progress: 0 };
       });
-      loadDirectory(currentPath);
+      loadDirectory(currentPathRef.current);
     }).then(un => unlistenDownEnd = un);
 
     return () => {
@@ -117,7 +119,7 @@ export function FileManager() {
       if (unlistenDownChunk) unlistenDownChunk();
       if (unlistenDownEnd) unlistenDownEnd();
     };
-  }, [currentPath, addToast]);
+  }, [addToast]);
 
   // Navigate deeper into directory
   const handleNavigate = (entry: FileEntry) => {

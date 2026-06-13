@@ -137,7 +137,7 @@ where
                 }
                 Ok((sender_id, clipboard_msg)) = clipboard_rx.recv() => {
                     let my_id = session_id_clone.lock().unwrap().clone();
-                    if sender_id != my_id {
+                    if !my_id.is_empty() && sender_id != my_id {
                         let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
                         if clipboard_enabled {
                             if let Ok(json) = serde_json::to_string(&clipboard_msg) {
@@ -411,25 +411,34 @@ where
                 }
 
                 ControlMessage::FileStart { name, size } => {
-                    info!("File transfer started: {}, size: {}", name, size);
-                    let path = std::path::Path::new(&name);
-                    let file_name = path.file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or("received_file");
+                    let file_transfer_enabled = crate::registry::read_dword("FileTransfer").unwrap_or(1) == 1;
+                    if !file_transfer_enabled {
+                        warn!("File transfer upload blocked: disabled by host policy");
+                        current_file = None;
+                    } else {
+                        info!("File transfer started: {}, size: {}", name, size);
+                        let normalized_name = name.replace('\\', "/");
+                        let file_name = normalized_name
+                            .split('/')
+                            .last()
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+                            .unwrap_or("received_file");
 
-                    let mut dest_path = dirs_next::download_dir()
-                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                        let mut dest_path = dirs_next::download_dir()
+                            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-                    dest_path.push(file_name);
+                        dest_path.push(file_name);
 
-                    match std::fs::File::create(&dest_path) {
-                        Ok(file) => {
-                            info!("Creating file at {:?}", dest_path);
-                            current_file = Some((file_name.to_string(), file));
-                        }
-                        Err(e) => {
-                            error!("Failed to create file at {:?}: {}", dest_path, e);
-                            current_file = None;
+                        match std::fs::File::create(&dest_path) {
+                            Ok(file) => {
+                                info!("Creating file at {:?}", dest_path);
+                                current_file = Some((file_name.to_string(), file));
+                            }
+                            Err(e) => {
+                                error!("Failed to create file at {:?}: {}", dest_path, e);
+                                current_file = None;
+                            }
                         }
                     }
                 }

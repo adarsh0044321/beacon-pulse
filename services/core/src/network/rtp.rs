@@ -348,6 +348,9 @@ impl Reassembler {
         if m >= lens.len() {
             return None;
         }
+        if lens[m] as usize > xor.len() {
+            return None;
+        }
 
         // XOR all present frags to get the missing one
         let mut recovered = xor.clone();

