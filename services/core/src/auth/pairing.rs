@@ -99,7 +99,7 @@ impl PairingManager {
 
         // Check expiry before doing any crypto
         if !self.is_custom
-            && Instant::now().duration_since(issued_at) > Duration::from_secs(CODE_EXPIRY_SECS)
+            && Instant::now().saturating_duration_since(issued_at) > Duration::from_secs(CODE_EXPIRY_SECS)
         {
             warn!("Pairing: HMAC challenge expired");
             self.active_challenge = None;
@@ -141,7 +141,7 @@ impl PairingManager {
     pub fn has_valid_code(&self) -> bool {
         if let (Some(_), Some(issued_at)) = (&self.current_code, self.issued_at) {
             self.is_custom
-                || Instant::now().duration_since(issued_at) <= Duration::from_secs(CODE_EXPIRY_SECS)
+                || Instant::now().saturating_duration_since(issued_at) <= Duration::from_secs(CODE_EXPIRY_SECS)
         } else {
             false
         }
