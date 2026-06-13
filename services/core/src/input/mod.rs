@@ -120,7 +120,32 @@ fn get_target_rect(
                     }
                 }
             }
-            _ => {}
+            crate::CaptureTarget::MultiWindow(handles) => {
+                let idx = display_id.unwrap_or(0) as usize;
+                if idx < handles.len() {
+                    let hwnd = handles[idx];
+                    let mut rect = Default::default();
+                    unsafe {
+                        if GetWindowRect(windows::Win32::Foundation::HWND(hwnd as *mut _), &mut rect)
+                            .is_ok()
+                        {
+                            return Some(rect);
+                        }
+                    }
+                }
+            }
+            crate::CaptureTarget::DualWindow(h1, h2) => {
+                let idx = display_id.unwrap_or(0) as usize;
+                let hwnd = if idx == 0 { h1 } else { h2 };
+                let mut rect = Default::default();
+                unsafe {
+                    if GetWindowRect(windows::Win32::Foundation::HWND(hwnd as *mut _), &mut rect)
+                        .is_ok()
+                    {
+                        return Some(rect);
+                    }
+                }
+            }
         }
     }
     // Default to primary monitor if None
