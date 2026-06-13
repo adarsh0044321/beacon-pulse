@@ -412,9 +412,12 @@ where
 
                 ControlMessage::FileStart { name, size } => {
                     info!("File transfer started: {}, size: {}", name, size);
-                    let path = std::path::Path::new(&name);
-                    let file_name = path.file_name()
-                        .and_then(|f| f.to_str())
+                    let normalized_name = name.replace('\\', "/");
+                    let file_name = normalized_name
+                        .split('/')
+                        .last()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
                         .unwrap_or("received_file");
 
                     let mut dest_path = dirs_next::download_dir()
