@@ -282,7 +282,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   connectToHost: async (host: DiscoveredHost, code: string) => {
     try {
-      await invoke('connect_to_host', { address: host.address, port: host.port, code, tls: host.tls });
+      await invoke('connect_to_host', { address: host.address, port: host.port, code, tls: host.tls ?? false });
       set({ connectedHost: host });
     } catch (e) {
       console.error('Failed to connect:', e);
