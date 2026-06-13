@@ -43,10 +43,14 @@ pub enum SignalingMessage {
 /// Sends a Binding Request and parses the response for `MAPPED-ADDRESS` (0x0001)
 /// or `XOR-MAPPED-ADDRESS` (0x0020) attributes.
 pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
+    let mut resolved_addr = server_addr.to_string();
+    if !resolved_addr.contains(':') {
+        resolved_addr.push_str(":3478");
+    }
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
     // Resolve STUN server address
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(server_addr).await?.collect();
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&resolved_addr).await?.collect();
     let dest = addrs
         .iter()
         .find(|addr| addr.is_ipv4())
