@@ -95,6 +95,9 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   load: async () => {
     try {
       const raw = await invoke<Record<string, unknown>>('load_settings');
+      if (!raw || typeof raw !== 'object') {
+        return;
+      }
       // Only pick known data keys — never overwrite store action methods.
       const safeKeys = [
         'bitrate_kbps', 'fps', 'encoder', 'audio_enabled',
