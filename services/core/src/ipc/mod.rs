@@ -1478,8 +1478,8 @@ pub fn open_browser(url: &str) {
     #[cfg(windows)]
     {
         use windows::core::PCWSTR;
-        use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
         let url_wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();

@@ -126,8 +126,11 @@ fn get_target_rect(
                     let hwnd = handles[idx];
                     let mut rect = Default::default();
                     unsafe {
-                        if GetWindowRect(windows::Win32::Foundation::HWND(hwnd as *mut _), &mut rect)
-                            .is_ok()
+                        if GetWindowRect(
+                            windows::Win32::Foundation::HWND(hwnd as *mut _),
+                            &mut rect,
+                        )
+                        .is_ok()
                         {
                             return Some(rect);
                         }

@@ -278,7 +278,13 @@ fn get_local_ips() -> Vec<String> {
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
-                    let clean_ip = ip_str.trim().split('(').next().unwrap_or(ip_str).trim().to_string();
+                    let clean_ip = ip_str
+                        .trim()
+                        .split('(')
+                        .next()
+                        .unwrap_or(ip_str)
+                        .trim()
+                        .to_string();
                     if !ips.contains(&clean_ip) {
                         ips.push(clean_ip);
                     }
