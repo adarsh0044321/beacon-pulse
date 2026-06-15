@@ -1,7 +1,20 @@
-📡 Beacon & Pulse v1.0.8 - Release Notes
+📡 Beacon & Pulse v1.1.0 - Release Notes
 =======================================
 
 Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
+
+What's New in v1.1.0
+-------------------
+
+🐧 Linux Support & Compilation
+- Standalone Linux Binaries: Added compilation support and release packaging for Linux platforms. Linux users can now download `release-linux.zip` containing both the `beacon-host` and `pulse-client` standalone binaries.
+- Multi-Platform CI Pipeline: Configured GitHub Actions to build and release both Windows (`release-windows.zip`) and Linux (`release-linux.zip`) standalone bundles.
+
+What's New in v1.0.9
+-------------------
+
+🌐 WebSocket IPC Response Resolution Fix
+- Promise-Response Matching: Resolved a race condition in Chrome/browser UI mode where background polling requests (like window list/monitor updates) would consume the `start_share` command response. Added strict event-type correlation to ensure the "Start Sharing" action triggers and resolves correctly.
 
 What's New in v1.0.8
 -------------------

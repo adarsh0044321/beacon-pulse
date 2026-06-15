@@ -1,6 +1,6 @@
 [package]
 name = "beacon-pulse"
-version = "1.0.8"
+version = "1.1.0"
 edition = "2021"
 authors = ["adarsh0044321"]
 description = "Low-latency, hardware-accelerated LAN remote desktop streaming service"
@@ -31,47 +31,6 @@ tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tokio-tungstenite = "0.29.0"
 tokio-util = "0.7"
-
-# Windows API bindings
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Shell",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Dxgi",
-    "Win32_Graphics_Dxgi_Common",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_Dwm",
-    "Win32_System_Threading",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Pipes",
-    "Win32_System_IO",
-    "Win32_Storage_FileSystem",
-    "Win32_Security",
-    "Win32_System_Services",
-    "Win32_System_Registry",
-    "Win32_System_LibraryLoader",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Graphics_Capture",
-    "Graphics_DirectX",
-    "Graphics_DirectX_Direct3D11",
-    "Win32_System_WinRT",
-    "Win32_System_WinRT_Graphics_Capture",
-    # windows-rs 0.58: CreateDirect3D11DeviceFromDXGIDevice/IDirect3DDxgiInterfaceAccess
-    # moved from WinRT_Graphics_Capture into their own WinRT_Direct3D11 module
-    "Win32_System_WinRT_Direct3D11",
-    "Win32_Storage_Xps",
-    # Phase 3: Windows Media Foundation (hardware encoder NVENC/AMF/QSV)
-    "Win32_Media_MediaFoundation",
-    "Win32_System_Com",
-    # Phase 3: Toolhelp32 snapshot for crash-handler thread count
-    "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_DataExchange",
-    "Win32_System_Memory",
-] }
-windows-service = "0.7"
 
 # Networking
 socket2 = { version = "0.5", features = ["all"] }
@@ -114,5 +73,46 @@ openh264 = "0.9"
 # Synchronization primitives
 parking_lot = "0.12"
 atomic = "0.6"
+
+# Windows API bindings
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Pipes",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Services",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Graphics_Capture",
+    # windows-rs 0.58: CreateDirect3D11DeviceFromDXGIDevice/IDirect3DDxgiInterfaceAccess
+    # moved from WinRT_Graphics_Capture into their own WinRT_Direct3D11 module
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_Storage_Xps",
+    # Phase 3: Windows Media Foundation (hardware encoder NVENC/AMF/QSV)
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    # Phase 3: Toolhelp32 snapshot for crash-handler thread count
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+] }
+windows-service = "0.7"
 
 

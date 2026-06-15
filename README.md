@@ -21,13 +21,22 @@
 
 > **No installation required for standalone use** — just download, extract, and run.
 
+### 🪟 Windows
 | Component | Description | Download |
 |-----------|-------------|----------|
 | **BeaconSetup.exe** | Host installer — share your screen | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
 | **PulseSetup.exe** | Player installer — view remote screen | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
+| **release-windows.zip** | Standalone portable bundle (no install) | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
 
 **BeaconSetup.exe** extracts `beacon.exe` + `beacon-watchdog.exe` to `%APPDATA%\Beacon\` and optionally adds to Windows startup.  
 **PulseSetup.exe** extracts `pulse.exe` to `%APPDATA%\Pulse\` and creates a desktop shortcut.
+
+### 🐧 Linux
+| Component | Description | Download |
+|-----------|-------------|----------|
+| **release-linux.zip** | Standalone portable bundle for Linux | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
+
+The Linux release contains compiled `beacon-host` (Host) and `pulse-client` (Player/Viewer) standalone binaries. Simply extract, mark as executable (`chmod +x`), and run.
 
 ---
 
@@ -77,7 +86,7 @@ Run `beacon.exe` (or launch via `BeaconSetup.exe`):
 ```
   Base UI Config Menu
   ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.0.7                   ║
+  ║         Beacon  v1.1.0                   ║
   ╚══════════════════════════════════════════╝
 
     [1] Start Sharing Session (Window, Display, Multi, Dual)
@@ -365,6 +374,22 @@ npm run tauri build
 ---
 
 ## 📋 Changelog
+
+### v1.1.0 (2026-06-17)
+
+**Features & Platform Support**
+- **Linux Platform Support** — Added native compilation support for Linux hosts and players. Standalone Linux builds are packaged in `release-linux.zip`.
+- **Multi-Platform CI Releases** — Configured GitHub Actions to run cross-platform verification and automatically build/release both Windows and Linux binaries.
+
+### v1.0.9 (2026-06-15)
+
+**Bug Fixes & Reliability**
+- **Browser Mode Start Sharing** — mapped incoming WebSocket response events to their respective command request promises in `ipc.ts`, preventing background window/monitor polling from intercepting or stealing the `start_share` promise.
+
+### v1.0.8 (2026-06-10)
+
+**Features & Improvements**
+- **Installer UI Mode Selection** — updated setup installers (`BeaconSetup.exe` and `PulseSetup.exe`) to prompt users for foreground "Localhost Web UI" or silent background "Terminal UI" installation modes, persisting choices under the `UiMode` registry value.
 
 ### v1.0.7 (2026-06-07)
 

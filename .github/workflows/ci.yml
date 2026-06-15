@@ -19,7 +19,10 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
 
     steps:
     - uses: actions/checkout@v4
@@ -35,8 +38,13 @@ jobs:
     - name: Check formatting
       run: cargo fmt --all -- --check
 
-    - name: Clippy Lints
+    - name: Clippy Lints (Windows)
+      if: matrix.os == 'windows-latest'
       run: cargo clippy --all-targets --all-features
+
+    - name: Clippy Lints (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: cargo clippy -p beacon-pulse --all-targets --all-features
 
     - name: Build Host (Beacon)
       run: cargo build --release -p beacon-pulse --bin beacon --features host
@@ -44,7 +52,8 @@ jobs:
     - name: Build Player Backend (Pulse)
       run: cargo build --release -p beacon-pulse --bin pulse --features player
 
-    - name: Build Watchdog
+    - name: Build Watchdog (Windows)
+      if: matrix.os == 'windows-latest'
       run: cargo build --release -p beacon-watchdog
 
   release:
@@ -91,6 +100,43 @@ jobs:
           release-windows.zip
           installer/host/BeaconSetup.exe
           installer/player/PulseSetup.exe
+        name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
+        body_path: RELEASE_NOTES.txt
+        tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+
+  release-linux:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build Linux Release Binaries
+      run: |
+        cargo build --release -p beacon-pulse --bin beacon --features host
+        cargo build --release -p beacon-pulse --bin pulse --features player
+        
+    - name: Package Release
+      run: |
+        mkdir -p release-linux
+        cp target/release/beacon release-linux/beacon-host
+        cp target/release/pulse release-linux/pulse-client
+        cp RELEASE_NOTES.txt release-linux/RELEASE_NOTES.txt
+        zip -r release-linux.zip release-linux
+        
+    - name: Publish Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release-linux.zip
         name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
         body_path: RELEASE_NOTES.txt
         tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
