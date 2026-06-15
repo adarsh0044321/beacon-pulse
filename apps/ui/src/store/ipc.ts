@@ -87,19 +87,42 @@ function initWebSocket() {
   };
 }
 
+function responseMatchesCommand(event: string | undefined, cmd: string): boolean {
+  if (!event || event === 'error') return true;
+
+  switch (cmd) {
+    case 'list_windows': return event === 'window_list';
+    case 'list_monitors': return event === 'monitor_list';
+    case 'start_share': return event === 'share_started';
+    case 'stop_share': return event === 'share_stopped';
+    case 'generate_pairing_code': return event === 'pairing_code';
+    case 'get_active_clients': return event === 'active_clients';
+    case 'discover_hosts': return event === 'host_list';
+    case 'connect_to_host': return event === 'stream_connected';
+    case 'disconnect_from_host': return event === 'stream_disconnected';
+    case 'kick_client': return event === 'client_disconnected';
+    case 'set_bitrate':
+    case 'request_keyframe':
+      return event === 'stats';
+    case 'send_input':
+    case 'send_file_start':
+    case 'send_file_chunk':
+    case 'send_file_end':
+    case 'list_host_dir':
+    case 'download_host_file':
+    case 'host_file_action':
+    case 'update_stream_settings':
+      return event === 'recv_stats';
+    default:
+      return false;
+  }
+}
+
 function resolveNextPending(responseData: any) {
   if (requestQueue.length === 0) return;
 
-  let matchIndex = 0;
-  if (responseData.windows) {
-    matchIndex = requestQueue.findIndex(r => r.cmd === 'list_windows');
-  } else if (responseData.monitors) {
-    matchIndex = requestQueue.findIndex(r => r.cmd === 'list_monitors');
-  } else if (responseData.hosts) {
-    matchIndex = requestQueue.findIndex(r => r.cmd === 'discover_hosts');
-  } else if (responseData.clients) {
-    matchIndex = requestQueue.findIndex(r => r.cmd === 'get_active_clients');
-  }
+  const event = responseData.event;
+  let matchIndex = requestQueue.findIndex(r => responseMatchesCommand(event, r.cmd));
 
   if (matchIndex === -1) {
     matchIndex = 0;
