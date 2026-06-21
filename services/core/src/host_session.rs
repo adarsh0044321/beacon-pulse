@@ -416,6 +416,22 @@ async fn capture_encode_loop(
         return;
     }
 
+    let audio_enabled = crate::registry::read_dword("Audio").unwrap_or(0) == 1;
+    let _audio_cap = if audio_enabled {
+        match crate::capture::audio::AudioCapture::start(enc_tx.clone()) {
+            Ok(ac) => {
+                info!("Audio capture stream started for host session");
+                Some(ac)
+            }
+            Err(e) => {
+                warn!("Failed to start audio loopback capture: {:?}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Initialise encoder (we don't know dimensions yet — resize on first frame)
     let mut encoder = match create_encoder(enc_cfg.clone()) {
         Ok(e) => e,

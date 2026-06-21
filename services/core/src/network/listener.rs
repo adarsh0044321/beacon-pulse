@@ -182,6 +182,8 @@ where
     let mut current_file: Option<(String, std::fs::File)> = None;
     let mut last_seen_max_bitrate = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
     let mut current_bitrate_bps = last_seen_max_bitrate;
+    let mut registered_udp_port = 0u16;
+    let mut registered_display_name = "Player".to_string();
 
     let result = async {
         while let Some(line) = lines.next_line().await? {
@@ -194,6 +196,9 @@ where
                     version,
                     udp_port,
                 } => {
+                    registered_udp_port = udp_port;
+                    registered_display_name = display_name.clone();
+
                     info!(
                         client_id = %client_id,
                         display_name = %display_name,
@@ -499,6 +504,52 @@ where
                         let mut w = writer_shared.lock().await;
                         let _ = w.write_all((json + "\n").as_bytes()).await;
                     }
+                }
+
+                ControlMessage::ListHostMonitors => {
+                    let monitors = crate::capture::display_list::list_monitors().unwrap_or_default();
+                    let response = ControlMessage::HostMonitorList { monitors };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                }
+
+                ControlMessage::SwitchHostMonitor { display_handle } => {
+                    info!("Client requested monitor switch to display_handle={}", display_handle);
+                    let new_target = crate::CaptureTarget::Display(display_handle);
+                    *state.active_target.lock().await = Some(new_target.clone());
+                    
+                    // Stop current host session
+                    let mut session = state.host_session.lock().await;
+                    if let Some(handle) = session.take() {
+                        handle.stop();
+                    }
+                    
+                    // Start a new session with the new target
+                    let port = crate::network::DEFAULT_PORT;
+                    let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
+                    
+                    match crate::host_session::start(new_target, port, host_event_tx) {
+                        Ok(handle) => {
+                            if registered_udp_port != 0 {
+                                handle.add_client(
+                                    session_id.clone(),
+                                    registered_display_name.clone(),
+                                    SocketAddr::new(peer_addr.ip(), registered_udp_port),
+                                );
+                            }
+                            *session = Some(handle);
+                            info!("Successfully switched host session to display_handle={}", display_handle);
+                        }
+                        Err(e) => {
+                            error!("Failed to restart host session on target switch: {:?}", e);
+                        }
+                    }
+                    
+                    tokio::spawn(async move {
+                        while let Some(_ev) = host_event_rx.recv().await {}
+                    });
                 }
 
                 ControlMessage::BrowseDirectoryRequest { path } => {

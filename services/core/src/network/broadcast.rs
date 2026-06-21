@@ -266,7 +266,7 @@ fn get_broadcast_addresses() -> Vec<String> {
 }
 
 /// Get all local IP addresses (for filtering out self-broadcasts).
-fn get_local_ips() -> Vec<String> {
+pub fn get_local_ips() -> Vec<String> {
     let mut ips = vec!["127.0.0.1".to_string()];
 
     // Parse ipconfig for all our IPs

@@ -375,6 +375,25 @@ npm run tauri build
 
 ## 📋 Changelog
 
+### v1.1.1 (2026-06-21)
+
+**Android Player Customization & Updates**
+- **App Icon Customization** — Custom app icon generated from high-res logo and packaged for mdpi to xxxhdpi screen densities.
+- **Advanced Player Features** — Native H.264 video decoding with MediaCodec and SurfaceView hardware acceleration, ZXing QR camera scanner for pairing code parsing, and parallel UDP discovery & TCP control threading.
+- **Sticky Connection Overlay Fix** — Propagated TCP handshake success events in `MultiIpConnector` to immediately update the dashboard connection state and render video.
+- **Manual Connect History** — Persisted manual inputs in SharedPreferences and added scrollable connection history chips for fast reconnects.
+
+**Chrome UI Video Stream Fixes**
+- **H.264 Codec case-sensitivity** — Changed uppercase profile-level ID to lowercase `avc1.42c033` in `Client.tsx` to satisfy strict browser WebCodecs parsing.
+- **Secure Context Warnings** — Implemented detection for insecure origins, advising users to connect via localhost or enable browser flag overrides.
+- **Synchronous Error Recovery** — Wrapped decoder setups in try-catch to report errors directly to the client banner instead of freezing the stream.
+
+**Build & Packaging Fixes**
+- **Malformed PATH Override** — Sanitized build script environments to avoid trailing quote path parsing bugs.
+- **File Lock Release** — Resolved copy failures on `beacon.exe` and `pulse.exe` by terminating active background handles.
+- **C# Installer Compilation** — Built standalone self-extracting installers (`BeaconSetup.exe`, `PulseSetup.exe`) embedding new binaries.
+- **Tauri Webview Packaging** — Generated native wrapper installers (`BeaconChromeUI-Setup.exe`, `PulseChromeUI-Setup.exe`) using NSIS.
+
 ### v1.1.0 (2026-06-17)
 
 **Features & Platform Support**

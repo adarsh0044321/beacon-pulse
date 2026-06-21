@@ -2,6 +2,7 @@
 members = [
     "services/core",
     "services/watchdog",
+    "shared",
 ]
 resolver = "2"
 

@@ -74,51 +74,65 @@ function useMultiWebCodecsDecoder() {
     canvas.height = height;
     const ctx = canvas.getContext('2d')!;
 
-    const decoder = new VideoDecoder({
-      output: (frame: VideoFrame) => {
-        if (instance.canvas) {
-          ctx.drawImage(frame, 0, 0, instance.canvas.width, instance.canvas.height);
-        }
-        frame.close();
-        instance.frameCount++;
+    try {
+      if (typeof VideoDecoder === 'undefined') {
+        throw new Error(
+          "WebCodecs (VideoDecoder) is not supported in this browser/context. " +
+          "WebCodecs requires a Secure Context (HTTPS or localhost) in Chrome/Firefox. " +
+          "If you are accessing this UI over a LAN IP (e.g., http://192.168.x.x:45200), " +
+          "please use localhost or enable the 'Insecure origins treated as secure' flag in chrome://flags."
+        );
+      }
 
-        const now = Date.now();
-        if (now - instance.lastFpsCheck >= 1000) {
-          const elapsed = (now - instance.lastFpsCheck) / 1000;
-          const fps = Math.round(instance.frameCount / elapsed);
-          instance.stats = {
-            ...instance.stats,
-            fps,
-            frames: instance.stats.frames + instance.frameCount,
-          };
-          setDisplayStats(prev => ({
-            ...prev,
-            [displayId]: { ...instance.stats }
-          }));
-          instance.frameCount = 0;
-          instance.lastFpsCheck = now;
-        }
-      },
-      error: (e: DOMException) => {
-        console.error(`[WebCodecs] Decoder error on display ${displayId}:`, e);
-        setErrors(prev => ({ ...prev, [displayId]: `Decoder error: ${e.message}` }));
-      },
-    });
+      const decoder = new VideoDecoder({
+        output: (frame: VideoFrame) => {
+          if (instance.canvas) {
+            ctx.drawImage(frame, 0, 0, instance.canvas.width, instance.canvas.height);
+          }
+          frame.close();
+          instance.frameCount++;
 
-    decoder.configure({
-      codec: 'avc1.42C033', // Constrained Baseline H.264, Level 5.1
-      codedWidth: width,
-      codedHeight: height,
-      optimizeForLatency: true,
-      hardwareAcceleration: 'prefer-hardware',
-    });
+          const now = Date.now();
+          if (now - instance.lastFpsCheck >= 1000) {
+            const elapsed = (now - instance.lastFpsCheck) / 1000;
+            const fps = Math.round(instance.frameCount / elapsed);
+            instance.stats = {
+              ...instance.stats,
+              fps,
+              frames: instance.stats.frames + instance.frameCount,
+            };
+            setDisplayStats(prev => ({
+              ...prev,
+              [displayId]: { ...instance.stats }
+            }));
+            instance.frameCount = 0;
+            instance.lastFpsCheck = now;
+          }
+        },
+        error: (e: DOMException) => {
+          console.error(`[WebCodecs] Decoder error on display ${displayId}:`, e);
+          setErrors(prev => ({ ...prev, [displayId]: `Decoder error: ${e.message}` }));
+        },
+      });
 
-    instance.decoder = decoder;
-    setErrors(prev => {
-      const copy = { ...prev };
-      delete copy[displayId];
-      return copy;
-    });
+      decoder.configure({
+        codec: 'avc1.42c033', // Constrained Baseline H.264, Level 5.1 (lowercase for Chrome compatibility)
+        codedWidth: width,
+        codedHeight: height,
+        optimizeForLatency: true,
+        hardwareAcceleration: 'prefer-hardware',
+      });
+
+      instance.decoder = decoder;
+      setErrors(prev => {
+        const copy = { ...prev };
+        delete copy[displayId];
+        return copy;
+      });
+    } catch (e: any) {
+      console.error(`[WebCodecs] Failed to initialize decoder on display ${displayId}:`, e);
+      setErrors(prev => ({ ...prev, [displayId]: e.message || String(e) }));
+    }
   }, []);
 
   const feedChunk = useCallback((

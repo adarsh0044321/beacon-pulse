@@ -53,3 +53,10 @@ dist-host/
 dist-player/
 apps/ui/dist-host/
 apps/ui/dist-player/
+
+# Android
+apps/ui-android/build/
+apps/ui-android/app/build/
+apps/ui-android/.gradle/
+apps/ui-android/local.properties
+.gradle/

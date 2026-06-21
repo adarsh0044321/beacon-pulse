@@ -4,6 +4,8 @@ pub mod dda;
 pub mod display_list;
 pub mod wgc;
 pub mod window_list;
+pub mod audio;
+pub mod audio_player;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -1,0 +1,15 @@
+[package]
+name = "beacon-pulse-shared"
+version = "1.1.0"
+edition = "2021"
+authors = ["adarsh0044321"]
+description = "Shared protocols, data models, and security primitives for Beacon & Pulse"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+ring = "0.17"
+rcgen = "0.13"
+anyhow = "1"
+rand = "0.8"

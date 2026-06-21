@@ -121,6 +121,9 @@ pub enum ClientEvent {
         pid: u32,
         success: bool,
     },
+    HostMonitorList {
+        monitors: Vec<crate::capture::display_list::MonitorInfo>,
+    },
     HostDirectoryList {
         path: String,
         entries: Vec<crate::network::FileEntry>,
@@ -407,6 +410,9 @@ pub async fn start(
                                     ControlMessage::HostProcessKilled { pid, success } => {
                                         let _ = fwd_event_tx_loop.send(ClientEvent::HostProcessKilled { pid, success });
                                     }
+                                    ControlMessage::HostMonitorList { monitors } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::HostMonitorList { monitors });
+                                    }
                                     ControlMessage::BrowseDirectoryResponse { path, entries, error } => {
                                         let _ = fwd_event_tx_loop.send(ClientEvent::HostDirectoryList { path, entries, error });
                                     }
@@ -464,6 +470,8 @@ pub async fn start(
 // Forward frames → IPC events
 // ─────────────────────────────────────────────────────────────────────────────
 
+use crate::capture::audio_player::AudioPlayer;
+
 async fn forward_frames(
     mut frame_rx: mpsc::UnboundedReceiver<ReceivedFrame>,
     event_tx: mpsc::UnboundedSender<ClientEvent>,
@@ -476,6 +484,14 @@ async fn forward_frames(
     let mut bytes_received = 0u64;
     let mut last_stats = std::time::Instant::now();
     let stats_interval = std::time::Duration::from_millis(1000);
+
+    let audio_player = match AudioPlayer::start() {
+        Ok(ap) => Some(ap),
+        Err(e) => {
+            tracing::warn!("Failed to initialize audio playback engine: {:?}", e);
+            None
+        }
+    };
 
     while running.load(Ordering::Relaxed) {
         let frame = match tokio::time::timeout(
@@ -493,6 +509,13 @@ async fn forward_frames(
             }
             Err(_) => continue,
         };
+
+        if frame.display_id == 255 {
+            if let Some(ref player) = audio_player {
+                player.play(&frame.nal_data);
+            }
+            continue;
+        }
 
         frames += 1;
         bytes_received += frame.nal_data.len() as u64;

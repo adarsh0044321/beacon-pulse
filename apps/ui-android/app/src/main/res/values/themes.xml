@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.AppCompat.NoActionBar" parent="android:Theme.Material.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="android:colorPrimary">#6200EE</item>
+        <item name="android:colorSecondary">#03DAC6</item>
+        <item name="android:statusBarColor">#000000</item>
+    </style>
+</resources>

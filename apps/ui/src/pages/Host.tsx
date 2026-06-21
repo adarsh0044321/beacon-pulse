@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke, listen } from '../store/ipc';
+import * as QRCode from 'qrcode';
 import { 
   ArrowLeft, Play, Square, RefreshCw, Users, Key, AlertTriangle, 
   Cpu, Zap, Settings as SettingsIcon, Monitor, Activity, Terminal, ShieldAlert
@@ -39,6 +40,36 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   const [shareMode, setShareMode] = useState<'single' | 'display' | 'multi' | 'dual' | 'all_displays'>('single');
   const [codeTimer, setCodeTimer] = useState(0);
   const [windowSearch, setWindowSearch] = useState('');
+  const [hostIps, setHostIps] = useState<string[]>([]);
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Fetch host IPs on mount
+  useEffect(() => {
+    invoke<string[]>('get_host_ips')
+      .then(ips => {
+        setHostIps(ips.filter(ip => ip !== '127.0.0.1'));
+      })
+      .catch(console.error);
+  }, []);
+
+  // Render QR code to canvas
+  useEffect(() => {
+    if (qrCanvasRef.current && pairingCode && hostIps.length > 0) {
+      const payload = JSON.stringify({
+        ips: hostIps,
+        port: 45101,
+        code: pairingCode
+      });
+      QRCode.toCanvas(qrCanvasRef.current, payload, {
+        width: 120,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }).catch(console.error);
+    }
+  }, [pairingCode, hostIps]);
   
   // Real-time logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -671,10 +702,17 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
                         <Key size={16} />
-                        <span style={{ fontSize: '0.875rem' }}>Connection Pairing Code</span>
+                        <span style={{ fontSize: '0.875rem' }}>Scan QR or Enter Code</span>
                         {codeTimer > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({codeTimer}s)</span>}
                       </div>
-                      <div className="pairing-code">{pairingCode ?? '------'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', justifyContent: 'center', width: '100%' }}>
+                        <div className="pairing-code" style={{ minWidth: '120px', textAlign: 'center' }}>{pairingCode ?? '------'}</div>
+                        {pairingCode && (
+                          <div style={{ background: '#fff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                            <canvas ref={qrCanvasRef} style={{ width: '100px', height: '100px', display: 'block' }} />
+                          </div>
+                        )}
+                      </div>
                       <button className="btn btn-ghost btn-sm" onClick={generatePairingCode}>Cycle Pairing Code</button>
                     </div>
 

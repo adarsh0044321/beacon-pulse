@@ -1,7 +1,30 @@
-📡 Beacon & Pulse v1.1.0 - Release Notes
+📡 Beacon & Pulse v1.1.1 - Release Notes
 =======================================
 
 Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
+
+What's New in v1.1.1
+-------------------
+
+📱 Android Player Customization & Updates
+- App Icon Customization: The Android app icon is now customized using a high-resolution logo, automatically resized for all standard Android screen densities (mdpi to xxxhdpi).
+- Advanced Player Features: Integrated hardware H.264 video decoding using native MediaCodec + SurfaceView for sub-millisecond acceleration, QR camera scan support (zxing-android-embedded) for pairing codes, and high-speed network threading for UDP discovery and TCP control channels.
+- Connection Overlay Fix: Resolved sticky "Connecting to host..." overlay by properly propagating the TCP handshake connected status callback event to update UI states.
+- Recent Connections Dashboard: Implemented input persistence in SharedPreferences and a scrollable recent connections row (up to 5 items) for instant reconnects.
+
+🌐 Chrome UI Video Stream Fixes
+- H.264 Codec Case-Sensitivity: Corrected the profile-level ID to lowercase (`avc1.42c033`) to prevent Chrome WebCodecs from rejecting the video stream with validation errors.
+- Secure Context Safeguards: Added client detection for secure contexts (HTTPS/localhost). When accessed over insecure LAN IPs, a descriptive error banner advises users to connect via localhost or enable chrome://flags bypasses.
+- Error Handling: Wrapped decoder setup in a try-catch block to gracefully route initialization failures to the user-facing error banner instead of freezing on a black screen.
+
+⚙️ Packaging & Build System Fixes
+- Malformed PATH Resolution: Cleaned environment PATH setup in build scripts, bypassing malformed trailing double-quotes in Windows PATH.
+- Process Locks: Cleared background process handles to prevent build/copy failures on `beacon.exe` and `pulse.exe`.
+- Setup Installer Builds: Compiled self-contained C# setups (`BeaconSetup.exe`, `PulseSetup.exe`) embedding updated Rust binaries and icons.
+- Tauri Webview Installer Generation: Generated Chrome UI setups (`BeaconChromeUI-Setup.exe`, `PulseChromeUI-Setup.exe`) using Tauri release compilation and NSIS packaging.
+
+📡 Beacon & Pulse v1.1.0 - Release Notes
+=======================================
 
 What's New in v1.1.0
 -------------------

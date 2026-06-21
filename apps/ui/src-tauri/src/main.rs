@@ -185,6 +185,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_host_ips,
             list_windows,
             list_monitors,
             start_share,
@@ -234,6 +235,11 @@ fn main() {
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_host_ips() -> Result<Vec<String>, String> {
+    Ok(lanshare_service::network::broadcast::get_local_ips())
+}
 
 #[tauri::command]
 async fn list_windows(state: State<'_, AppData>) -> Result<Value, String> {

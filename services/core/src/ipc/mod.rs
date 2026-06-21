@@ -126,6 +126,12 @@ pub enum UiCommand {
         scale: Option<f32>,
         bitrate_bps: Option<u32>,
     },
+    #[cfg(feature = "player")]
+    ListHostMonitors,
+    #[cfg(feature = "player")]
+    SwitchHostMonitor {
+        display_handle: isize,
+    },
 }
 
 /// Messages sent from Service → UI
@@ -250,6 +256,10 @@ pub enum ServiceEvent {
     HostProcessKilled {
         pid: u32,
         success: bool,
+    },
+    #[cfg(feature = "player")]
+    HostMonitorList {
+        monitors: Vec<crate::capture::display_list::MonitorInfo>,
     },
     #[cfg(feature = "player")]
     HostDirectoryList {
@@ -1042,6 +1052,46 @@ async fn dispatch_cmd(
         }
 
         #[cfg(feature = "player")]
+        UiCommand::ListHostMonitors => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::ListHostMonitors)
+                {
+                    error!(error = %e, "Failed to send ListHostMonitors request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::SwitchHostMonitor { display_handle } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::SwitchHostMonitor { display_handle })
+                {
+                    error!(error = %e, "Failed to send SwitchHostMonitor request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
         UiCommand::ListHostDirectory { path } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
@@ -1262,6 +1312,9 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         }
         client_session::ClientEvent::HostProcessKilled { pid, success } => {
             ServiceEvent::HostProcessKilled { pid, success }
+        }
+        client_session::ClientEvent::HostMonitorList { monitors } => {
+            ServiceEvent::HostMonitorList { monitors }
         }
         client_session::ClientEvent::HostDirectoryList {
             path,
