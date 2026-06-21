@@ -73,9 +73,18 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
         let mut watchdog_path = None;
 
         // Try Tauri Resource Resolver (official bundle path)
-        if let Ok(path) = app.path().resolve("resources/beacon-watchdog.exe", tauri::path::BaseDirectory::Resource) {
+        if let Ok(path) = app.path().resolve("beacon-watchdog.exe", tauri::path::BaseDirectory::Resource) {
             if path.exists() {
                 watchdog_path = Some(path);
+            }
+        }
+
+        // Try legacy Tauri Resource Resolver path
+        if watchdog_path.is_none() {
+            if let Ok(path) = app.path().resolve("resources/beacon-watchdog.exe", tauri::path::BaseDirectory::Resource) {
+                if path.exists() {
+                    watchdog_path = Some(path);
+                }
             }
         }
 
