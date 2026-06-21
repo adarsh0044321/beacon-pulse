@@ -119,6 +119,12 @@ pub struct StatsAccumulator {
     window_start: u64,
 }
 
+impl Default for StatsAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StatsAccumulator {
     pub fn new() -> Self {
         Self {

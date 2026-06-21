@@ -59,6 +59,7 @@ pub enum ShareMode {
     Display,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ShareMode {
     fn default() -> Self {
         ShareMode::Window
