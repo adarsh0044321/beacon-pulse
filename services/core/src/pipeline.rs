@@ -186,6 +186,7 @@ mod tests {
                 is_stale: false,
                 source: CaptureBackend::WGC,
                 timestamp_us: 100,
+                #[cfg(windows)]
                 gpu_texture: None,
             },
             meta: FrameMetadata::new(1),
@@ -198,6 +199,7 @@ mod tests {
                 is_stale: false,
                 source: CaptureBackend::WGC,
                 timestamp_us: 200,
+                #[cfg(windows)]
                 gpu_texture: None,
             },
             meta: FrameMetadata::new(2),
@@ -210,6 +212,7 @@ mod tests {
                 is_stale: false,
                 source: CaptureBackend::WGC,
                 timestamp_us: 300,
+                #[cfg(windows)]
                 gpu_texture: None,
             },
             meta: FrameMetadata::new(3),
