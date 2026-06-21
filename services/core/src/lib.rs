@@ -9,8 +9,15 @@ pub mod benchmark;
 pub mod capture;
 #[cfg(feature = "host")]
 pub mod cli_host;
-#[cfg(feature = "player")]
+#[cfg(all(feature = "player", windows))]
 pub mod cli_player;
+
+#[cfg(all(feature = "player", not(windows)))]
+pub mod cli_player {
+    pub fn run(_args: Vec<String>) -> anyhow::Result<()> {
+        anyhow::bail!("CLI Player is only supported on Windows.");
+    }
+}
 #[cfg(feature = "player")]
 pub mod client_session;
 #[cfg(feature = "host")]
@@ -25,7 +32,13 @@ pub mod network;
 pub mod pipeline;
 pub mod registry;
 pub mod telemetry;
+#[cfg(windows)]
 pub mod tray;
+
+#[cfg(not(windows))]
+pub mod tray {
+    pub fn spawn(_shutdown_tx: tokio::sync::broadcast::Sender<()>, _title: String) {}
+}
 
 pub use crate::auth::PairingManager;
 pub use crate::logging::session_logger::SessionId;

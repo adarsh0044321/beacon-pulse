@@ -8,7 +8,9 @@
 //! Requirements: Windows 10 1903+, WinRT runtime.
 //! Gracefully falls back (returns Err on start) on older OS.
 
-use super::{CaptureBackend, CapturedFrame, GpuTexture, GpuTextureInner, WindowCapture};
+use super::{CaptureBackend, CapturedFrame, WindowCapture};
+#[cfg(windows)]
+use super::{GpuTexture, GpuTextureInner};
 use crate::encoder::gpu_device::SharedGpuDeviceArc;
 use anyhow::{anyhow, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
