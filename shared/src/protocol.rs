@@ -5,29 +5,17 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SignalingMessage {
     /// Host registers its pairing code on signaling server (if proxying is used)
-    RegisterHost {
-        pairing_code: String,
-    },
+    RegisterHost { pairing_code: String },
     /// Player registers to connect via pairing code
-    RegisterPlayer {
-        pairing_code: String,
-    },
+    RegisterPlayer { pairing_code: String },
     /// Confirmation from the broker
-    RegistrationSuccess {
-        role: String,
-    },
+    RegistrationSuccess { role: String },
     /// Rejection from the broker
-    RegistrationFailed {
-        reason: String,
-    },
+    RegistrationFailed { reason: String },
     /// WebRTC Session Description Protocol (SDP) Offer sent by the host
-    SdpOffer {
-        sdp: String,
-    },
+    SdpOffer { sdp: String },
     /// WebRTC Session Description Protocol (SDP) Answer returned by the player
-    SdpAnswer {
-        sdp: String,
-    },
+    SdpAnswer { sdp: String },
     /// WebRTC ICE Candidate exchanged for NAT traversal / direct connections
     IceCandidate {
         candidate: String,
@@ -45,9 +33,7 @@ pub enum SignalingMessage {
         hmac: String,
     },
     /// Disconnect request
-    Disconnect {
-        reason: String,
-    },
+    Disconnect { reason: String },
 }
 
 /// Binary input layout constants for the WebRTC DataChannel.

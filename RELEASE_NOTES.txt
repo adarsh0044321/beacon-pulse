@@ -7,6 +7,7 @@ What's New in v1.1.1
 -------------------
 
 📱 Android Player Customization & Updates
+- Android Player Client Build: The compiled Android Player Client APK is now generated as `PulsePlayer-debug.apk` and is available for download on the release assets page.
 - App Icon Customization: The Android app icon is now customized using a high-resolution logo, automatically resized for all standard Android screen densities (mdpi to xxxhdpi).
 - Advanced Player Features: Integrated hardware H.264 video decoding using native MediaCodec + SurfaceView for sub-millisecond acceleration, QR camera scan support (zxing-android-embedded) for pairing codes, and high-speed network threading for UDP discovery and TCP control channels.
 - Connection Overlay Fix: Resolved sticky "Connecting to host..." overlay by properly propagating the TCP handshake connected status callback event to update UI states.

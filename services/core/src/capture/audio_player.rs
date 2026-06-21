@@ -20,7 +20,9 @@ impl AudioPlayer {
             .default_output_device()
             .ok_or_else(|| anyhow!("No default output audio device found"))?;
 
-        let device_name = device.name().unwrap_or_else(|_| "Default Output".to_string());
+        let device_name = device
+            .name()
+            .unwrap_or_else(|_| "Default Output".to_string());
         info!(device = %device_name, "Audio playback device initialized on player");
 
         let config = device.default_output_config()?;
@@ -71,8 +73,10 @@ impl AudioPlayer {
                     let ceil_pos = floor_pos + 1;
                     let weight = source_pos - source_pos.floor();
 
-                    let l_val = buf[floor_pos * 2] * (1.0 - weight as f32) + buf[ceil_pos * 2] * weight as f32;
-                    let r_val = buf[floor_pos * 2 + 1] * (1.0 - weight as f32) + buf[ceil_pos * 2 + 1] * weight as f32;
+                    let l_val = buf[floor_pos * 2] * (1.0 - weight as f32)
+                        + buf[ceil_pos * 2] * weight as f32;
+                    let r_val = buf[floor_pos * 2 + 1] * (1.0 - weight as f32)
+                        + buf[ceil_pos * 2 + 1] * weight as f32;
 
                     // Map to output channels
                     if channels == 2 {
@@ -83,9 +87,13 @@ impl AudioPlayer {
                     } else {
                         // Multi-channel fallback
                         for c in 0..channels {
-                            if c == 0 { data[data_index * channels + c] = l_val; }
-                            else if c == 1 { data[data_index * channels + c] = r_val; }
-                            else { data[data_index * channels + c] = 0.0; }
+                            if c == 0 {
+                                data[data_index * channels + c] = l_val;
+                            } else if c == 1 {
+                                data[data_index * channels + c] = r_val;
+                            } else {
+                                data[data_index * channels + c] = 0.0;
+                            }
                         }
                     }
 
@@ -108,12 +116,8 @@ impl AudioPlayer {
             }
         };
 
-        let stream = device.build_output_stream(
-            &config.into(),
-            data_callback,
-            error_callback,
-            None
-        )?;
+        let stream =
+            device.build_output_stream(&config.into(), data_callback, error_callback, None)?;
 
         stream.play()?;
         info!("Audio playback stream initialized and playing");

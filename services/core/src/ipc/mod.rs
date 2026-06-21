@@ -1075,7 +1075,10 @@ async fn dispatch_cmd(
         UiCommand::SwitchHostMonitor { display_handle } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::SwitchHostMonitor { display_handle })
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::SwitchHostMonitor {
+                        display_handle,
+                    })
                 {
                     error!(error = %e, "Failed to send SwitchHostMonitor request to host");
                     return ServiceEvent::Error {

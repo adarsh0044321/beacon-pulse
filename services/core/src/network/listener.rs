@@ -519,17 +519,17 @@ where
                     info!("Client requested monitor switch to display_handle={}", display_handle);
                     let new_target = crate::CaptureTarget::Display(display_handle);
                     *state.active_target.lock().await = Some(new_target.clone());
-                    
+
                     // Stop current host session
                     let mut session = state.host_session.lock().await;
                     if let Some(handle) = session.take() {
                         handle.stop();
                     }
-                    
+
                     // Start a new session with the new target
                     let port = crate::network::DEFAULT_PORT;
                     let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
-                    
+
                     match crate::host_session::start(new_target, port, host_event_tx) {
                         Ok(handle) => {
                             if registered_udp_port != 0 {
@@ -546,7 +546,7 @@ where
                             error!("Failed to restart host session on target switch: {:?}", e);
                         }
                     }
-                    
+
                     tokio::spawn(async move {
                         while let Some(_ev) = host_event_rx.recv().await {}
                     });

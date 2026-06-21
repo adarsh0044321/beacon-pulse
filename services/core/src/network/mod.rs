@@ -7,11 +7,11 @@ pub mod receiver;
 pub mod rtp;
 pub mod session;
 pub mod signaling;
-pub mod webrtc;
 #[cfg(feature = "host")]
 pub mod streamer;
 #[cfg(feature = "host")]
 pub mod udp_stream;
+pub mod webrtc;
 
 use serde::{Deserialize, Serialize};
 

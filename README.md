@@ -38,6 +38,13 @@
 
 The Linux release contains compiled `beacon-host` (Host) and `pulse-client` (Player/Viewer) standalone binaries. Simply extract, mark as executable (`chmod +x`), and run.
 
+### 🤖 Android
+| Component | Description | Download |
+|-----------|-------------|----------|
+| **PulsePlayer-debug.apk** | Android Player Client — view remote screen | [⬇ Download](https://github.com/adarsh0044321/beacon-pulse/releases/latest) |
+
+The Android player application utilizes hardware-accelerated H.264 video decoding via MediaCodec + SurfaceView and includes a camera QR scanner for easy pairing.
+
 ---
 
 ## ✨ Features

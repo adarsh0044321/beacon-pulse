@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use opus_rs::{OpusEncoder, Application};
+use opus_rs::{Application, OpusEncoder};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -21,7 +21,9 @@ impl AudioCapture {
             .default_output_device()
             .ok_or_else(|| anyhow!("No default output audio device found"))?;
 
-        let device_name = device.name().unwrap_or_else(|_| "Default Output".to_string());
+        let device_name = device
+            .name()
+            .unwrap_or_else(|_| "Default Output".to_string());
         info!(device = %device_name, "Audio default output device found for loopback");
 
         // On Windows, loopback is initialized by using the output device's output configuration
@@ -29,7 +31,10 @@ impl AudioCapture {
         let sample_rate = config.sample_rate().0;
         let channels = config.channels() as usize;
 
-        info!(sample_rate, channels, "System default output audio format resolved");
+        info!(
+            sample_rate,
+            channels, "System default output audio format resolved"
+        );
 
         // Opus expects 48000 Hz sample rate.
         let target_sample_rate = 48000;
@@ -82,7 +87,7 @@ impl AudioCapture {
 
         // cpal input stream callback (handles system audio loopback samples)
         let error_callback = |err| error!("Audio loopback stream error: {:?}", err);
-        
+
         let sample_buffer_clone = Arc::clone(&sample_buffer);
         let send_tx_clone = Arc::clone(&send_tx);
         let encoder_clone = Arc::clone(&encoder);
@@ -102,8 +107,10 @@ impl AudioCapture {
                     let ceil_pos = (floor_pos + 1).min(stereo_input.len() / 2 - 1);
                     let weight = target_pos - target_pos.floor();
 
-                    let l_val = stereo_input[floor_pos * 2] * (1.0 - weight as f32) + stereo_input[ceil_pos * 2] * weight as f32;
-                    let r_val = stereo_input[floor_pos * 2 + 1] * (1.0 - weight as f32) + stereo_input[ceil_pos * 2 + 1] * weight as f32;
+                    let l_val = stereo_input[floor_pos * 2] * (1.0 - weight as f32)
+                        + stereo_input[ceil_pos * 2] * weight as f32;
+                    let r_val = stereo_input[floor_pos * 2 + 1] * (1.0 - weight as f32)
+                        + stereo_input[ceil_pos * 2 + 1] * weight as f32;
 
                     buf.push(l_val);
                     buf.push(r_val);
@@ -117,14 +124,14 @@ impl AudioCapture {
             // Slice out 20ms frames and encode them
             while buf.len() >= target_frame_samples {
                 let frame_samples: Vec<f32> = buf.drain(..target_frame_samples).collect();
-                
+
                 // Compress using Opus (encodes f32 directly)
                 let mut opus_buf = vec![0u8; 1276]; // Max typical Opus payload
                 let mut enc = encoder_clone.lock().unwrap();
                 match enc.encode(&frame_samples, frame_size, &mut opus_buf) {
                     Ok(enc_len) => {
                         let opus_payload = opus_buf[..enc_len].to_vec();
-                        
+
                         // Wrap in an EncodedPacket (display_id = 255 denotes Audio packet)
                         let pkt = EncodedPacket {
                             data: opus_payload,
@@ -147,12 +154,8 @@ impl AudioCapture {
         };
 
         // Create input stream on output device to capture output loopback
-        let stream = device.build_input_stream(
-            &config.into(),
-            data_callback,
-            error_callback,
-            None
-        )?;
+        let stream =
+            device.build_input_stream(&config.into(), data_callback, error_callback, None)?;
 
         stream.play()?;
         info!("Audio loopback capture stream started successfully");
@@ -163,4 +166,3 @@ impl AudioCapture {
 
 unsafe impl Send for AudioCapture {}
 unsafe impl Sync for AudioCapture {}
-

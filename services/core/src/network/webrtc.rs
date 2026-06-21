@@ -6,8 +6,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::io::Cursor;
 use tracing::{error, warn};
 
-use beacon_pulse_shared::protocol::binary_input::*;
 use crate::network::InputMsg;
+use beacon_pulse_shared::protocol::binary_input::*;
 
 /// Deserializes a binary input packet received over a WebRTC DataChannel.
 ///
@@ -139,7 +139,14 @@ mod tests {
         // [8..9]: viewport_h (1080 = 0x0438)
         let data = vec![0x01, 0x02, 0x7F, 0xFF, 0x3F, 0xFF, 0x07, 0x80, 0x04, 0x38];
         let result = parse_binary_input(&data).unwrap();
-        if let InputMsg::MouseMove { x, y, viewport_w, viewport_h, display_id } = result {
+        if let InputMsg::MouseMove {
+            x,
+            y,
+            viewport_w,
+            viewport_h,
+            display_id,
+        } = result
+        {
             assert!((x - 0.5).abs() < 0.01);
             assert!((y - 0.25).abs() < 0.01);
             assert_eq!(viewport_w, 1920);
@@ -157,7 +164,13 @@ mod tests {
         // [2..3]: Scan Code (0x001C = 28)
         let data = vec![0x05, 0x01, 0x00, 0x1C];
         let result = parse_binary_input(&data).unwrap();
-        if let InputMsg::KeyPress { vk_code: _, scan_code, pressed, is_extended } = result {
+        if let InputMsg::KeyPress {
+            vk_code: _,
+            scan_code,
+            pressed,
+            is_extended,
+        } = result
+        {
             assert_eq!(scan_code, 28);
             assert!(pressed);
             assert!(is_extended);
@@ -166,4 +179,3 @@ mod tests {
         }
     }
 }
-

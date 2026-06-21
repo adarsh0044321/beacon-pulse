@@ -18,17 +18,22 @@ pub fn generate_self_signed_cert(subject_alt_names: Vec<String>) -> Result<(Vec<
 /// Solves an HMAC challenge using the pairing PIN.
 /// Computes: HMAC-SHA256(key = pairing_code, data = challenge_bytes)
 pub fn solve_pairing_challenge(pairing_code: &str, challenge_b64: &str) -> Result<String> {
-    let challenge = B64.decode(challenge_b64)
+    let challenge = B64
+        .decode(challenge_b64)
         .map_err(|e| anyhow!("Failed to decode base64 challenge: {}", e))?;
 
     let key = hmac::Key::new(hmac::HMAC_SHA256, pairing_code.as_bytes());
     let tag = hmac::sign(&key, &challenge);
-    
+
     Ok(B64.encode(tag.as_ref()))
 }
 
 /// Verifies an HMAC response against the pairing PIN and raw challenge bytes.
-pub fn verify_pairing_response(pairing_code: &str, challenge_bytes: &[u8], response_b64: &str) -> bool {
+pub fn verify_pairing_response(
+    pairing_code: &str,
+    challenge_bytes: &[u8],
+    response_b64: &str,
+) -> bool {
     let response = match B64.decode(response_b64) {
         Ok(r) => r,
         Err(_) => return false,
