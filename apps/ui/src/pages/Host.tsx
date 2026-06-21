@@ -29,6 +29,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     connectedClients, kickClient, fetchActiveClients,
     stats, updateStats,
     encoderInfo, setEncoderInfo,
+    fetchActiveShare,
   } = useSessionStore();
 
   const { addToast } = useToastStore();
@@ -163,6 +164,25 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     });
     return () => { unlisten.then(f => f()); };
   }, [addToast]);
+
+  // Fetch active share status on mount/tab switch
+  useEffect(() => {
+    if (tab === 'share') {
+      fetchActiveShare().catch(console.error);
+    }
+  }, [tab, fetchActiveShare]);
+
+  // Auto-select primary monitor when displays list is populated
+  useEffect(() => {
+    if (shareMode === 'display' && availableMonitors.length > 0 && selectedMonitor === null) {
+      const primary = availableMonitors.find(m => m.is_primary);
+      if (primary) {
+        setSelectedMonitor(primary.handle);
+      } else {
+        setSelectedMonitor(availableMonitors[0].handle);
+      }
+    }
+  }, [shareMode, availableMonitors, selectedMonitor]);
 
   // NOTE: Stats, encoder_ready, pairing_code, client_connected/disconnected,
   // share_started/stopped are all handled globally by useGlobalIpcEvents() in App.tsx.

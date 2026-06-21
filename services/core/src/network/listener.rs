@@ -252,6 +252,20 @@ where
                         );
                     }
 
+                    // Verify if host session is active before accepting
+                    {
+                        let hs = state.host_session.lock().await;
+                        if hs.is_none() {
+                            let reject = ControlMessage::JoinRejected {
+                                reason: "Host is not broadcasting".to_string(),
+                            };
+                            let json = serde_json::to_string(&reject)? + "\n";
+                            writer_shared.lock().await.write_all(json.as_bytes()).await?;
+                            info!("Client {} rejected (host is not broadcasting)", peer_addr);
+                            return Ok(());
+                        }
+                    }
+
                     // Accept: generate session, reply with UDP stream port
                     session_id = uuid::Uuid::new_v4().to_string();
                     *session_id_shared.lock().unwrap() = session_id.clone();
@@ -547,8 +561,15 @@ where
                         }
                     }
 
+                    let state_clone = Arc::clone(&state);
                     tokio::spawn(async move {
-                        while let Some(_ev) = host_event_rx.recv().await {}
+                        while let Some(ev) = host_event_rx.recv().await {
+                            if let crate::host_session::HostEvent::StreamStopped { .. } = &ev {
+                                *state_clone.active_target.lock().await = None;
+                                let mut hs = state_clone.host_session.lock().await;
+                                *hs = None;
+                            }
+                        }
                     });
                 }
 

@@ -1279,7 +1279,7 @@ fn start_sharing_service(
         });
 
         // Start web / WebSocket server if Web UI mode (1) is active
-        let ui_mode = registry::read_dword("UiMode").unwrap_or(1);
+        let ui_mode = registry::read_dword("UiMode").unwrap_or(2);
         if ui_mode == 1 {
             let web_state = Arc::clone(&state);
             tokio::spawn(async move {

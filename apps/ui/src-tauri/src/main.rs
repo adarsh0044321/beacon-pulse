@@ -199,6 +199,7 @@ fn main() {
             list_monitors,
             start_share,
             stop_share,
+            get_active_share,
             set_bitrate,
             generate_pairing_code,
             kick_client,
@@ -281,6 +282,11 @@ async fn start_share(target: Value, state: State<'_, AppData>) -> Result<Value, 
 #[tauri::command]
 async fn stop_share(state: State<'_, AppData>) -> Result<Value, String> {
     ipc_send(&state, serde_json::json!({ "cmd": "stop_share" }))
+}
+
+#[tauri::command]
+async fn get_active_share(state: State<'_, AppData>) -> Result<Value, String> {
+    ipc_send(&state, serde_json::json!({ "cmd": "get_active_share" }))
 }
 
 /// Phase 3: apply a new encoder bitrate from the Settings slider.

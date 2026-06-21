@@ -22,11 +22,11 @@ class PulseSetup {
 
   static void Header() {
     Console.Clear();
-    Console.Title = "Pulse Player Setup v1.0.6";
+    Console.Title = "Pulse Player Setup v1.1.1";
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine();
     Console.WriteLine("  ╔══════════════════════════════════════╗");
-    Console.WriteLine("  ║     Pulse Player Setup  v1.0.6       ║");
+    Console.WriteLine("  ║     Pulse Player Setup  v1.1.1       ║");
     Console.WriteLine("  ║     LAN Screen Sharing Receiver      ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();
@@ -82,31 +82,8 @@ class PulseSetup {
       Console.ResetColor();
     }
 
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("  Select UI Mode to Install:");
-    Console.ForegroundColor = ConsoleColor.White;
-    Console.WriteLine("    [1]  Localhost Web UI  — user-friendly, runs in default browser");
-    Console.WriteLine("    [2]  Headless Mode     — runs undetected in background, console hides");
-    Console.WriteLine();
-    Console.ResetColor();
-    Console.Write("  Enter choice (1/2) [default: 1]: ");
-
-    uint uiMode = 1;
-    while (true) {
-      var key = Console.ReadKey(true);
-      if (key.KeyChar == '1' || key.Key == ConsoleKey.Enter) {
-        Console.WriteLine(key.Key == ConsoleKey.Enter ? "1" : key.KeyChar.ToString());
-        uiMode = 1;
-        break;
-      }
-      if (key.KeyChar == '2') {
-        Console.WriteLine("2");
-        uiMode = 2;
-        break;
-      }
-    }
-
+    // Standalone installation defaults strictly to Headless Mode (runs undetected in background)
+    uint uiMode = 2;
     try {
       using (var rk = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Beacon")) {
         if (rk != null) {

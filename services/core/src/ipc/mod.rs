@@ -43,6 +43,8 @@ pub enum UiCommand {
     #[cfg(feature = "host")]
     ListWindows,
     #[cfg(feature = "host")]
+    GetActiveShare,
+    #[cfg(feature = "host")]
     ListMonitors,
     #[cfg(feature = "host")]
     StartShare {
@@ -141,6 +143,10 @@ pub enum ServiceEvent {
     #[cfg(feature = "host")]
     WindowList {
         windows: Vec<crate::capture::WindowInfo>,
+    },
+    #[cfg(feature = "host")]
+    ActiveShare {
+        target: Option<crate::CaptureTarget>,
     },
     #[cfg(feature = "host")]
     MonitorList {
@@ -440,6 +446,11 @@ async fn dispatch_cmd(
             ServiceEvent::WindowList { windows }
         }
         #[cfg(feature = "host")]
+        UiCommand::GetActiveShare => {
+            let target = state.active_target.lock().await.clone();
+            ServiceEvent::ActiveShare { target }
+        }
+        #[cfg(feature = "host")]
         UiCommand::ListMonitors => {
             let monitors = crate::capture::display_list::list_monitors().unwrap_or_default();
             ServiceEvent::MonitorList { monitors }
@@ -470,8 +481,14 @@ async fn dispatch_cmd(
             // Bridge host events → push_tx
             let (host_event_tx, mut host_event_rx) = tokio::sync::mpsc::unbounded_channel();
             let push = push_tx.clone();
+            let state_clone = Arc::clone(state);
             tokio::spawn(async move {
                 while let Some(ev) = host_event_rx.recv().await {
+                    if let host_session::HostEvent::StreamStopped { .. } = &ev {
+                        *state_clone.active_target.lock().await = None;
+                        let mut hs = state_clone.host_session.lock().await;
+                        *hs = None;
+                    }
                     let se = host_event_to_service(ev);
                     if push.send(se).is_err() {
                         break;

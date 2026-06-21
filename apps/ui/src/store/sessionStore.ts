@@ -108,6 +108,7 @@ interface SessionState {
   fetchMonitors: () => Promise<void>;
   startShare: (target: any) => Promise<void>;
   stopShare: () => Promise<void>;
+  fetchActiveShare: () => Promise<void>;
   generatePairingCode: () => Promise<void>;
   kickClient: (clientId: string) => Promise<void>;
   fetchActiveClients: () => Promise<void>;
@@ -204,6 +205,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
     } catch (e) {
       console.error('Failed to stop share:', e);
+    }
+  },
+
+  fetchActiveShare: async () => {
+    try {
+      const target = await invoke<any>('get_active_share');
+      if (target) {
+        let activeHwnd = null;
+        if (target.kind === 'window') {
+          activeHwnd = target.data;
+        } else if (target.kind === 'display') {
+          activeHwnd = target.data;
+        }
+        set({ isSharing: true, activeTarget: target, activeHwnd });
+      } else {
+        set({ isSharing: false, activeTarget: null, activeHwnd: null });
+      }
+    } catch (e) {
+      console.error('Failed to fetch active share:', e);
     }
   },
 
