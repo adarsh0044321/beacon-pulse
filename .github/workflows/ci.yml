@@ -26,6 +26,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install system dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
     
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
@@ -65,6 +71,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
       
@@ -93,6 +105,12 @@ jobs:
         C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe /out:installer\host\BeaconSetup.exe /resource:installer\host\beacon.exe,beacon.exe /resource:installer\host\beacon-watchdog.exe,beacon-watchdog.exe installer\BeaconSetup.cs
         C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:exe /out:installer\player\PulseSetup.exe /resource:installer\player\pulse.exe,pulse.exe installer\player\PulseSetup.cs
 
+    - name: Build Android Player APK
+      run: |
+        cd apps/ui-android
+        ./gradlew.bat assembleDebug
+        copy app\build\outputs\apk\debug\app-debug.apk ..\..\PulsePlayer-debug.apk
+
     - name: Publish Release
       uses: softprops/action-gh-release@v2
       with:
@@ -100,6 +118,7 @@ jobs:
           release-windows.zip
           installer/host/BeaconSetup.exe
           installer/player/PulseSetup.exe
+          PulsePlayer-debug.apk
         name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
         body_path: RELEASE_NOTES.txt
         tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
@@ -112,6 +131,11 @@ jobs:
       contents: write
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install system dependencies (Linux)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
     
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
