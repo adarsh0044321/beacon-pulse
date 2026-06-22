@@ -1247,9 +1247,22 @@ fn start_sharing_service(
         let _keep_alive_tx = host_event_tx.clone();
 
         if let Some(ref target) = initial_target {
-            let handle = host_session::start(target.clone(), stream_port, host_event_tx)?;
-            *state.host_session.lock().await = Some(handle);
-            *state.active_target.lock().await = Some(target.clone());
+            match host_session::start(target.clone(), stream_port, host_event_tx) {
+                Ok(handle) => {
+                    *state.host_session.lock().await = Some(handle);
+                    *state.active_target.lock().await = Some(target.clone());
+                }
+                Err(e) => {
+                    error!("Failed to start sharing target on startup: {}. Falling back to idle mode.", e);
+                    // Clear the invalid target from registry so we don't try it again
+                    crate::registry::write_string("LastWindowProcess", "");
+                    crate::registry::write_string("LastWindowTitle", "");
+                    crate::registry::write_string("LastTargetType", "");
+                    crate::registry::write_string("LastTargetDisplay", "");
+                    crate::registry::write_string("LastSharingTarget", "");
+                    crate::registry::write_string("LastSharingMode", "");
+                }
+            }
         }
 
         // Start control channel TCP listener
@@ -1279,7 +1292,7 @@ fn start_sharing_service(
         });
 
         // Start web / WebSocket server if Web UI mode (1) is active
-        let ui_mode = registry::read_dword("UiMode").unwrap_or(2);
+        let ui_mode = registry::read_dword("UiMode").unwrap_or(1);
         if ui_mode == 1 {
             let web_state = Arc::clone(&state);
             tokio::spawn(async move {
@@ -1344,18 +1357,22 @@ fn start_sharing_service(
                         host_session::HostEvent::ClientDisconnected { client_id } => {
                             if player_connected {
                                 info!(client = %client_id, "Player disconnected");
-                                if !unattended {
+                                let ui_mode = crate::registry::read_dword("UiMode").unwrap_or(1);
+                                if !unattended && ui_mode != 1 {
                                     info!("Not unattended — shutting down host");
                                     break;
                                 } else {
-                                    // In unattended background mode, keep running and wait for new connections
+                                    // In Web UI or unattended background mode, keep running and wait for new connections
                                     player_connected = false;
                                 }
                             }
                         }
                         host_session::HostEvent::StreamStopped { reason } => {
                             info!(reason = %reason, "Stream stopped");
-                            break;
+                            let ui_mode = crate::registry::read_dword("UiMode").unwrap_or(1);
+                            if ui_mode != 1 {
+                                break;
+                            }
                         }
                         _ => {}
                     }

@@ -93,7 +93,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "beacon-pulse"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "atomic",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "beacon-pulse-shared"
-version = "1.1.0"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "beacon-watchdog"
-version = "1.1.1"
+version = "1.1.2"
 
 [[package]]
 name = "bindgen"

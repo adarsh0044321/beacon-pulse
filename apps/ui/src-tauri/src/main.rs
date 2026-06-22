@@ -12,11 +12,11 @@
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 mod ipc_client;
-use ipc_client::IpcClient;
 use beacon_pulse as lanshare_service;
+use ipc_client::IpcClient;
 
 // Windows CREATE_NO_WINDOW flag — ensures no terminal flickers on spawn.
 #[cfg(windows)]
@@ -62,7 +62,13 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
 
         let our_pid = std::process::id();
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/FI", &format!("PID ne {}", our_pid), "/IM", target_bin])
+            .args([
+                "/F",
+                "/FI",
+                &format!("PID ne {}", our_pid),
+                "/IM",
+                target_bin,
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
@@ -73,7 +79,10 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
         let mut watchdog_path = None;
 
         // Try Tauri Resource Resolver (official bundle path)
-        if let Ok(path) = app.path().resolve("beacon-watchdog.exe", tauri::path::BaseDirectory::Resource) {
+        if let Ok(path) = app
+            .path()
+            .resolve("beacon-watchdog.exe", tauri::path::BaseDirectory::Resource)
+        {
             if path.exists() {
                 watchdog_path = Some(path);
             }
@@ -81,7 +90,10 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
 
         // Try legacy Tauri Resource Resolver path
         if watchdog_path.is_none() {
-            if let Ok(path) = app.path().resolve("resources/beacon-watchdog.exe", tauri::path::BaseDirectory::Resource) {
+            if let Ok(path) = app.path().resolve(
+                "resources/beacon-watchdog.exe",
+                tauri::path::BaseDirectory::Resource,
+            ) {
                 if path.exists() {
                     watchdog_path = Some(path);
                 }
@@ -234,7 +246,13 @@ fn main() {
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
                     let _ = std::process::Command::new("taskkill")
-                        .args(["/F", "/FI", &format!("PID ne {}", our_pid), "/IM", target_bin])
+                        .args([
+                            "/F",
+                            "/FI",
+                            &format!("PID ne {}", our_pid),
+                            "/IM",
+                            target_bin,
+                        ])
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
                 }
@@ -409,10 +427,16 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
         if let Some(tls) = settings.get("tls_enabled").and_then(Value::as_bool) {
             lanshare_service::registry::write_dword("TlsEnabled", if tls { 1 } else { 0 });
         }
-        if let Some(ab) = settings.get("adaptive_bitrate_enabled").and_then(Value::as_bool) {
+        if let Some(ab) = settings
+            .get("adaptive_bitrate_enabled")
+            .and_then(Value::as_bool)
+        {
             lanshare_service::registry::write_dword("AdaptiveBitrate", if ab { 1 } else { 0 });
         }
-        let use_static = settings.get("use_static_code").and_then(Value::as_bool).unwrap_or(false);
+        let use_static = settings
+            .get("use_static_code")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if use_static {
             if let Some(code) = settings.get("static_code").and_then(Value::as_str) {
                 lanshare_service::registry::write_string("PairingCode", code);
@@ -420,9 +444,15 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
         } else {
             lanshare_service::registry::delete_value("PairingCode");
         }
-        if let Some(start_with_windows) = settings.get("start_with_windows").and_then(Value::as_bool) {
+        if let Some(start_with_windows) =
+            settings.get("start_with_windows").and_then(Value::as_bool)
+        {
             let is_player = is_player_mode();
-            let startup_name = if is_player { "PulsePlayer" } else { "BeaconHost" };
+            let startup_name = if is_player {
+                "PulsePlayer"
+            } else {
+                "BeaconHost"
+            };
             let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
 
             if start_with_windows {
@@ -550,7 +580,7 @@ async fn send_wol_packet(mac: String) -> Result<(), String> {
     }
     let mut mac_bytes = [0u8; 6];
     for i in 0..6 {
-        mac_bytes[i] = u8::from_str_radix(&cleaned[i*2..i*2+2], 16)
+        mac_bytes[i] = u8::from_str_radix(&cleaned[i * 2..i * 2 + 2], 16)
             .map_err(|e| format!("Invalid MAC byte: {}", e))?;
     }
 
@@ -560,13 +590,15 @@ async fn send_wol_packet(mac: String) -> Result<(), String> {
     }
     for i in 0..16 {
         let offset = 6 + i * 6;
-        packet[offset..offset+6].copy_from_slice(&mac_bytes);
+        packet[offset..offset + 6].copy_from_slice(&mac_bytes);
     }
 
     use std::net::UdpSocket;
     let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
     socket.set_broadcast(true).map_err(|e| e.to_string())?;
-    socket.send_to(&packet, "255.255.255.255:9").map_err(|e| e.to_string())?;
+    socket
+        .send_to(&packet, "255.255.255.255:9")
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -580,7 +612,11 @@ async fn get_active_clients(state: State<'_, AppData>) -> Result<Value, String> 
 }
 
 #[tauri::command]
-async fn send_file_start(name: String, size: u64, state: State<'_, AppData>) -> Result<Value, String> {
+async fn send_file_start(
+    name: String,
+    size: u64,
+    state: State<'_, AppData>,
+) -> Result<Value, String> {
     ipc_send(
         &state,
         serde_json::json!({
@@ -619,7 +655,10 @@ async fn list_host_processes(state: State<'_, AppData>) -> Result<Value, String>
 
 #[tauri::command]
 async fn kill_host_process(pid: u32, state: State<'_, AppData>) -> Result<Value, String> {
-    ipc_send(&state, serde_json::json!({ "cmd": "kill_host_process", "pid": pid }))
+    ipc_send(
+        &state,
+        serde_json::json!({ "cmd": "kill_host_process", "pid": pid }),
+    )
 }
 
 #[tauri::command]
@@ -639,4 +678,3 @@ async fn update_stream_settings(
         }),
     )
 }
-

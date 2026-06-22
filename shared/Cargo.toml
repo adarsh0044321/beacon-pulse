@@ -1,6 +1,6 @@
 [package]
 name = "beacon-pulse-shared"
-version = "1.1.0"
+version = "1.1.2"
 edition = "2021"
 authors = ["adarsh0044321"]
 description = "Shared protocols, data models, and security primitives for Beacon & Pulse"

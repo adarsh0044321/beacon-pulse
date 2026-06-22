@@ -25,6 +25,9 @@ import com.beaconpulse.player.network.H264Decoder
 import com.beaconpulse.player.network.MultiIpConnector
 import com.beaconpulse.player.network.NetworkClient
 import org.json.JSONObject
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.sqrt
+import kotlin.math.abs
 
 @Composable
 fun StreamingScreen(
@@ -39,6 +42,9 @@ fun StreamingScreen(
     var statsText by remember { mutableStateOf("Latency: --ms  |  FPS: --") }
     
     var viewSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1920, 1080)) }
+    var isTrackpadMode by remember { mutableStateOf(false) }
+    var virtualCursorX by remember { mutableStateOf(0.5f) }
+    var virtualCursorY by remember { mutableStateOf(0.5f) }
     
     // Hold references to native network and decoder components
     var activeClient by remember { mutableStateOf<NetworkClient?>(null) }
@@ -63,62 +69,398 @@ fun StreamingScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onSizeChanged { viewSize = it }
-            .pointerInput(viewSize) {
-                // Intercept touch events on screen and map them to remote mouse events
+            .pointerInput(viewSize, isTrackpadMode) {
                 awaitPointerEventScope {
+                    var lastTapTime = 0L
+                    var lastTapPos = Offset.Zero
+                    var isDoubleTapAndHold = false
+                    
+                    var isLeftMouseDown = false
+                    var isRightMouseDown = false
+                    
+                    var touchDownTime = 0L
+                    var touchDownPos = Offset.Zero
+                    var isLongPressTriggered = false
+                    
+                    // Track multi-finger states
+                    var isMultiTouch = false
+                    var twoFingerScrollStarted = false
+                    var twoFingerTapPossible = false
+                    var twoFingerDownTime = 0L
+                    var twoFingerStartPos1 = Offset.Zero
+                    var twoFingerStartPos2 = Offset.Zero
+
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: continue
-                        val pos = change.position
-                        
                         val client = activeClient ?: continue
                         val width = viewSize.width
                         val height = viewSize.height
                         
-                        // Normalize positions to floats in 0.0 .. 1.0
-                        val normX = (pos.x / width.toFloat()).coerceIn(0f, 1f)
-                        val normY = (pos.y / height.toFloat()).coerceIn(0f, 1f)
-                        
-                        if (change.changedToDown()) {
-                            // Left Mouse Button Down
-                            val clickEvent = JSONObject().apply {
-                                put("kind", "mouse_button")
-                                put("button", 1) // 1 = Left Click
-                                put("pressed", true)
-                                put("x", normX)
-                                put("y", normY)
-                                put("viewport_w", width)
-                                put("viewport_h", height)
-                                put("display_id", 0)
+                        val pressedPointers = event.changes.filter { it.pressed }
+                        val numFingers = pressedPointers.size
+
+                        if (numFingers == 0) {
+                            // All fingers lifted
+                            val releasedPointers = event.changes.filter { !it.pressed && it.previousPressed }
+                            if (releasedPointers.isNotEmpty()) {
+                                val change = releasedPointers.first()
+                                val pos = change.position
+                                val normX = (pos.x / width.toFloat()).coerceIn(0f, 1f)
+                                val normY = (pos.y / height.toFloat()).coerceIn(0f, 1f)
+
+                                if (isMultiTouch) {
+                                    // Multi-touch sequence ended
+                                    if (twoFingerTapPossible && !twoFingerScrollStarted) {
+                                        val duration = System.currentTimeMillis() - twoFingerDownTime
+                                        if (duration < 250) {
+                                            // Send Right Click
+                                            val rx = if (isTrackpadMode) virtualCursorX else normX
+                                            val ry = if (isTrackpadMode) virtualCursorY else normY
+                                            val clickDown = JSONObject().apply {
+                                                put("kind", "mouse_button")
+                                                put("button", 1) // 1 = Right click
+                                                put("pressed", true)
+                                                put("x", rx)
+                                                put("y", ry)
+                                                put("viewport_w", width)
+                                                put("viewport_h", height)
+                                                put("display_id", 0)
+                                            }
+                                            val clickUp = JSONObject().apply {
+                                                put("kind", "mouse_button")
+                                                put("button", 1)
+                                                put("pressed", false)
+                                                put("x", rx)
+                                                put("y", ry)
+                                                put("viewport_w", width)
+                                                put("viewport_h", height)
+                                                put("display_id", 0)
+                                            }
+                                            client.sendInputEvent(clickDown)
+                                            client.sendInputEvent(clickUp)
+                                        }
+                                    }
+                                    isMultiTouch = false
+                                    twoFingerScrollStarted = false
+                                    twoFingerTapPossible = false
+                                } else {
+                                    // Single finger lifted
+                                    if (isLongPressTriggered) {
+                                        // Release Right Mouse Button if direct touch
+                                        if (!isTrackpadMode && isRightMouseDown) {
+                                            val clickEvent = JSONObject().apply {
+                                                put("kind", "mouse_button")
+                                                put("button", 1)
+                                                put("pressed", false)
+                                                put("x", normX)
+                                                put("y", normY)
+                                                put("viewport_w", width)
+                                                put("viewport_h", height)
+                                                put("display_id", 0)
+                                            }
+                                            client.sendInputEvent(clickEvent)
+                                            isRightMouseDown = false
+                                        }
+                                        isLongPressTriggered = false
+                                    } else {
+                                        if (isTrackpadMode) {
+                                            if (isDoubleTapAndHold) {
+                                                // Release Left mouse
+                                                if (isLeftMouseDown) {
+                                                    val clickEvent = JSONObject().apply {
+                                                        put("kind", "mouse_button")
+                                                        put("button", 0) // Left Mouse Button Up
+                                                        put("pressed", false)
+                                                        put("x", virtualCursorX)
+                                                        put("y", virtualCursorY)
+                                                        put("viewport_w", width)
+                                                        put("viewport_h", height)
+                                                        put("display_id", 0)
+                                                    }
+                                                    client.sendInputEvent(clickEvent)
+                                                    isLeftMouseDown = false
+                                                }
+                                                isDoubleTapAndHold = false
+                                            } else {
+                                                // Check for tap / click
+                                                val duration = System.currentTimeMillis() - touchDownTime
+                                                val dx = pos.x - touchDownPos.x
+                                                val dy = pos.y - touchDownPos.y
+                                                val distance = sqrt(dx * dx + dy * dy)
+                                                if (duration < 250 && distance < 20f) {
+                                                    val now = System.currentTimeMillis()
+                                                    val tapDx = pos.x - lastTapPos.x
+                                                    val tapDy = pos.y - lastTapPos.y
+                                                    val tapDistance = sqrt(tapDx * tapDx + tapDy * tapDy)
+                                                    if (now - lastTapTime < 300 && tapDistance < 50f) {
+                                                        // Double click
+                                                        val click1D = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0)
+                                                            put("pressed", true)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        val click1U = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0)
+                                                            put("pressed", false)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        val click2D = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0)
+                                                            put("pressed", true)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        val click2U = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0)
+                                                            put("pressed", false)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        client.sendInputEvent(click1D)
+                                                        client.sendInputEvent(click1U)
+                                                        client.sendInputEvent(click2D)
+                                                        client.sendInputEvent(click2U)
+                                                        lastTapTime = 0L
+                                                    } else {
+                                                        // Single click
+                                                        val clickDown = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0) // Left Click Down
+                                                            put("pressed", true)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        val clickUp = JSONObject().apply {
+                                                            put("kind", "mouse_button")
+                                                            put("button", 0) // Left Click Up
+                                                            put("pressed", false)
+                                                            put("x", virtualCursorX)
+                                                            put("y", virtualCursorY)
+                                                            put("viewport_w", width)
+                                                            put("viewport_h", height)
+                                                            put("display_id", 0)
+                                                        }
+                                                        client.sendInputEvent(clickDown)
+                                                        client.sendInputEvent(clickUp)
+                                                        lastTapTime = now
+                                                        lastTapPos = pos
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // Direct touch: send left mouse up
+                                            if (isLeftMouseDown) {
+                                                val clickEvent = JSONObject().apply {
+                                                    put("kind", "mouse_button")
+                                                    put("button", 0) // Left Mouse Button Up (0)
+                                                    put("pressed", false)
+                                                    put("x", normX)
+                                                    put("y", normY)
+                                                    put("viewport_w", width)
+                                                    put("viewport_h", height)
+                                                    put("display_id", 0)
+                                                }
+                                                client.sendInputEvent(clickEvent)
+                                                isLeftMouseDown = false
+                                            }
+                                        }
+                                    }
+                                }
+                                change.consume()
                             }
-                            client.sendInputEvent(clickEvent)
-                            change.consume()
-                        } else if (change.changedToUp()) {
-                            // Left Mouse Button Up
-                            val clickEvent = JSONObject().apply {
-                                put("kind", "mouse_button")
-                                put("button", 1)
-                                put("pressed", false)
-                                put("x", normX)
-                                put("y", normY)
-                                put("viewport_w", width)
-                                put("viewport_h", height)
-                                put("display_id", 0)
+                        } else if (numFingers == 1) {
+                            val change = pressedPointers.first()
+                            val pos = change.position
+                            val normX = (pos.x / width.toFloat()).coerceIn(0f, 1f)
+                            val normY = (pos.y / height.toFloat()).coerceIn(0f, 1f)
+
+                            if (change.changedToDown()) {
+                                touchDownTime = System.currentTimeMillis()
+                                touchDownPos = pos
+                                isLongPressTriggered = false
+
+                                if (isTrackpadMode) {
+                                    val now = System.currentTimeMillis()
+                                    val tapDx = pos.x - lastTapPos.x
+                                    val tapDy = pos.y - lastTapPos.y
+                                    val tapDistance = sqrt(tapDx * tapDx + tapDy * tapDy)
+                                    if (now - lastTapTime < 300 && tapDistance < 50f) {
+                                        isDoubleTapAndHold = true
+                                        val clickEvent = JSONObject().apply {
+                                            put("kind", "mouse_button")
+                                            put("button", 0) // Left mouse button down
+                                            put("pressed", true)
+                                            put("x", virtualCursorX)
+                                            put("y", virtualCursorY)
+                                            put("viewport_w", width)
+                                            put("viewport_h", height)
+                                            put("display_id", 0)
+                                        }
+                                        client.sendInputEvent(clickEvent)
+                                        isLeftMouseDown = true
+                                    }
+                                } else {
+                                    // Direct touch: send mouse move + Left Click Down immediately
+                                    val moveEvent = JSONObject().apply {
+                                        put("kind", "mouse_move")
+                                        put("x", normX)
+                                        put("y", normY)
+                                        put("viewport_w", width)
+                                        put("viewport_h", height)
+                                        put("display_id", 0)
+                                    }
+                                    client.sendInputEvent(moveEvent)
+                                    
+                                    val clickEvent = JSONObject().apply {
+                                        put("kind", "mouse_button")
+                                        put("button", 0) // Left click (0)
+                                        put("pressed", true)
+                                        put("x", normX)
+                                        put("y", normY)
+                                        put("viewport_w", width)
+                                        put("viewport_h", height)
+                                        put("display_id", 0)
+                                    }
+                                    client.sendInputEvent(clickEvent)
+                                    isLeftMouseDown = true
+                                    virtualCursorX = normX
+                                    virtualCursorY = normY
+                                }
+                                change.consume()
+                            } else if (change.pressed) {
+                                if (isTrackpadMode) {
+                                    val deltaX = change.position.x - change.previousPosition.x
+                                    val deltaY = change.position.y - change.previousPosition.y
+                                    
+                                    val sensitivity = 1.8f
+                                    val normDeltaX = (deltaX / width.toFloat()) * sensitivity
+                                    val normDeltaY = (deltaY / height.toFloat()) * sensitivity
+                                    
+                                    virtualCursorX = (virtualCursorX + normDeltaX).coerceIn(0f, 1f)
+                                    virtualCursorY = (virtualCursorY + normDeltaY).coerceIn(0f, 1f)
+
+                                    val moveEvent = JSONObject().apply {
+                                        put("kind", "mouse_move")
+                                        put("x", virtualCursorX)
+                                        put("y", virtualCursorY)
+                                        put("viewport_w", width)
+                                        put("viewport_h", height)
+                                        put("display_id", 0)
+                                    }
+                                    client.sendInputEvent(moveEvent)
+                                } else {
+                                    // Direct Touch Move / Drag
+                                    val moveEvent = JSONObject().apply {
+                                        put("kind", "mouse_move")
+                                        put("x", normX)
+                                        put("y", normY)
+                                        put("viewport_w", width)
+                                        put("viewport_h", height)
+                                        put("display_id", 0)
+                                    }
+                                    client.sendInputEvent(moveEvent)
+                                    virtualCursorX = normX
+                                    virtualCursorY = normY
+
+                                    val duration = System.currentTimeMillis() - touchDownTime
+                                    val dx = pos.x - touchDownPos.x
+                                    val dy = pos.y - touchDownPos.y
+                                    val distance = sqrt(dx * dx + dy * dy)
+                                    if (!isLongPressTriggered && duration > 600 && distance < 20f) {
+                                        isLongPressTriggered = true
+                                        if (isLeftMouseDown) {
+                                            val leftUp = JSONObject().apply {
+                                                put("kind", "mouse_button")
+                                                put("button", 0)
+                                                put("pressed", false)
+                                                put("x", normX)
+                                                put("y", normY)
+                                                put("viewport_w", width)
+                                                put("viewport_h", height)
+                                                put("display_id", 0)
+                                            }
+                                            client.sendInputEvent(leftUp)
+                                            isLeftMouseDown = false
+                                        }
+                                        val rightDown = JSONObject().apply {
+                                            put("kind", "mouse_button")
+                                            put("button", 1) // Right click
+                                            put("pressed", true)
+                                            put("x", normX)
+                                            put("y", normY)
+                                            put("viewport_w", width)
+                                            put("viewport_h", height)
+                                            put("display_id", 0)
+                                        }
+                                        client.sendInputEvent(rightDown)
+                                        isRightMouseDown = true
+                                    }
+                                }
+                                change.consume()
                             }
-                            client.sendInputEvent(clickEvent)
-                            change.consume()
-                        } else if (change.pressed) {
-                            // Mouse Move / Drag
-                            val moveEvent = JSONObject().apply {
-                                put("kind", "mouse_move")
-                                put("x", normX)
-                                put("y", normY)
-                                put("viewport_w", width)
-                                put("viewport_h", height)
-                                put("display_id", 0)
+                        } else if (numFingers == 2) {
+                            isMultiTouch = true
+                            val p1 = pressedPointers[0]
+                            val p2 = pressedPointers[1]
+
+                            if (p2.changedToDown() || p1.changedToDown()) {
+                                twoFingerDownTime = System.currentTimeMillis()
+                                twoFingerStartPos1 = p1.position
+                                twoFingerStartPos2 = p2.position
+                                twoFingerTapPossible = true
+                                twoFingerScrollStarted = false
                             }
-                            client.sendInputEvent(moveEvent)
-                            change.consume()
+
+                            val dy1 = p1.position.y - p1.previousPosition.y
+                            val dy2 = p2.position.y - p2.previousPosition.y
+                            val avgDeltaY = (dy1 + dy2) / 2f
+
+                            val d1x = p1.position.x - twoFingerStartPos1.x
+                            val d1y = p1.position.y - twoFingerStartPos1.y
+                            val dist1 = sqrt(d1x * d1x + d1y * d1y)
+
+                            val d2x = p2.position.x - twoFingerStartPos2.x
+                            val d2y = p2.position.y - twoFingerStartPos2.y
+                            val dist2 = sqrt(d2x * d2x + d2y * d2y)
+
+                            if (dist1 > 25f || dist2 > 25f) {
+                                twoFingerTapPossible = false
+                            }
+
+                            if (abs(avgDeltaY) > 2f) {
+                                twoFingerScrollStarted = true
+                                val scrollDelta = -avgDeltaY / 80f
+                                val scrollEvent = JSONObject().apply {
+                                    put("kind", "mouse_scroll")
+                                    put("delta_x", 0f)
+                                    put("delta_y", scrollDelta)
+                                }
+                                client.sendInputEvent(scrollEvent)
+                            }
+                            
+                            p1.consume()
+                            p2.consume()
                         }
                     }
                 }
@@ -281,13 +623,15 @@ fun StreamingScreen(
                         Text("🔄 Refresh", color = Color.White, fontSize = 12.sp)
                     }
 
-                    // Touch mode indicator (Direct screen touch input is active)
+                    // Touch mode indicator/toggle
                     Button(
-                        onClick = {},
-                        enabled = false,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
+                        onClick = { isTrackpadMode = !isTrackpadMode },
+                        enabled = true,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isTrackpadMode) Color(0xFF6366F1) else Color(0xFF334155)
+                        )
                     ) {
-                        Text("🖱️ Touch Mode", color = Color.White, fontSize = 12.sp)
+                        Text(if (isTrackpadMode) "🖱️ Trackpad" else "📱 Direct Touch", color = Color.White, fontSize = 12.sp)
                     }
 
                     // Disconnect button

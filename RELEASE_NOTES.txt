@@ -1,3 +1,25 @@
+📡 Beacon & Pulse v1.1.2 - Release Notes
+=======================================
+
+Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
+
+What's New in v1.1.2
+-------------------
+
+📱 Android Player Touch Control Enhancements
+- Direct Touch Mode Mapping: Corrected click input mapping to send left clicks (button = 0) instead of right clicks, and added long-press (>600ms) gesture mapping to fire absolute remote right clicks.
+- Relative Trackpad Mode: Added a virtual laptop trackpad emulator with client-side cursor acceleration, single-finger tap (left click), two-finger tap (right click), and double-tap and hold (click-and-drag).
+- Multi-Touch Gestures: Added support for two-finger vertical scrolling (mouse wheel).
+- Active Toggle Button: Configured the touch mode settings button in the streaming interface to act as a toggle between Direct Touch and Relative Trackpad modes, displaying the active mode status.
+
+🌐 Localhost Chrome UI Video Playback Fix
+- H.264 Codec Upgrade: Upgraded the WebCodecs decoding profile configuration in `Client.tsx` from Constrained Baseline (`avc1.42c033`) to High Profile (`avc1.640033`). This resolves the black screen issue by allowing browser decoders to parse hardware-encoded streams.
+
+⚙️ Watchdog & Startup Settings
+- UI Mode Defaults: Updated default UI mode to Localhost Web UI (1) for hosts, players, and installers, making the Chrome UI the default experience.
+- Target Session Recovery: Enhanced registry state persistence (sharing target and mode) to allow the Watchdog service to auto-resume multi-window, dual-window, and display sharing sessions seamlessly on crash or restart.
+- Stale Target Handling: Prevented host startup failure loops by falling back to idle mode and clearing configuration registry keys if the target window is no longer open.
+
 📡 Beacon & Pulse v1.1.1 - Release Notes
 =======================================
 
@@ -22,7 +44,6 @@ What's New in v1.1.1
 - Malformed PATH Resolution: Cleaned environment PATH setup in build scripts, bypassing malformed trailing double-quotes in Windows PATH.
 - Process Locks: Cleared background process handles to prevent build/copy failures on `beacon.exe` and `pulse.exe`.
 - Setup Installer Builds: Compiled self-contained C# setups (`BeaconSetup.exe`, `PulseSetup.exe`) embedding updated Rust binaries and icons.
-- Tauri Webview Installer Generation: Generated Chrome UI setups (`BeaconChromeUI-Setup.exe`, `PulseChromeUI-Setup.exe`) using Tauri release compilation and NSIS packaging.
 
 📡 Beacon & Pulse v1.1.0 - Release Notes
 =======================================

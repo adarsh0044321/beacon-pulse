@@ -82,8 +82,44 @@ class BeaconSetup {
       Console.ResetColor();
     }
 
-    // Standalone installation defaults strictly to Headless Mode (runs undetected in background)
-    uint uiMode = 2;
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("  Choose Installation / UI Mode:");
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("    [1]  Localhost Chrome UI Mode (Recommended)");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine("         - Runs the host with a local web interface (http://localhost:45199).");
+    Console.WriteLine("         - Automatically opens your default web browser (Chrome).");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("         - Note: Chrome/localhost UI must be open for sharing and control.");
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("    [2]  Headless Mode");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine("         - Runs undetected in the background (no desktop window).");
+    Console.WriteLine("         - Configures the service to run via background terminal/console interface.");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("         - Note: Best for unattended remote servers.");
+    Console.WriteLine();
+    Console.ResetColor();
+    Console.Write("  Enter choice (1/2): ");
+
+    uint uiMode = 1;
+    while (true) {
+      var key = Console.ReadKey(true);
+      if (key.KeyChar == '1') {
+        Console.WriteLine("1");
+        uiMode = 1;
+        break;
+      }
+      if (key.KeyChar == '2') {
+        Console.WriteLine("2");
+        uiMode = 2;
+        break;
+      }
+    }
+
     try {
       using (var rk = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Beacon")) {
         if (rk != null) {

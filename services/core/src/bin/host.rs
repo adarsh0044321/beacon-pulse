@@ -231,7 +231,7 @@ mod run {
         let mode = args.get(1).map(|s| s.as_str()).unwrap_or("host");
 
         // Read registry setting for UI mode choice (1 = Localhost Web UI, 2 = Headless/Background Terminal)
-        let ui_mode = beacon_pulse::registry::read_dword("UiMode").unwrap_or(2);
+        let ui_mode = beacon_pulse::registry::read_dword("UiMode").unwrap_or(1);
         if ui_mode == 2
             || mode == "headless"
             || args

@@ -287,7 +287,8 @@ fn main() {
             let sharing_mode =
                 reg_read_string("LastSharingMode").unwrap_or_else(|| "window".to_string());
             let sharing_target = reg_read_string("LastSharingTarget")
-                .or_else(|| reg_read_string("LastWindowProcess")); // fallback to legacy
+                .or_else(|| reg_read_string("LastWindowProcess")) // fallback to legacy
+                .filter(|t| !t.trim().is_empty());
 
             let unattended = reg_read_dword("Unattended").unwrap_or(0) == 1;
 

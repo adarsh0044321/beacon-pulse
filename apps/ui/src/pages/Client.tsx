@@ -116,7 +116,7 @@ function useMultiWebCodecsDecoder() {
       });
 
       decoder.configure({
-        codec: 'avc1.42c033', // Constrained Baseline H.264, Level 5.1 (lowercase for Chrome compatibility)
+        codec: 'avc1.640033', // High Profile H.264, Level 5.1 (supporting both High and Baseline profiles)
         codedWidth: width,
         codedHeight: height,
         optimizeForLatency: true,

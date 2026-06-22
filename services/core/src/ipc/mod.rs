@@ -461,21 +461,49 @@ async fn dispatch_cmd(
             let port = crate::network::DEFAULT_PORT;
             *state.active_target.lock().await = Some(target.clone());
 
-            // Write window metadata to registry for watchdog recovery
-            if let crate::CaptureTarget::Window(hwnd) = &target {
-                let hwnd_val = *hwnd;
-                if let Some(w) = window_list::list_visible_windows()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .find(|w| w.hwnd == hwnd_val)
-                {
-                    crate::registry::write_string("LastWindowProcess", &w.process_name);
-                    crate::registry::write_string("LastWindowTitle", &w.title);
+            // Write target metadata to registry for watchdog recovery
+            match &target {
+                crate::CaptureTarget::Window(hwnd) => {
+                    let hwnd_val = *hwnd;
+                    if let Some(w) = window_list::list_visible_windows()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .find(|w| w.hwnd == hwnd_val)
+                    {
+                        crate::registry::write_string("LastWindowProcess", &w.process_name);
+                        crate::registry::write_string("LastWindowTitle", &w.title);
+                        crate::registry::write_string("LastSharingMode", "window");
+                        crate::registry::write_string("LastSharingTarget", &w.process_name);
+                    }
                 }
-            } else if let crate::CaptureTarget::Display(hmon) = &target {
-                // Save display target for watchdog recovery
-                crate::registry::write_string("LastTargetType", "Display");
-                crate::registry::write_string("LastTargetDisplay", &hmon.to_string());
+                crate::CaptureTarget::Display(hmon) => {
+                    crate::registry::write_string("LastTargetType", "Display");
+                    crate::registry::write_string("LastTargetDisplay", &hmon.to_string());
+                    crate::registry::write_string("LastSharingMode", "display");
+                    crate::registry::write_string("LastSharingTarget", &hmon.to_string());
+                }
+                crate::CaptureTarget::MultiWindow(hwnds) => {
+                    let hwnds_str = hwnds
+                        .iter()
+                        .map(|h| h.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    crate::registry::write_string("LastSharingMode", "multi");
+                    crate::registry::write_string("LastSharingTarget", &hwnds_str);
+                }
+                crate::CaptureTarget::DualWindow(h1, h2) => {
+                    crate::registry::write_string("LastSharingMode", "dual");
+                    crate::registry::write_string("LastSharingTarget", &format!("{},{}", h1, h2));
+                }
+                crate::CaptureTarget::MultiDisplay(handles) => {
+                    let handles_str = handles
+                        .iter()
+                        .map(|h| h.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    crate::registry::write_string("LastSharingMode", "multi-display");
+                    crate::registry::write_string("LastSharingTarget", &handles_str);
+                }
             }
 
             // Bridge host events → push_tx
@@ -615,6 +643,8 @@ async fn dispatch_cmd(
             crate::registry::write_string("LastWindowTitle", "");
             crate::registry::write_string("LastTargetType", "");
             crate::registry::write_string("LastTargetDisplay", "");
+            crate::registry::write_string("LastSharingTarget", "");
+            crate::registry::write_string("LastSharingMode", "");
 
             // Cancel the broadcast advertiser
             if let Some(cancel_tx) = state.broadcast_cancel.lock().await.take() {

@@ -93,7 +93,7 @@ Run `beacon.exe` (or launch via `BeaconSetup.exe`):
 ```
   Base UI Config Menu
   ╔══════════════════════════════════════════╗
-  ║         Beacon  v1.1.0                   ║
+  ║         Beacon  v1.1.2                   ║
   ╚══════════════════════════════════════════╝
 
     [1] Start Sharing Session (Window, Display, Multi, Dual)
@@ -382,6 +382,22 @@ npm run tauri build
 
 ## 📋 Changelog
 
+### v1.1.2 (2026-06-22)
+
+**Android Player Touch Control Enhancements**
+- **Direct Touch Mode Mapping** — Corrected touch tap events to map to remote left click (`button = 0`) instead of right click, and added long-press (`>600ms`) mapping to trigger remote absolute right clicks.
+- **Relative Trackpad Mode** — Implemented a client-side virtual cursor with custom acceleration, enabling single-finger tap for left click, two-finger tap for right click, and double-tap & hold for click-and-drag.
+- **Two-Finger Scroll Gesture** — Added capture of two-finger vertical dragging to scroll the remote screen.
+- **Active Mode Indicator** — Configured the touch settings button in `StreamingScreen.kt` to act as an active-state toggle showing the selected control mode.
+
+**Chrome UI Video Playback Fix**
+- **H.264 High Profile Decoding** — Upgraded the WebCodecs config decoder string to `avc1.640033` (High Profile) to support decoding hardware-accelerated streams and fix the silent black screen.
+
+**Watchdog & Startup Improvements**
+- **Localhost Web UI Default** — Defaulted `UiMode` to `1` (Localhost Web UI) in the codebase and setup programs, ensuring a smooth first-run web app experience.
+- **Crash Session Recovery** — Configured Watchdog to auto-resume multi-window, dual-window, and display sharing modes by tracking target metadata in the registry.
+- **Idle Recovery Fallback** — Handled stale startup window targets gracefully to prevent crash/failure loops.
+
 ### v1.1.1 (2026-06-21)
 
 **Android Player Customization & Updates**
@@ -399,7 +415,6 @@ npm run tauri build
 - **Malformed PATH Override** — Sanitized build script environments to avoid trailing quote path parsing bugs.
 - **File Lock Release** — Resolved copy failures on `beacon.exe` and `pulse.exe` by terminating active background handles.
 - **C# Installer Compilation** — Built standalone self-extracting installers (`BeaconSetup.exe`, `PulseSetup.exe`) embedding new binaries.
-- **Tauri Webview Packaging** — Generated native wrapper installers (`BeaconChromeUI-Setup.exe`, `PulseChromeUI-Setup.exe`) using NSIS.
 
 ### v1.1.0 (2026-06-17)
 

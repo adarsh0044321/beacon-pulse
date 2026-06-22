@@ -127,7 +127,9 @@ impl AudioPlayer {
             _stream: stream,
             sample_buffer,
             decoder,
-            last_overflow_log: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)),
+            last_overflow_log: Mutex::new(
+                std::time::Instant::now() - std::time::Duration::from_secs(5),
+            ),
         })
     }
 

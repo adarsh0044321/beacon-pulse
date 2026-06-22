@@ -82,8 +82,44 @@ class PulseSetup {
       Console.ResetColor();
     }
 
-    // Standalone installation defaults strictly to Headless Mode (runs undetected in background)
-    uint uiMode = 2;
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("  Choose Installation / UI Mode:");
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("    [1]  Localhost Chrome UI Mode (Recommended)");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine("         - Runs the player with a local web interface (http://localhost:45200).");
+    Console.WriteLine("         - Automatically opens your default web browser (Chrome).");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("         - Note: Chrome/localhost UI must be open for client connection management.");
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("    [2]  Headless Mode");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine("         - Runs undetected in the background (no desktop window).");
+    Console.WriteLine("         - Configures the player to run via background terminal/console interface.");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("         - Note: Best for unattended remote playback nodes.");
+    Console.WriteLine();
+    Console.ResetColor();
+    Console.Write("  Enter choice (1/2): ");
+
+    uint uiMode = 1;
+    while (true) {
+      var key = Console.ReadKey(true);
+      if (key.KeyChar == '1') {
+        Console.WriteLine("1");
+        uiMode = 1;
+        break;
+      }
+      if (key.KeyChar == '2') {
+        Console.WriteLine("2");
+        uiMode = 2;
+        break;
+      }
+    }
+
     try {
       using (var rk = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Beacon")) {
         if (rk != null) {
@@ -200,6 +236,20 @@ class PulseSetup {
         UseShellExecute = false, CreateNoWindow = true
       });
       if (_q != null) _q.WaitForExit(5000);
+    } catch { }
+
+    // ── Step 7: Launch ───────────────────────────────────────────────────
+    Msg("Starting Pulse...");
+    try {
+      Process.Start(new ProcessStartInfo(Path.Combine(dir, "pulse.exe")) {
+        WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = (uiMode == 2)
+      });
+      if (uiMode == 1) {
+        System.Threading.Thread.Sleep(500); // Give the background web server a moment to bind
+        Process.Start(new ProcessStartInfo("http://localhost:45200") {
+          UseShellExecute = true
+        });
+      }
     } catch { }
 
     // ── Done ─────────────────────────────────────────────────────────────
