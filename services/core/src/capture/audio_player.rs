@@ -10,6 +10,7 @@ pub struct AudioPlayer {
     _stream: cpal::Stream,
     sample_buffer: Arc<Mutex<Vec<f32>>>,
     decoder: Arc<Mutex<OpusDecoder>>,
+    last_overflow_log: Mutex<std::time::Instant>,
 }
 
 impl AudioPlayer {
@@ -126,6 +127,7 @@ impl AudioPlayer {
             _stream: stream,
             sample_buffer,
             decoder,
+            last_overflow_log: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)),
         })
     }
 
@@ -141,13 +143,23 @@ impl AudioPlayer {
 
                 // Cap buffer size to preserve low-latency targets and drop stale samples on jitter spikes
                 if buf.len() > 48000 * 2 {
-                    warn!("Audio buffer overflow, draining to catch up");
+                    if let Ok(mut last_log) = self.last_overflow_log.lock() {
+                        if last_log.elapsed() >= std::time::Duration::from_secs(1) {
+                            warn!("Audio buffer overflow, draining to catch up");
+                            *last_log = std::time::Instant::now();
+                        }
+                    }
                     buf.drain(..24000); // Drop 250ms of audio
                 }
                 buf.extend_from_slice(&pcm_buf[..decoded_len]);
             }
             Err(e) => {
-                warn!("Opus decode failed: {:?}", e);
+                if let Ok(mut last_log) = self.last_overflow_log.lock() {
+                    if last_log.elapsed() >= std::time::Duration::from_secs(1) {
+                        warn!("Opus decode failed: {:?}", e);
+                        *last_log = std::time::Instant::now();
+                    }
+                }
             }
         }
     }

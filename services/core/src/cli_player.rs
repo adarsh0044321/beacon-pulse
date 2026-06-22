@@ -222,6 +222,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
         let mut decoder = Decoder::new().context("Failed to initialize OpenH264 decoder")?;
         let mut shutdown_rx = shutdown_tx.subscribe();
+        let mut last_error_log = std::time::Instant::now() - std::time::Duration::from_secs(5);
 
         println!("\n==================================================");
         println!("Pulse Standalone CLI Player Connected!");
@@ -272,7 +273,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
                                     }
                                     Ok(None) => {}
                                     Err(e) => {
-                                        warn!("H.264 decode error: {}", e);
+                                        if last_error_log.elapsed() >= std::time::Duration::from_secs(1) {
+                                            warn!("H.264 decode error: {}", e);
+                                            last_error_log = std::time::Instant::now();
+                                        }
                                     }
                                 }
                             }
