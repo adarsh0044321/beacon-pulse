@@ -398,6 +398,36 @@ npm run tauri build
 - **Crash Session Recovery** — Configured Watchdog to auto-resume multi-window, dual-window, and display sharing modes by tracking target metadata in the registry.
 - **Idle Recovery Fallback** — Handled stale startup window targets gracefully to prevent crash/failure loops.
 
+### v1.1.3 (2026-06-24)
+
+**Localhost Chrome UI H.264 Playback**
+- **Annex-B to AVCC Conversion** — Implemented dynamic byte stream conversion in the browser player (`Client.tsx`) to prefix NAL units with 4-byte lengths.
+- **Out-of-band SPS/PPS Configuration** — Parsed SPS and PPS parameter sets from incoming H.264 keyframes to construct the `AVCDecoderConfigurationRecord` description block dynamically, fully resolving Chrome's `VideoDecoder` decoding failure and black screen loops.
+- **Browser Logs HUD** — Integrated browser console logging visibility into the player dashboard overlay for troubleshooting.
+
+**mDNS & Local Loopback Discovery**
+- **Local Host Loopback Scan** — Added parallel TCP checks for loopback interfaces (`127.0.0.1`/`127.0.0.2`) on the player discovery panel.
+- **Retrieve Host IPs API** — Exposed active host network interfaces via named-pipe IPC.
+
+**Headless Installer Mode**
+- **Headless Setup Spawning** — Fixed `PulseSetup` tool to correctly spawn background player process silently when headless mode is selected.
+
+### v1.1.2 (2026-06-24)
+
+**Android Player Touch Control Enhancements**
+- **Direct Touch Mapping** — Corrected click input mapping to send left clicks instead of right clicks, and mapped long-press gestures to absolute remote right clicks.
+- **Relative Trackpad Mode** — Added a virtual laptop trackpad emulator with client-side cursor acceleration, tap-to-click, and click-and-drag gestures.
+- **Multi-Touch Gestures** — Added support for two-finger vertical scrolling (mouse wheel).
+- **Active Toggle Button** — Configured the touch settings button to act as a toggle between touch modes.
+
+**Localhost Chrome UI Video Playback Fix**
+- **H.264 Codec Upgrade** — Upgraded the WebCodecs decoding profile configuration in `Client.tsx` from Constrained Baseline (`avc1.42c033`) to High Profile (`avc1.640033`).
+
+**Watchdog & Startup Settings**
+- **UI Mode Defaults** — Updated default UI mode to Localhost Web UI (1) for hosts, players, and installers.
+- **Target Session Recovery** — Enhanced registry state persistence to allow the Watchdog service to auto-resume active sessions on crash/restart.
+- **Stale Target Handling** — Prevented host startup failure loops by falling back to idle mode and clearing configuration keys if the target window is closed.
+
 ### v1.1.1 (2026-06-21)
 
 **Android Player Customization & Updates**

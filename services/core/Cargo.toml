@@ -1,6 +1,6 @@
 [package]
 name = "beacon-pulse"
-version = "1.1.2"
+version = "1.1.3"
 edition = "2021"
 authors = ["adarsh0044321"]
 description = "Low-latency, hardware-accelerated LAN remote desktop streaming service"

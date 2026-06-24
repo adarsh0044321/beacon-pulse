@@ -1,6 +1,7 @@
 //! Named pipe IPC server — communication bridge between Beacon/Pulse Service and UI.
 //! Protocol: newline-delimited JSON messages.
 
+// Touch to rebuild embedded assets (v2)
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -65,6 +66,8 @@ pub enum UiCommand {
     LeaveStream,
     #[cfg(feature = "host")]
     GeneratePairingCode,
+    #[cfg(feature = "host")]
+    GetHostIps,
     #[allow(dead_code)]
     SetPermission {
         client_id: String,
@@ -178,6 +181,10 @@ pub enum ServiceEvent {
     PairingCode {
         code: String,
         expires_in: u64,
+    },
+    #[cfg(feature = "host")]
+    HostIps {
+        ips: Vec<String>,
     },
     Stats {
         fps: f32,
@@ -842,6 +849,11 @@ async fn dispatch_cmd(
                 }
             }
         }
+        #[cfg(feature = "host")]
+        UiCommand::GetHostIps => {
+            let ips = crate::network::broadcast::get_local_ips();
+            ServiceEvent::HostIps { ips }
+        }
 
         // ── Kick client ───────────────────────────────────────────────────────
         #[cfg(feature = "host")]
@@ -891,7 +903,31 @@ async fn dispatch_cmd(
         // ── Discovery ────────────────────────────────────────────────────────
         #[cfg(feature = "player")]
         UiCommand::DiscoverHosts => {
-            info!("DiscoverHosts: starting parallel scan (mDNS + broadcast + TCP)");
+            info!("DiscoverHosts: starting parallel scan (mDNS + broadcast + TCP + loopback)");
+
+            let control_port = crate::network::CONTROL_PORT;
+
+            // Check loopback interfaces for local host running on same machine
+            let mut loopback_hosts = Vec::new();
+            for loopback_ip in &["127.0.0.1", "127.0.0.2"] {
+                if let Ok(addr) = format!("{}:{}", loopback_ip, control_port).parse::<std::net::SocketAddr>() {
+                    if let Ok(Ok(_)) = tokio::time::timeout(
+                        std::time::Duration::from_millis(150),
+                        tokio::net::TcpStream::connect(&addr),
+                    )
+                    .await
+                    {
+                        loopback_hosts.push(discovery::DiscoveredHost {
+                            name: format!("Local Host ({})", loopback_ip),
+                            address: loopback_ip.to_string(),
+                            port: control_port,
+                            version: None,
+                            mac: None,
+                            tls: None,
+                        });
+                    }
+                }
+            }
 
             // Run mDNS, UDP broadcast, AND TCP port scan in parallel.
             let (mdns_hosts, bcast_hosts, tcp_hosts) = tokio::join!(
@@ -902,13 +938,24 @@ async fn dispatch_cmd(
 
             let mdns_vec = mdns_hosts.unwrap_or_default();
             info!(
+                loopback_count = loopback_hosts.len(),
                 mdns_count = mdns_vec.len(),
                 bcast_count = bcast_hosts.len(),
                 tcp_count = tcp_hosts.len(),
                 "DiscoverHosts: scan complete"
             );
 
-            let mut hosts = mdns_vec;
+            let mut hosts = loopback_hosts;
+
+            // Merge mDNS results
+            for mh in mdns_vec {
+                if !hosts
+                    .iter()
+                    .any(|h| h.address == mh.address && h.port == mh.port)
+                {
+                    hosts.push(mh);
+                }
+            }
 
             // Merge broadcast results
             for bh in bcast_hosts {

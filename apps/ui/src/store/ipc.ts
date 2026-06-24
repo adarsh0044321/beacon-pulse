@@ -97,6 +97,7 @@ function responseMatchesCommand(event: string | undefined, cmd: string): boolean
     case 'stop_share': return event === 'share_stopped';
     case 'get_active_share': return event === 'active_share';
     case 'generate_pairing_code': return event === 'pairing_code';
+    case 'get_host_ips': return event === 'host_ips';
     case 'get_active_clients': return event === 'active_clients';
     case 'discover_hosts': return event === 'host_list';
     case 'connect_to_host': return event === 'stream_connected';
@@ -144,6 +145,8 @@ function resolveNextPending(responseData: any) {
         req.resolve(responseData.clients || []);
       } else if (req.cmd === 'get_active_share') {
         req.resolve(responseData.target || null);
+      } else if (req.cmd === 'get_host_ips') {
+        req.resolve(responseData.ips || []);
       } else {
         req.resolve(responseData);
       }
@@ -197,6 +200,9 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       break;
     case 'generate_pairing_code':
       payload = { cmd: 'generate_pairing_code' };
+      break;
+    case 'get_host_ips':
+      payload = { cmd: 'get_host_ips' };
       break;
     case 'kick_client':
       payload = { cmd: 'kick_client', client_id: args.clientId };

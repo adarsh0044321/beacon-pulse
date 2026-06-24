@@ -28,6 +28,208 @@ interface ParsedLog {
 // WebCodecs decoder hook
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper to convert H.264 Annex-B bitstream (delimited by 0x00000001 or 0x000001 start codes)
+// to AVCC format (length-prefixed NAL units with 4-byte length prefix).
+function annexBToAvcc(bytes: Uint8Array): Uint8Array {
+  const len = bytes.length;
+  const offsets: number[] = [];
+  
+  let i = 0;
+  while (i < len - 2) {
+    if (bytes[i] === 0 && bytes[i + 1] === 0) {
+      if (bytes[i + 2] === 1) {
+        offsets.push(i);
+        i += 3;
+        continue;
+      } else if (i + 3 < len && bytes[i + 2] === 0 && bytes[i + 3] === 1) {
+        offsets.push(i);
+        i += 4;
+        continue;
+      }
+    }
+    i++;
+  }
+  
+  if (offsets.length === 0) {
+    return bytes;
+  }
+  
+  const nalUnits: Uint8Array[] = [];
+  for (let idx = 0; idx < offsets.length; idx++) {
+    const start = offsets[idx];
+    const nextStart = idx + 1 < offsets.length ? offsets[idx + 1] : len;
+    
+    let startCodeLen = 3;
+    if (start + 3 < len && bytes[start] === 0 && bytes[start + 1] === 0 && bytes[start + 2] === 0 && bytes[start + 3] === 1) {
+      startCodeLen = 4;
+    }
+    
+    const payloadStart = start + startCodeLen;
+    let payloadEnd = nextStart;
+    
+    while (payloadEnd > payloadStart && bytes[payloadEnd - 1] === 0) {
+      payloadEnd--;
+    }
+    
+    if (payloadEnd > payloadStart) {
+      nalUnits.push(bytes.subarray(payloadStart, payloadEnd));
+    }
+  }
+  
+  if (nalUnits.length === 0) {
+    return bytes;
+  }
+  
+  let totalSize = 0;
+  for (const nal of nalUnits) {
+    totalSize += 4 + nal.length;
+  }
+  
+  const avcc = new Uint8Array(totalSize);
+  let writeOffset = 0;
+  for (const nal of nalUnits) {
+    const nalLen = nal.length;
+    avcc[writeOffset] = (nalLen >> 24) & 0xff;
+    avcc[writeOffset + 1] = (nalLen >> 16) & 0xff;
+    avcc[writeOffset + 2] = (nalLen >> 8) & 0xff;
+    avcc[writeOffset + 3] = nalLen & 0xff;
+    avcc.set(nal, writeOffset + 4);
+    writeOffset += 4 + nalLen;
+  }
+  
+  return avcc;
+}
+
+function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// Helper to construct AVCDecoderConfigurationRecord (description) from H.264 SPS/PPS NAL units
+function buildAvcDescription(bytes: Uint8Array): Uint8Array | null {
+  const len = bytes.length;
+  let sps: Uint8Array | null = null;
+  let pps: Uint8Array | null = null;
+  
+  // Find all start codes and extract NAL units
+  let i = 0;
+  const offsets: number[] = [];
+  while (i < len - 2) {
+    if (bytes[i] === 0 && bytes[i + 1] === 0) {
+      if (bytes[i + 2] === 1) {
+        offsets.push(i);
+        i += 3;
+        continue;
+      } else if (i + 3 < len && bytes[i + 2] === 0 && bytes[i + 3] === 1) {
+        offsets.push(i);
+        i += 4;
+        continue;
+      }
+    }
+    i++;
+  }
+  
+  for (let idx = 0; idx < offsets.length; idx++) {
+    const start = offsets[idx];
+    const nextStart = idx + 1 < offsets.length ? offsets[idx + 1] : len;
+    
+    let startCodeLen = 3;
+    if (start + 3 < len && bytes[start] === 0 && bytes[start + 1] === 0 && bytes[start + 2] === 0 && bytes[start + 3] === 1) {
+      startCodeLen = 4;
+    }
+    
+    const payloadStart = start + startCodeLen;
+    let payloadEnd = nextStart;
+    while (payloadEnd > payloadStart && bytes[payloadEnd - 1] === 0) {
+      payloadEnd--;
+    }
+    
+    if (payloadEnd > payloadStart) {
+      const nal = bytes.subarray(payloadStart, payloadEnd);
+      const nalType = nal[0] & 0x1f;
+      if (nalType === 7) sps = nal;
+      if (nalType === 8) pps = nal;
+    }
+  }
+  
+  if (!sps || !pps) {
+    return null;
+  }
+  
+  const profileIdc = sps[1];
+  const constraints = sps[2];
+  const levelIdc = sps[3];
+  
+  const descSize = 11 + sps.length + 3 + pps.length;
+  const desc = new Uint8Array(descSize);
+  
+  desc[0] = 1; // configurationVersion
+  desc[1] = profileIdc; // AVCProfileIndication
+  desc[2] = constraints; // profile_compatibility
+  desc[3] = levelIdc; // AVCLevelIndication
+  desc[4] = 0xff; // lengthSizeMinusOne | 0xfc (reserved) -> 0xff (4-byte length)
+  desc[5] = 0xe1; // numOfSequenceParameterSets | 0xe0 (reserved) -> 0xe1 (1 SPS)
+  
+  desc[6] = (sps.length >> 8) & 0xff;
+  desc[7] = sps.length & 0xff;
+  desc.set(sps, 8);
+  
+  const ppsOffset = 8 + sps.length;
+  desc[ppsOffset] = 1; // numOfPictureParameterSets
+  desc[ppsOffset + 1] = (pps.length >> 8) & 0xff;
+  desc[ppsOffset + 2] = pps.length & 0xff;
+  desc.set(pps, ppsOffset + 3);
+  
+  return desc;
+}
+
+// Helper to parse H.264 SPS (Sequence Parameter Set) from Annex-B bitstream
+// to extract profile_idc, constraint_set_flags, and level_idc and construct the WebCodecs codec string.
+function parseSpsCodec(bytes: Uint8Array): string | null {
+  const len = bytes.length;
+  let i = 0;
+  while (i < len - 4) {
+    let startCodeLen = 0;
+    if (bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1) {
+      startCodeLen = 3;
+    } else if (bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 0 && bytes[i + 3] === 1) {
+      startCodeLen = 4;
+    }
+
+    if (startCodeLen > 0) {
+      const nalOffset = i + startCodeLen;
+      if (nalOffset < len) {
+        const nalHeader = bytes[nalOffset];
+        const nalType = nalHeader & 0x1F;
+        if (nalType === 7) { // SPS NAL unit
+          if (nalOffset + 3 < len) {
+            const profileIdc = bytes[nalOffset + 1];
+            const profileConstraints = bytes[nalOffset + 2];
+            const levelIdc = bytes[nalOffset + 3];
+            
+            const validProfiles = [66, 77, 88, 100, 110, 122, 244];
+            if (validProfiles.includes(profileIdc)) {
+              const toHex = (val: number) => val.toString(16).padStart(2, '0').toLowerCase();
+              // For H.264 WebCodecs, using a high level like Level 5.1 (0x33) is recommended for compatibility
+              // so the decoder is prepared to handle any resolution/bitrate up to that level.
+              // We also map Baseline Profile (66) constraints to c0 (Constrained Baseline) which is widely supported.
+              const constraints = profileIdc === 66 ? 0xc0 : profileConstraints;
+              return `avc1.${toHex(profileIdc)}${toHex(constraints)}33`;
+            }
+          }
+        }
+      }
+      i += startCodeLen;
+    } else {
+      i++;
+    }
+  }
+  return null;
+}
+
 function useMultiWebCodecsDecoder() {
   const decodersRef = useRef<Map<number, {
     decoder: VideoDecoder | null;
@@ -35,6 +237,10 @@ function useMultiWebCodecsDecoder() {
     frameCount: number;
     lastFpsCheck: number;
     stats: DecoderStats;
+    configuredCodec: string | null;
+    configuredDescription: Uint8Array | null;
+    chunksFed: number;
+    hardwarePreference: 'no-preference' | 'prefer-hardware' | 'prefer-software';
   }>>(new Map());
   const [displayStats, setDisplayStats] = useState<Record<number, DecoderStats>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
@@ -48,20 +254,26 @@ function useMultiWebCodecsDecoder() {
         frameCount: 0,
         lastFpsCheck: Date.now(),
         stats: { fps: 0, decodeMs: 0, frames: 0, keyframes: 0 },
+        configuredCodec: null,
+        configuredDescription: null,
+        chunksFed: 0,
+        hardwarePreference: 'no-preference',
       };
       decodersRef.current.set(displayId, instance);
     }
     
-    if (instance.canvas !== canvas) {
+    if (canvas && instance.canvas !== canvas) {
       instance.canvas = canvas;
       if (instance.decoder) {
         instance.decoder.close();
         instance.decoder = null;
+        instance.configuredCodec = null;
+        instance.configuredDescription = null;
       }
     }
   }, []);
 
-  const initDecoder = useCallback((displayId: number, width: number, height: number) => {
+  const initDecoder = useCallback((displayId: number, width: number, height: number, codecStr: string = 'avc1.640033', description?: Uint8Array) => {
     let instance = decodersRef.current.get(displayId);
     if (!instance || !instance.canvas) return;
 
@@ -91,6 +303,7 @@ function useMultiWebCodecsDecoder() {
           }
           frame.close();
           instance.frameCount++;
+          instance.chunksFed = 0; // successfully decoded a frame
 
           const now = Date.now();
           if (now - instance.lastFpsCheck >= 1000) {
@@ -115,15 +328,22 @@ function useMultiWebCodecsDecoder() {
         },
       });
 
-      decoder.configure({
-        codec: 'avc1.640033', // High Profile H.264, Level 5.1 (supporting both High and Baseline profiles)
+      console.log(`[WebCodecs] Configuring decoder on display ${displayId} with codec: ${codecStr} (Accel: ${instance.hardwarePreference}, HasDesc: ${!!description})`);
+      const config: VideoDecoderConfig = {
+        codec: codecStr,
         codedWidth: width,
         codedHeight: height,
         optimizeForLatency: true,
-        hardwareAcceleration: 'prefer-hardware',
-      });
+        hardwareAcceleration: instance.hardwarePreference,
+      };
+      if (description) {
+        config.description = description;
+      }
+      decoder.configure(config);
 
       instance.decoder = decoder;
+      instance.configuredCodec = codecStr;
+      instance.configuredDescription = description || null;
       setErrors(prev => {
         const copy = { ...prev };
         delete copy[displayId];
@@ -146,20 +366,49 @@ function useMultiWebCodecsDecoder() {
     let instance = decodersRef.current.get(displayId);
     if (!instance || !instance.canvas) return;
 
-    if (!instance.decoder || instance.decoder.state === 'closed') {
-      initDecoder(displayId, width, height);
-    }
-    const decoder = instance.decoder!;
-    if (decoder.state !== 'configured') return;
-
     const raw = atob(data);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
 
+    let targetCodec = instance.configuredCodec || 'avc1.640033';
+    let description: Uint8Array | undefined = undefined;
+    if (isKeyframe) {
+      const parsed = parseSpsCodec(bytes);
+      if (parsed) {
+        targetCodec = parsed;
+      }
+      const desc = buildAvcDescription(bytes);
+      if (desc) {
+        description = desc;
+      }
+    }
+
+    instance.chunksFed++;
+    if (instance.chunksFed > 45 && instance.frameCount === 0 && instance.hardwarePreference !== 'prefer-software') {
+      console.warn(`[WebCodecs] Fed ${instance.chunksFed} chunks but decoded 0 frames. Triggering automatic fallback to software decoding.`);
+      instance.hardwarePreference = 'prefer-software';
+      initDecoder(displayId, width, height, targetCodec, description);
+      instance.chunksFed = 0;
+    }
+
+    const needsInit = !instance.decoder || 
+      instance.decoder.state === 'closed' || 
+      instance.configuredCodec !== targetCodec ||
+      (description && (!instance.configuredDescription || !arraysEqual(instance.configuredDescription, description)));
+
+    if (needsInit) {
+      initDecoder(displayId, width, height, targetCodec, description);
+    }
+    const decoder = instance.decoder;
+    if (!decoder || decoder.state !== 'configured') return;
+
+    // Convert Annex-B start-coded NALs to AVCC length-prefixed format for WebCodecs
+    const avccBytes = annexBToAvcc(bytes);
+
     const chunk = new EncodedVideoChunk({
       type: isKeyframe ? 'key' : 'delta',
       timestamp: timestampUs,
-      data: bytes,
+      data: avccBytes,
     });
 
     try {
@@ -494,6 +743,43 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   }, [tab, streamConnected]);
 
   // Real-time client logs state
+  const [browserLogs, setBrowserLogs] = useState<string[]>([]);
+  useEffect(() => {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+
+    const addLog = (type: string, args: any[]) => {
+      const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+      setBrowserLogs(prev => [...prev.slice(-49), `[${type}] ${msg}`]);
+    };
+
+    console.log = (...args) => {
+      addLog('LOG', args);
+      originalLog.apply(console, args);
+    };
+    console.warn = (...args) => {
+      addLog('WARN', args);
+      originalWarn.apply(console, args);
+    };
+    console.error = (...args) => {
+      addLog('ERROR', args);
+      originalError.apply(console, args);
+    };
+
+    const handleWindowError = (e: ErrorEvent) => {
+      addLog('FATAL', [e.message, e.filename, e.lineno]);
+    };
+    window.addEventListener('error', handleWindowError);
+
+    return () => {
+      console.log = originalLog;
+      console.warn = originalWarn;
+      console.error = originalError;
+      window.removeEventListener('error', handleWindowError);
+    };
+  }, []);
+
   const [logs, setLogs] = useState<string[]>([]);
   const [logType, setLogType] = useState<string>('service');
   const [logSearch, setLogSearch] = useState('');
@@ -1961,7 +2247,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: '100%', minHeight: 'calc(100vh - 260px)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  {['service', 'capture', 'network', 'metrics'].map(type => (
+                  {['service', 'capture', 'network', 'metrics', 'browser'].map(type => (
                     <button
                       key={type}
                       className={`btn btn-sm ${logType === type ? 'btn-primary' : 'btn-ghost'}`}
@@ -1983,7 +2269,19 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
               {/* Console log box */}
               <div className="logs-console" style={{ flex: 1, maxHeight: 'calc(100vh - 330px)' }}>
-                {logs.length === 0 ? (
+                {logType === 'browser' ? (
+                  browserLogs.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No browser console logs yet.</div>
+                  ) : (
+                    browserLogs
+                      .filter(log => log.toLowerCase().includes(logSearch.toLowerCase()))
+                      .map((log, index) => (
+                        <div key={index} className={`log-entry ${log.startsWith('[ERROR]') || log.startsWith('[FATAL]') ? 'error' : log.startsWith('[WARN]') ? 'warn' : 'info'}`}>
+                          <span className="log-text">{log}</span>
+                        </div>
+                      ))
+                  )
+                ) : logs.length === 0 ? (
                   <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>Loading client logs...</div>
                 ) : (
                   logs

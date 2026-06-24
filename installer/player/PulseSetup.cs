@@ -22,11 +22,11 @@ class PulseSetup {
 
   static void Header() {
     Console.Clear();
-    Console.Title = "Pulse Player Setup v1.1.1";
+    Console.Title = "Pulse Player Setup v1.1.3";
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine();
     Console.WriteLine("  ╔══════════════════════════════════════╗");
-    Console.WriteLine("  ║     Pulse Player Setup  v1.1.1       ║");
+    Console.WriteLine("  ║     Pulse Player Setup  v1.1.3       ║");
     Console.WriteLine("  ║     LAN Screen Sharing Receiver      ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();
@@ -242,14 +242,8 @@ class PulseSetup {
     Msg("Starting Pulse...");
     try {
       Process.Start(new ProcessStartInfo(Path.Combine(dir, "pulse.exe")) {
-        WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = (uiMode == 2)
+        WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true
       });
-      if (uiMode == 1) {
-        System.Threading.Thread.Sleep(500); // Give the background web server a moment to bind
-        Process.Start(new ProcessStartInfo("http://localhost:45200") {
-          UseShellExecute = true
-        });
-      }
     } catch { }
 
     // ── Done ─────────────────────────────────────────────────────────────

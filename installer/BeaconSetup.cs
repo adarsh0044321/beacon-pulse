@@ -22,11 +22,11 @@ class BeaconSetup {
 
   static void Header() {
     Console.Clear();
-    Console.Title = "Beacon Setup v1.1.1";
+    Console.Title = "Beacon Setup v1.1.3";
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine();
     Console.WriteLine("  ╔══════════════════════════════════════╗");
-    Console.WriteLine("  ║     Beacon Setup  v1.1.1             ║");
+    Console.WriteLine("  ║     Beacon Setup  v1.1.3             ║");
     Console.WriteLine("  ║     LAN Screen Sharing               ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();
