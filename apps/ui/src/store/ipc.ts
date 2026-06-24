@@ -103,6 +103,7 @@ function responseMatchesCommand(event: string | undefined, cmd: string): boolean
     case 'connect_to_host': return event === 'stream_connected';
     case 'disconnect_from_host': return event === 'stream_disconnected';
     case 'kick_client': return event === 'client_disconnected';
+    case 'shutdown': return event === 'error' || event === 'stream_disconnected';
     case 'set_bitrate':
     case 'request_keyframe':
       return event === 'stats';
@@ -252,6 +253,9 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       break;
     case 'update_stream_settings':
       payload = { cmd: 'update_stream_settings', fps: args.fps || null, scale: args.scale || null, bitrate_bps: args.bitrateBps || null };
+      break;
+    case 'shutdown':
+      payload = { cmd: 'shutdown' };
       break;
     default:
       return Promise.reject(new Error(`Unknown command: ${cmd}`));

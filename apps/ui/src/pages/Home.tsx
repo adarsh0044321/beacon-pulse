@@ -1,12 +1,22 @@
-import React from 'react';
-import { Monitor, Link2, Settings as SettingsIcon } from 'lucide-react';
+import { Monitor, Link2, Settings as SettingsIcon, Power } from 'lucide-react';
 import type { Page } from '../App';
+import { invoke } from '../store/ipc';
 
 interface HomeProps {
   onNavigate: (page: Page) => void;
 }
 
 export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
+  const handleShutdown = async () => {
+    if (window.confirm("Are you sure you want to stop the service completely? This will terminate all background sharing processes.")) {
+      try {
+        await invoke('shutdown');
+      } catch (err: any) {
+        alert(err.message || 'Failed to stop service');
+      }
+    }
+  };
+
   return (
     <div className="page" style={{ justifyContent: 'center', alignItems: 'center' }}>
       <div 
@@ -87,24 +97,42 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
           </button>
         </div>
 
-        {/* Settings button */}
-        <button
-          id="btn-settings"
-          className="btn btn-ghost btn-sm"
-          style={{ 
-            borderRadius: 'var(--radius-md)', 
-            padding: '8px 16px',
-            background: 'rgba(255, 255, 255, 0.02)',
-            border: '1px solid var(--border)'
-          }}
-          onClick={() => onNavigate('settings')}
-        >
-          <SettingsIcon size={14} style={{ color: 'var(--text-secondary)' }} />
-          <span>System Settings</span>
-        </button>
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            id="btn-settings"
+            className="btn btn-ghost btn-sm"
+            style={{ 
+              borderRadius: 'var(--radius-md)', 
+              padding: '8px 16px',
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid var(--border)'
+            }}
+            onClick={() => onNavigate('settings')}
+          >
+            <SettingsIcon size={14} style={{ color: 'var(--text-secondary)' }} />
+            <span>System Settings</span>
+          </button>
+
+          <button
+            id="btn-shutdown"
+            className="btn btn-ghost btn-sm"
+            style={{ 
+              borderRadius: 'var(--radius-md)', 
+              padding: '8px 16px',
+              background: 'rgba(239, 68, 68, 0.06)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              color: '#ef4444'
+            }}
+            onClick={handleShutdown}
+          >
+            <Power size={14} style={{ marginRight: '6px' }} />
+            <span>Stop Service</span>
+          </button>
+        </div>
 
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          v0.1.0 · Secured LAN Connection · Windows 10+
+          v1.1.3 · Secured LAN Connection · Windows 10+
         </span>
       </div>
 

@@ -3,7 +3,8 @@ import { invoke, listen } from '../store/ipc';
 import * as QRCode from 'qrcode';
 import { 
   ArrowLeft, Play, Square, RefreshCw, Users, Key, AlertTriangle, 
-  Cpu, Zap, Settings as SettingsIcon, Monitor, Activity, Terminal, ShieldAlert
+  Cpu, Zap, Settings as SettingsIcon, Monitor, Activity, Terminal, ShieldAlert,
+  Power
 } from 'lucide-react';
 import type { Page } from '../App';
 import { useSessionStore, type WindowInfo } from '../store/sessionStore';
@@ -33,6 +34,17 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   } = useSessionStore();
 
   const { addToast } = useToastStore();
+
+  const handleShutdown = async () => {
+    if (window.confirm("Are you sure you want to stop the Host service completely? This will terminate all background sharing processes.")) {
+      try {
+        await invoke('shutdown');
+        addToast('Service Stopped', 'The Host service is shutting down...', 'success');
+      } catch (err: any) {
+        addToast('Error', err.message || 'Failed to stop service', 'error');
+      }
+    }
+  };
 
   const [tab, setTab] = useState<'share' | 'devices' | 'performance' | 'logs'>('share');
   const [selectedHwnd, setSelectedHwnd] = useState<number | null>(null);
@@ -441,6 +453,10 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
               <ArrowLeft size={14} /> Main Menu
             </button>
           )}
+
+          <button className="btn btn-ghost btn-sm btn-full" onClick={handleShutdown} style={{ marginTop: '6px', background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#ef4444' }}>
+            <Power size={14} style={{ marginRight: '6px' }} /> Stop Host Service
+          </button>
         </div>
       </div>
 
