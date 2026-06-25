@@ -1,3 +1,25 @@
+📡 Beacon & Pulse v1.1.4 - Release Notes
+=======================================
+
+Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
+
+What's New in v1.1.4
+-------------------
+
+⚙️ UI Settings & Windows Registry Synchronization
+- Bidirectional IPC Binding: Integrated Chrome UI settings toggles (e.g. sharing audio, enabling control, quality, custom pins, adaptive bitrate) to write directly to the Windows Registry and %APPDATA%/Beacon/settings.json configurations via named-pipe WebSocket IPC.
+- Persistent Startup Handler: Enabling the "Start with Windows" toggle automatically manages the Windows registry startup entries for the service daemon.
+
+📈 Adaptive Network Engine Frame Rate Auto-Tuning
+- Network-Aware Frame Rate Control: Expanded the adaptive rate controller to dynamically throttle host capture frame rates down to 30 FPS under network constraints (packet loss > 3% or RTT > 80ms) and restore it to 60 FPS once connection parameters recover (packet loss < 0.5%, RTT < 40ms, bitrate >= 12 Mbps).
+
+💻 Interactive Remote Terminal Console
+- WebSocket IPC Shell Streaming: Embedded asynchronous interactive command shell execution (cmd.exe on Windows, sh on non-Windows) in the network control thread.
+- Terminal Viewport: Spawned command piping, stream readers/writers, and lossy UTF-8 formatting, rendering a full monospaced command console inside the player's file/task manager sidebar.
+
+🖥️ Player Multi-Monitor Selection Switcher
+- Target Display Switcher: Exposed the host's monitor list and active display pointer switching protocols in the browser player toolbar, allowing client-initiated dynamic monitor target sharing on-the-fly.
+
 📡 Beacon & Pulse v1.1.3 - Release Notes
 =======================================
 

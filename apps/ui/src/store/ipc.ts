@@ -104,6 +104,8 @@ function responseMatchesCommand(event: string | undefined, cmd: string): boolean
     case 'disconnect_from_host': return event === 'stream_disconnected';
     case 'kick_client': return event === 'client_disconnected';
     case 'shutdown': return event === 'error' || event === 'stream_disconnected';
+    case 'save_settings': return event === 'settings_saved';
+    case 'load_settings': return event === 'settings_loaded';
     case 'set_bitrate':
     case 'request_keyframe':
       return event === 'stats';
@@ -115,7 +117,12 @@ function responseMatchesCommand(event: string | undefined, cmd: string): boolean
     case 'download_host_file':
     case 'host_file_action':
     case 'update_stream_settings':
+    case 'start_shell':
+    case 'send_shell_input':
+    case 'switch_host_monitor':
       return event === 'recv_stats';
+    case 'list_host_monitors':
+      return event === 'host_monitor_list';
     default:
       return false;
   }
@@ -148,6 +155,10 @@ function resolveNextPending(responseData: any) {
         req.resolve(responseData.target || null);
       } else if (req.cmd === 'get_host_ips') {
         req.resolve(responseData.ips || []);
+      } else if (req.cmd === 'load_settings') {
+        req.resolve(responseData.settings || {});
+      } else if (req.cmd === 'list_host_monitors') {
+        req.resolve(responseData.monitors || []);
       } else {
         req.resolve(responseData);
       }
@@ -163,14 +174,6 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
     return tauriInvoke<T>(cmd, args);
   }
 
-  if (cmd === 'save_settings') {
-    localStorage.setItem('lanshare_settings', JSON.stringify(args.settings));
-    return Promise.resolve({} as T);
-  }
-  if (cmd === 'load_settings') {
-    const s = localStorage.getItem('lanshare_settings');
-    return Promise.resolve(s ? JSON.parse(s) : {}) as Promise<T>;
-  }
   if (cmd === 'read_recent_logs') {
     return Promise.resolve(["Logs are only available in desktop standalone mode."] as any);
   }
@@ -254,8 +257,26 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
     case 'update_stream_settings':
       payload = { cmd: 'update_stream_settings', fps: args.fps || null, scale: args.scale || null, bitrate_bps: args.bitrateBps || null };
       break;
+    case 'save_settings':
+      payload = { cmd: 'save_settings', settings: args.settings };
+      break;
+    case 'load_settings':
+      payload = { cmd: 'load_settings' };
+      break;
     case 'shutdown':
       payload = { cmd: 'shutdown' };
+      break;
+    case 'start_shell':
+      payload = { cmd: 'start_shell' };
+      break;
+    case 'send_shell_input':
+      payload = { cmd: 'send_shell_input', text: args.text };
+      break;
+    case 'list_host_monitors':
+      payload = { cmd: 'list_host_monitors' };
+      break;
+    case 'switch_host_monitor':
+      payload = { cmd: 'switch_host_monitor', display_handle: args.displayHandle };
       break;
     default:
       return Promise.reject(new Error(`Unknown command: ${cmd}`));

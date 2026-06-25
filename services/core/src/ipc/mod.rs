@@ -90,6 +90,8 @@ pub enum UiCommand {
         kbps: u32,
     },
     Shutdown,
+    SaveSettings { settings: serde_json::Value },
+    LoadSettings,
     #[cfg(feature = "player")]
     SendInput {
         event: crate::network::InputMsg,
@@ -136,6 +138,12 @@ pub enum UiCommand {
     #[cfg(feature = "player")]
     SwitchHostMonitor {
         display_handle: isize,
+    },
+    #[cfg(feature = "player")]
+    StartShell,
+    #[cfg(feature = "player")]
+    SendShellInput {
+        text: String,
     },
 }
 
@@ -200,6 +208,10 @@ pub enum ServiceEvent {
     },
     Error {
         message: String,
+    },
+    SettingsSaved,
+    SettingsLoaded {
+        settings: serde_json::Value,
     },
 
     // Capture state events
@@ -295,6 +307,10 @@ pub enum ServiceEvent {
     FileActionFinished {
         success: bool,
         error: Option<String>,
+    },
+    #[cfg(feature = "player")]
+    ShellOutput {
+        text: String,
     },
 
     /// Phase 3: sent immediately after hardware encoder activates
@@ -999,6 +1015,158 @@ async fn dispatch_cmd(
             event
         }
 
+        UiCommand::SaveSettings { settings } => {
+            if let Some(audio) = settings.get("audio_enabled").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("Audio", if audio { 1 } else { 0 });
+            }
+            if let Some(clipboard) = settings.get("clipboard_enabled").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("Clipboard", if clipboard { 1 } else { 0 });
+            }
+            if let Some(control) = settings.get("allow_input_control").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("ControlEnabled", if control { 1 } else { 0 });
+            }
+            if let Some(quality) = settings.get("bitrate_kbps").and_then(|v| v.as_u64()) {
+                crate::registry::write_dword("Quality", quality as u32);
+            }
+            if let Some(fps) = settings.get("fps").and_then(|v| v.as_u64()) {
+                crate::registry::write_dword("Fps", fps as u32);
+            }
+            if let Some(unattended) = settings.get("unattended_mode").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("Unattended", if unattended { 1 } else { 0 });
+            }
+            if let Some(unattended_pin) = settings.get("unattended_pin").and_then(|v| v.as_str()) {
+                crate::registry::write_string("UnattendedPin", unattended_pin);
+            }
+            if let Some(tls) = settings.get("tls_enabled").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("TlsEnabled", if tls { 1 } else { 0 });
+            }
+            if let Some(adaptive) = settings.get("adaptive_bitrate_enabled").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("AdaptiveBitrate", if adaptive { 1 } else { 0 });
+            }
+            if let Some(startup) = settings.get("start_with_windows").and_then(|v| v.as_bool()) {
+                if startup {
+                    if let Ok(exe_path) = std::env::current_exe() {
+                        let exe_str = exe_path.to_string_lossy();
+                        crate::registry::write_startup("BeaconHost", &exe_str, "--service");
+                        crate::registry::write_dword("StartupEnabled", 1);
+                    }
+                } else {
+                    crate::registry::delete_startup("BeaconHost");
+                    crate::registry::write_dword("StartupEnabled", 0);
+                }
+            }
+            if let Some(static_code) = settings.get("static_code").and_then(|v| v.as_str()) {
+                crate::registry::write_string("StaticCode", static_code);
+            }
+            if let Some(use_static_code) = settings.get("use_static_code").and_then(|v| v.as_bool()) {
+                crate::registry::write_dword("UseStaticCode", if use_static_code { 1 } else { 0 });
+            }
+            if let Some(encoder) = settings.get("encoder").and_then(|v| v.as_str()) {
+                crate::registry::write_string("Encoder", encoder);
+            }
+            if let Some(indicator) = settings.get("indicator_mode").and_then(|v| v.as_str()) {
+                crate::registry::write_string("IndicatorMode", indicator);
+            }
+
+            // Save to %APPDATA%\Beacon\settings.json
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let dir = std::path::PathBuf::from(appdata).join("Beacon");
+                let _ = std::fs::create_dir_all(&dir);
+                let file_path = dir.join("settings.json");
+                if let Ok(file_content) = serde_json::to_string_pretty(&settings) {
+                    let _ = std::fs::write(file_path, file_content);
+                }
+            }
+            ServiceEvent::SettingsSaved
+        }
+
+        UiCommand::LoadSettings => {
+            let mut settings_map = serde_json::Map::new();
+            
+            // Try loading from settings.json first
+            let mut loaded_json = None;
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let file_path = std::path::PathBuf::from(appdata).join("Beacon").join("settings.json");
+                if let Ok(content) = std::fs::read_to_string(file_path) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(obj) = val.as_object() {
+                            loaded_json = Some(obj.clone());
+                        }
+                    }
+                }
+            }
+
+            // Always ensure we return all fields. Fallback to registry or default values.
+            let default_keys = [
+                ("audio_enabled", "Audio", serde_json::Value::Bool(false), true),
+                ("clipboard_enabled", "Clipboard", serde_json::Value::Bool(true), true),
+                ("allow_input_control", "ControlEnabled", serde_json::Value::Bool(true), true),
+                ("bitrate_kbps", "Quality", serde_json::Value::Number(8000.into()), false),
+                ("fps", "Fps", serde_json::Value::Number(60.into()), false),
+                ("unattended_mode", "Unattended", serde_json::Value::Bool(false), true),
+                ("tls_enabled", "TlsEnabled", serde_json::Value::Bool(false), true),
+                ("adaptive_bitrate_enabled", "AdaptiveBitrate", serde_json::Value::Bool(true), true),
+                ("start_with_windows", "StartupEnabled", serde_json::Value::Bool(false), true),
+            ];
+
+            for (field_name, reg_key, default_val, is_bool) in default_keys.iter() {
+                let val = if let Some(ref json) = loaded_json {
+                    json.get(*field_name).cloned()
+                } else {
+                    None
+                };
+                
+                let final_val = match val {
+                    Some(v) => v,
+                    None => {
+                        if *is_bool {
+                            serde_json::Value::Bool(crate::registry::read_dword(reg_key).unwrap_or(if let serde_json::Value::Bool(b) = default_val { *b as u32 } else { 0 }) == 1)
+                        } else {
+                            serde_json::Value::Number(crate::registry::read_dword(reg_key).unwrap_or(if let serde_json::Value::Number(n) = default_val { n.as_u64().unwrap_or(0) as u32 } else { 0 }).into())
+                        }
+                    }
+                };
+                settings_map.insert(field_name.to_string(), final_val);
+            }
+
+            let str_keys = [
+                ("unattended_pin", "UnattendedPin", ""),
+                ("static_code", "StaticCode", ""),
+                ("encoder", "Encoder", "software"),
+                ("indicator_mode", "IndicatorMode", "always_show"),
+            ];
+
+            for (field_name, reg_key, default_str) in str_keys.iter() {
+                let val = if let Some(ref json) = loaded_json {
+                    json.get(*field_name).cloned()
+                } else {
+                    None
+                };
+                let final_val = match val {
+                    Some(v) => v,
+                    None => {
+                        serde_json::Value::String(crate::registry::read_string(reg_key).unwrap_or_else(|| default_str.to_string()))
+                    }
+                };
+                settings_map.insert(field_name.to_string(), final_val);
+            }
+
+            let use_static_val = if let Some(ref json) = loaded_json {
+                json.get("use_static_code").cloned()
+            } else {
+                None
+            };
+            let final_use_static = match use_static_val {
+                Some(v) => v,
+                None => {
+                    serde_json::Value::Bool(crate::registry::read_dword("UseStaticCode").unwrap_or(0) == 1)
+                }
+            };
+            settings_map.insert("use_static_code".to_string(), final_use_static);
+
+            ServiceEvent::SettingsLoaded { settings: serde_json::Value::Object(settings_map) }
+        }
+
         // ── Phase 3: Live bitrate change ──────────────────────────────────────
         #[cfg(feature = "host")]
         UiCommand::SetBitrate { kbps } => {
@@ -1287,6 +1455,44 @@ async fn dispatch_cmd(
                 bitrate_kbps: 0,
             }
         }
+
+        #[cfg(feature = "player")]
+        UiCommand::StartShell => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::ShellStart) {
+                    error!(error = %e, "Failed to send ShellStart request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
+
+        #[cfg(feature = "player")]
+        UiCommand::SendShellInput { text } => {
+            let cs = state.client_session.lock().await;
+            if let Some(ref handle) = *cs {
+                if let Err(e) = handle.send_input(crate::network::ControlMessage::ShellInput { text }) {
+                    error!(error = %e, "Failed to send ShellInput request to host");
+                    return ServiceEvent::Error {
+                        message: e.to_string(),
+                    };
+                }
+            }
+            ServiceEvent::RecvStats {
+                fps: 0.0,
+                packet_loss_pct: 0.0,
+                rtt_ms: 0,
+                bitrate_kbps: 0,
+            }
+        }
     }
 }
 
@@ -1431,6 +1637,9 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         client_session::ClientEvent::FileDownloadEnd => ServiceEvent::FileDownloadEnd,
         client_session::ClientEvent::FileActionFinished { success, error } => {
             ServiceEvent::FileActionFinished { success, error }
+        }
+        client_session::ClientEvent::ShellOutput { text } => {
+            ServiceEvent::ShellOutput { text }
         }
     }
 }

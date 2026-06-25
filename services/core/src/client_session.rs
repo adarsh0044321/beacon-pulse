@@ -141,6 +141,9 @@ pub enum ClientEvent {
         success: bool,
         error: Option<String>,
     },
+    ShellOutput {
+        text: String,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -427,6 +430,9 @@ pub async fn start(
                                     }
                                     ControlMessage::FileActionResponse { success, error } => {
                                         let _ = fwd_event_tx_loop.send(ClientEvent::FileActionFinished { success, error });
+                                    }
+                                    ControlMessage::ShellOutput { text } => {
+                                        let _ = fwd_event_tx_loop.send(ClientEvent::ShellOutput { text });
                                     }
                                     _ => {}
                                 }

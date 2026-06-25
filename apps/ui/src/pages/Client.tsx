@@ -610,7 +610,12 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const [recentConnections, setRecentConnections] = useState<DiscoveredHost[]>([]);
   const [scalingMode, setScalingMode] = useState<'fit' | 'stretch' | 'original'>('fit');
   const [processSearch, setProcessSearch] = useState('');
-  const [remoteSubTab, setRemoteSubTab] = useState<'processes' | 'files'>('processes');
+  const [remoteSubTab, setRemoteSubTab] = useState<'processes' | 'files' | 'shell'>('processes');
+  const [shellOutput, setShellOutput] = useState<string>('');
+  const [shellInput, setShellInput] = useState<string>('');
+  const [hostMonitors, setHostMonitors] = useState<any[]>([]);
+  const [showMonitorSwitcher, setShowMonitorSwitcher] = useState(false);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
   const [killConfirmPid, setKillConfirmPid] = useState<number | null>(null);
   const [killConfirmName, setKillConfirmName] = useState('');
 
@@ -722,6 +727,50 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     }
     setIsRecording(false);
   };
+
+  const startShellSession = () => {
+    setShellOutput('Connecting to host terminal shell...\n');
+    invoke('start_shell').catch(err => {
+      setShellOutput(prev => prev + `Error starting shell: ${(err as any).message}\n`);
+    });
+  };
+
+  const sendShellCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shellInput) return;
+    const cmdToSend = shellInput + '\n';
+    invoke('send_shell_input', { text: cmdToSend }).catch(err => {
+      setShellOutput(prev => prev + `Error sending input: ${(err as any).message}\n`);
+    });
+    setShellInput('');
+  };
+
+  const fetchHostMonitors = () => {
+    invoke<any[]>('list_host_monitors')
+      .then(monitors => {
+        setHostMonitors(monitors);
+      })
+      .catch(err => {
+        addToast('Error', `Failed to list host monitors: ${(err as any).message}`, 'error');
+      });
+  };
+
+  const handleSwitchMonitor = (displayHandle: number) => {
+    invoke('switch_host_monitor', { displayHandle })
+      .then(() => {
+        addToast('Monitor Switched', 'Request to switch screen target sent.', 'success');
+        setShowMonitorSwitcher(false);
+      })
+      .catch(err => {
+        addToast('Error', `Failed to switch monitor: ${(err as any).message}`, 'error');
+      });
+  };
+
+  useEffect(() => {
+    if (terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [shellOutput]);
 
   useEffect(() => {
     return () => {
@@ -919,6 +968,10 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       setPlayerMemoryBytes(event.payload.process_memory_bytes);
     });
 
+    const unlistenShellOutput = listen<{ text: string }>('shell_output', (event) => {
+      setShellOutput(prev => prev + event.payload.text);
+    });
+
     return () => {
       unlistenVideoChunk.then(f => f());
       unlistenConnected.then(f => f());
@@ -926,6 +979,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
       unlistenCursorChanged.then(f => f());
       unlistenRecvStats.then(f => f());
       unlistenMetrics.then(f => f());
+      unlistenShellOutput.then(f => f());
     };
   }, [feedChunk, closeAllDecoders, addToast, disconnectFromHost]);
 
@@ -1879,6 +1933,74 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                     Stream Settings
                   </button>
 
+                  {/* Monitor Switcher Button & Dropdown */}
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      className={`btn ${showMonitorSwitcher ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+                      onClick={() => {
+                        setShowMonitorSwitcher(!showMonitorSwitcher);
+                        if (!showMonitorSwitcher) {
+                          fetchHostMonitors();
+                        }
+                      }}
+                      style={{ height: '32px', background: showMonitorSwitcher ? undefined : 'rgba(10, 8, 20, 0.7)', backdropFilter: showMonitorSwitcher ? undefined : 'var(--glass-blur)' }}
+                    >
+                      Screens
+                    </button>
+                    {showMonitorSwitcher && (
+                      <div className="card" style={{
+                        position: 'absolute',
+                        top: '40px',
+                        right: 0,
+                        width: '240px',
+                        background: 'rgba(10, 8, 20, 0.95)',
+                        backdropFilter: 'blur(12px)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        zIndex: 30
+                      }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '4px' }}>
+                          Select Capture Target Display
+                        </div>
+                        {hostMonitors.length === 0 ? (
+                          <div style={{ padding: '8px', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                            Loading screens...
+                          </div>
+                        ) : (
+                          hostMonitors.map(m => (
+                            <button
+                              key={m.display_handle}
+                              className="btn btn-ghost btn-sm"
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px',
+                                width: '100%',
+                                minHeight: 'unset',
+                                fontSize: '0.8rem',
+                                color: '#fff',
+                                textAlign: 'left'
+                              }}
+                              onClick={() => handleSwitchMonitor(m.display_handle)}
+                            >
+                              <span>{m.name || `Display ${m.display_handle}`}</span>
+                              {m.is_primary && (
+                                <span style={{ fontSize: '0.65rem', background: 'var(--accent)', color: '#000', padding: '1px 4px', borderRadius: '2px', fontWeight: 'bold' }}>
+                                  Primary
+                                </span>
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <button 
                     className="btn btn-ghost btn-sm"
                     onClick={() => invoke('request_keyframe').then(() => addToast('Keyframe Requested', 'Sent IDR request to host.', 'info')).catch(console.error)}
@@ -2105,7 +2227,7 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 borderRadius: 'var(--radius-md)',
                 padding: '4px',
                 gap: '4px',
-                width: '320px'
+                width: '450px'
               }}>
                 <button
                   className={`btn btn-sm ${remoteSubTab === 'processes' ? 'btn-primary' : 'btn-ghost'}`}
@@ -2124,10 +2246,71 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 >
                   File Browser
                 </button>
+                <button
+                  className={`btn btn-sm ${remoteSubTab === 'shell' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, border: 'none', padding: '6px 12px' }}
+                  onClick={() => {
+                    setRemoteSubTab('shell');
+                    startShellSession();
+                  }}
+                >
+                  Shell Terminal
+                </button>
               </div>
 
               {remoteSubTab === 'files' ? (
                 <FileManager />
+              ) : remoteSubTab === 'shell' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 220px)', background: '#1e1e1e', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                  {/* Terminal Header */}
+                  <div style={{ background: '#252526', borderBottom: '1px solid var(--border)', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      <Terminal size={14} style={{ color: 'var(--accent)' }} />
+                      <span>Interactive Remote Shell</span>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 8px', minHeight: 'unset', fontSize: '0.75rem' }}
+                      onClick={() => {
+                        setShellOutput('');
+                        invoke('start_shell').catch(err => {
+                          setShellOutput(prev => prev + `Error restarting shell: ${(err as any).message}\n`);
+                        });
+                      }}
+                    >
+                      Reset Session
+                    </button>
+                  </div>
+                  
+                  {/* Output Panel */}
+                  <div style={{ flex: 1, padding: '16px', overflowY: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.85rem', color: '#d4d4d4', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
+                    {shellOutput}
+                    <div ref={terminalEndRef} />
+                  </div>
+                  
+                  {/* Input Form */}
+                  <form onSubmit={sendShellCommand} style={{ borderTop: '1px solid var(--border)', display: 'flex', background: '#1e1e1e' }}>
+                    <span style={{ padding: '12px 0 12px 16px', fontFamily: 'monospace', color: 'var(--accent)', fontSize: '0.85rem' }}>$</span>
+                    <input
+                      type="text"
+                      value={shellInput}
+                      onChange={e => setShellInput(e.target.value)}
+                      placeholder="Type a host command..."
+                      style={{
+                        flex: 1,
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#fff',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        fontSize: '0.85rem',
+                        padding: '12px 16px 12px 8px',
+                        outline: 'none',
+                        boxShadow: 'none'
+                      }}
+                      autoFocus
+                    />
+                  </form>
+                </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>

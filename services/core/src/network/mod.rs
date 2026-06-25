@@ -143,6 +143,14 @@ pub enum ControlMessage {
         scale: Option<f32>,
         bitrate_bps: Option<u32>,
     },
+    // Remote Shell
+    ShellStart,
+    ShellInput {
+        text: String,
+    },
+    ShellOutput {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
