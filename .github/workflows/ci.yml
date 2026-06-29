@@ -111,8 +111,9 @@ jobs:
     - name: Build Android Player APK
       run: |
         cd apps/ui-android
-        ./gradlew.bat assembleDebug
+        ./gradlew.bat assembleDebug assembleRelease
         copy app\build\outputs\apk\debug\app-debug.apk ..\..\PulsePlayer-debug.apk
+        copy app\build\outputs\apk\release\app-release-unsigned.apk ..\..\PulsePlayer-release.apk
 
     - name: Publish Release
       uses: softprops/action-gh-release@v2
@@ -122,6 +123,7 @@ jobs:
           installer/host/BeaconSetup.exe
           installer/player/PulseSetup.exe
           PulsePlayer-debug.apk
+          PulsePlayer-release.apk
         name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
         body_path: RELEASE_NOTES.txt
         tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
