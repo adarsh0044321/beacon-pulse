@@ -85,23 +85,27 @@ pub async fn run_with_listener(state: Arc<AppState>, listener: TcpListener) -> R
             Ok((stream, peer_addr)) => {
                 info!("Incoming connection from {}", peer_addr);
                 let peer_ip = peer_addr.ip();
-                let is_loopback = peer_ip.is_loopback() || match peer_ip {
-                    std::net::IpAddr::V6(v6) => {
-                        if let Some(v4) = v6.to_ipv4_mapped() {
-                            v4.is_loopback()
-                        } else {
-                            false
+                let is_loopback = peer_ip.is_loopback()
+                    || match peer_ip {
+                        std::net::IpAddr::V6(v6) => {
+                            if let Some(v4) = v6.to_ipv4_mapped() {
+                                v4.is_loopback()
+                            } else {
+                                false
+                            }
                         }
-                    }
-                    _ => false,
-                };
+                        _ => false,
+                    };
                 let conn_mode = {
                     let mode_lock = state.connection_mode.lock().await;
                     mode_lock.clone()
                 };
                 if let Some(mode) = conn_mode {
                     if mode == "wan" && !is_loopback {
-                        info!("Rejecting direct external connection from {} in WAN-only mode", peer_addr);
+                        info!(
+                            "Rejecting direct external connection from {} in WAN-only mode",
+                            peer_addr
+                        );
                         continue;
                     }
                 }

@@ -385,7 +385,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 fn GetLastError() -> u32;
                 fn SetLastError(code: u32);
             }
-            unsafe { SetLastError(0); }
+            unsafe {
+                SetLastError(0);
+            }
             let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {

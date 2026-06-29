@@ -146,8 +146,13 @@ pub fn start(
     let public_stun_addr_clone = Arc::clone(&public_stun_addr);
 
     // Spawn the UDP streamer task
-    let streamer = UdpStreamer::new(stream_port, enc_rx, Arc::clone(&clients), public_stun_addr_clone)
-        .with_context(|| format!("Cannot bind UDP stream port {}", stream_port))?;
+    let streamer = UdpStreamer::new(
+        stream_port,
+        enc_rx,
+        Arc::clone(&clients),
+        public_stun_addr_clone,
+    )
+    .with_context(|| format!("Cannot bind UDP stream port {}", stream_port))?;
     tokio::spawn(streamer.run());
 
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));

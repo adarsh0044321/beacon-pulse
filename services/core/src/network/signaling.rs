@@ -55,7 +55,10 @@ pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
 }
 
 /// Query a STUN server on a pre-existing persistent socket.
-pub async fn query_stun_server_on_socket(socket: &UdpSocket, server_addr: &str) -> Result<SocketAddr> {
+pub async fn query_stun_server_on_socket(
+    socket: &UdpSocket,
+    server_addr: &str,
+) -> Result<SocketAddr> {
     let mut resolved_addr = server_addr.to_string();
     if !resolved_addr.contains(':') {
         resolved_addr.push_str(":3478");
@@ -191,7 +194,11 @@ pub async fn run_host_signaling_loop(
             if let Some((host_str, port_str)) = host_part.rsplit_once(':') {
                 if port_str == "45188" {
                     let cleaned_host = host_str.trim_start_matches('[').trim_end_matches(']');
-                    if cleaned_host == "127.0.0.1" || cleaned_host == "localhost" || cleaned_host == "::1" || cleaned_host == "0.0.0.0" {
+                    if cleaned_host == "127.0.0.1"
+                        || cleaned_host == "localhost"
+                        || cleaned_host == "::1"
+                        || cleaned_host == "0.0.0.0"
+                    {
                         is_local = true;
                     } else {
                         let local_ips = super::broadcast::get_local_ips();
@@ -206,7 +213,10 @@ pub async fn run_host_signaling_loop(
     };
 
     if is_local_target {
-        if tokio::net::TcpStream::connect("127.0.0.1:45188").await.is_err() {
+        if tokio::net::TcpStream::connect("127.0.0.1:45188")
+            .await
+            .is_err()
+        {
             info!("Local signaling server is offline; spawning in-process signaling server on port 45188");
             let _ = crate::network::signaling_server::start_local_signaling_server(45188).await;
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -235,7 +245,9 @@ pub async fn run_host_signaling_loop(
                 let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
                 // Register as host
-                let reg = SignalingMessage::RegisterHost { pairing_code: pairing_code.clone() };
+                let reg = SignalingMessage::RegisterHost {
+                    pairing_code: pairing_code.clone(),
+                };
                 let reg_msg = serde_json::to_string(&reg)?;
                 if ws_tx.send(Message::Text(reg_msg.into())).await.is_err() {
                     warn!("Failed to send registration message to signaling server, retrying...");
@@ -259,7 +271,11 @@ pub async fn run_host_signaling_loop(
                                 session_token: token.clone(),
                             };
                             if let Ok(heartbeat_msg) = serde_json::to_string(&heartbeat) {
-                                if ws_tx.send(Message::Text(heartbeat_msg.into())).await.is_err() {
+                                if ws_tx
+                                    .send(Message::Text(heartbeat_msg.into()))
+                                    .await
+                                    .is_err()
+                                {
                                     error!("Failed to send heartbeat to signaling server");
                                     break;
                                 }
@@ -302,7 +318,10 @@ pub async fn run_host_signaling_loop(
                     };
 
                     match sig_msg {
-                        SignalingMessage::RegistrationSuccess { role, session_token } => {
+                        SignalingMessage::RegistrationSuccess {
+                            role,
+                            session_token,
+                        } => {
                             info!(role = %role, "Signaling registration confirmed");
                             if let Some(token) = session_token {
                                 let _ = token_tx.send(token).await;
@@ -318,7 +337,10 @@ pub async fn run_host_signaling_loop(
                             sdp,
                             candidates,
                         } => {
-                            info!(player_candidates_count = candidates.len(), "Received SDP connection offer from player");
+                            info!(
+                                player_candidates_count = candidates.len(),
+                                "Received SDP connection offer from player"
+                            );
 
                             let s_url = signaling_url.clone();
                             let l_port = local_control_port;
@@ -345,12 +367,19 @@ pub async fn run_host_signaling_loop(
                 }
 
                 // If error occurred or connection closed, sleep and retry
-                warn!("Signaling connection lost or failed. Reconnecting in {}s...", backoff.as_secs());
+                warn!(
+                    "Signaling connection lost or failed. Reconnecting in {}s...",
+                    backoff.as_secs()
+                );
                 tokio::time::sleep(backoff).await;
                 backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
             }
             Err(e) => {
-                warn!("Failed to connect to signaling server: {}. Retrying in {}s...", e, backoff.as_secs());
+                warn!(
+                    "Failed to connect to signaling server: {}. Retrying in {}s...",
+                    e,
+                    backoff.as_secs()
+                );
                 tokio::time::sleep(backoff).await;
                 backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
             }
@@ -394,7 +423,11 @@ async fn handle_proxied_connection(
     let host_response_json = String::from_utf8(buf[..n].to_vec())?;
     let mut host_candidates = Vec::new();
     for line in host_response_json.lines() {
-        if let Ok(super::ControlMessage::JoinAccepted { candidates: Some(ref cands), .. }) = serde_json::from_str::<super::ControlMessage>(line) {
+        if let Ok(super::ControlMessage::JoinAccepted {
+            candidates: Some(ref cands),
+            ..
+        }) = serde_json::from_str::<super::ControlMessage>(line)
+        {
             host_candidates = cands.clone();
             break;
         }
@@ -445,11 +478,7 @@ async fn handle_proxied_connection(
                 Ok(0) | Err(_) => break,
                 Ok(bytes) => {
                     let b64_str = B64.encode(&tcp_buf[..bytes]);
-                    if ws_tx
-                        .send(Message::Text(b64_str.into()))
-                        .await
-                        .is_err()
-                    {
+                    if ws_tx.send(Message::Text(b64_str.into())).await.is_err() {
                         break;
                     }
                 }
@@ -500,9 +529,9 @@ pub async fn run_player_signaling_loop(
 
     let stun_server = crate::registry::read_string("StunServer")
         .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
-    
+
     let mut player_candidates = Vec::new();
-    
+
     // Add public candidate
     match query_stun_server_on_socket(&socket, &stun_server).await {
         Ok(public_addr) => {
@@ -543,8 +572,6 @@ pub async fn run_player_signaling_loop(
             });
         }
     }
-
-
 
     // 3. Bind the local proxy TCP listener
     let local_listener =
@@ -592,7 +619,9 @@ pub async fn run_player_signaling_loop(
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
         // Register as player
-        let reg = SignalingMessage::RegisterPlayer { pairing_code: p_code };
+        let reg = SignalingMessage::RegisterPlayer {
+            pairing_code: p_code,
+        };
         if let Ok(reg_msg) = serde_json::to_string(&reg) {
             if ws_tx.send(Message::Text(reg_msg.into())).await.is_err() {
                 error!("Player proxy failed to send registration message");
@@ -668,7 +697,10 @@ pub async fn run_player_signaling_loop(
                         break;
                     }
                     SignalingMessage::RegistrationFailed { reason } => {
-                        error!("Player signaling registration failed during wait: {}", reason);
+                        error!(
+                            "Player signaling registration failed during wait: {}",
+                            reason
+                        );
                         return;
                     }
                     _ => {}
@@ -721,11 +753,7 @@ pub async fn run_player_signaling_loop(
                     Ok(0) | Err(_) => break,
                     Ok(bytes) => {
                         let b64_str = B64.encode(&tcp_buf[..bytes]);
-                        if ws_tx
-                            .send(Message::Text(b64_str.into()))
-                            .await
-                            .is_err()
-                        {
+                        if ws_tx.send(Message::Text(b64_str.into())).await.is_err() {
                             break;
                         }
                     }

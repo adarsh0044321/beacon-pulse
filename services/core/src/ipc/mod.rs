@@ -90,9 +90,14 @@ pub enum UiCommand {
         kbps: u32,
     },
     Shutdown,
-    SaveSettings { settings: serde_json::Value },
+    SaveSettings {
+        settings: serde_json::Value,
+    },
     LoadSettings,
-    ReadRecentLogs { log_type: String, limit: usize },
+    ReadRecentLogs {
+        log_type: String,
+        limit: usize,
+    },
     #[cfg(feature = "player")]
     SendInput {
         event: crate::network::InputMsg,
@@ -496,7 +501,10 @@ async fn dispatch_cmd(
         }
         // ── Start host stream ────────────────────────────────────────────────
         #[cfg(feature = "host")]
-        UiCommand::StartShare { target, connection_mode } => {
+        UiCommand::StartShare {
+            target,
+            connection_mode,
+        } => {
             let port = crate::network::DEFAULT_PORT;
             *state.active_target.lock().await = Some(target.clone());
             let conn_mode_str = connection_mode.as_deref().unwrap_or("both").to_string();
@@ -634,7 +642,10 @@ async fn dispatch_cmd(
                                 )
                                 .await
                                 {
-                                    tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                                    tracing::warn!(
+                                        "WAN Traversal host signaling loop failed: {}",
+                                        e
+                                    );
                                 }
                             });
                         }
@@ -645,7 +656,11 @@ async fn dispatch_cmd(
                             } else {
                                 c.clone()
                             },
-                            expires_in: if unattended || use_static { 999999 } else { 120 },
+                            expires_in: if unattended || use_static {
+                                999999
+                            } else {
+                                120
+                            },
                         });
                     } else {
                         let _ = push_tx.send(ServiceEvent::PairingCode {
@@ -785,7 +800,12 @@ async fn dispatch_cmd(
                 }
             }
 
-            let host_addr = match tokio::net::lookup_host(format!("{}:{}", resolved_host_ip, resolved_stream_port)).await {
+            let host_addr = match tokio::net::lookup_host(format!(
+                "{}:{}",
+                resolved_host_ip, resolved_stream_port
+            ))
+            .await
+            {
                 Ok(addrs) => {
                     let mut addr_list: Vec<std::net::SocketAddr> = addrs.collect();
                     addr_list.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
@@ -829,7 +849,7 @@ async fn dispatch_cmd(
                                     );
                                     current_file = None;
                                 }
-                             }
+                            }
                         }
                         crate::client_session::ClientEvent::FileDownloadChunk { data } => {
                             if let Some((ref name, ref mut file)) = current_file {
@@ -961,7 +981,10 @@ async fn dispatch_cmd(
                                 )
                                 .await
                                 {
-                                    tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                                    tracing::warn!(
+                                        "WAN Traversal host signaling loop failed: {}",
+                                        e
+                                    );
                                 }
                             });
                         }
@@ -988,7 +1011,7 @@ async fn dispatch_cmd(
             } else {
                 let code = pm.generate_code();
                 crate::registry::write_string("PairingCode", &code);
-                
+
                 // If sharing is active, also register the new pairing code with the signaling server!
                 if state.host_session.lock().await.is_some() {
                     let pairing_code_str = code.clone();
@@ -1088,7 +1111,9 @@ async fn dispatch_cmd(
             // Check loopback interfaces for local host running on same machine
             let mut loopback_hosts = Vec::new();
             for loopback_ip in &["127.0.0.1", "127.0.0.2"] {
-                if let Ok(addr) = format!("{}:{}", loopback_ip, control_port).parse::<std::net::SocketAddr>() {
+                if let Ok(addr) =
+                    format!("{}:{}", loopback_ip, control_port).parse::<std::net::SocketAddr>()
+                {
                     if let Ok(Ok(_)) = tokio::time::timeout(
                         std::time::Duration::from_millis(150),
                         tokio::net::TcpStream::connect(&addr),
@@ -1184,7 +1209,10 @@ async fn dispatch_cmd(
             if let Some(clipboard) = settings.get("clipboard_enabled").and_then(|v| v.as_bool()) {
                 crate::registry::write_dword("Clipboard", if clipboard { 1 } else { 0 });
             }
-            if let Some(control) = settings.get("allow_input_control").and_then(|v| v.as_bool()) {
+            if let Some(control) = settings
+                .get("allow_input_control")
+                .and_then(|v| v.as_bool())
+            {
                 crate::registry::write_dword("ControlEnabled", if control { 1 } else { 0 });
             }
             if let Some(quality) = settings.get("bitrate_kbps").and_then(|v| v.as_u64()) {
@@ -1202,7 +1230,10 @@ async fn dispatch_cmd(
             if let Some(tls) = settings.get("tls_enabled").and_then(|v| v.as_bool()) {
                 crate::registry::write_dword("TlsEnabled", if tls { 1 } else { 0 });
             }
-            if let Some(adaptive) = settings.get("adaptive_bitrate_enabled").and_then(|v| v.as_bool()) {
+            if let Some(adaptive) = settings
+                .get("adaptive_bitrate_enabled")
+                .and_then(|v| v.as_bool())
+            {
                 crate::registry::write_dword("AdaptiveBitrate", if adaptive { 1 } else { 0 });
             }
             if let Some(startup) = settings.get("start_with_windows").and_then(|v| v.as_bool()) {
@@ -1220,7 +1251,8 @@ async fn dispatch_cmd(
             if let Some(static_code) = settings.get("static_code").and_then(|v| v.as_str()) {
                 crate::registry::write_string("StaticCode", static_code);
             }
-            if let Some(use_static_code) = settings.get("use_static_code").and_then(|v| v.as_bool()) {
+            if let Some(use_static_code) = settings.get("use_static_code").and_then(|v| v.as_bool())
+            {
                 crate::registry::write_dword("UseStaticCode", if use_static_code { 1 } else { 0 });
             }
             if let Some(encoder) = settings.get("encoder").and_then(|v| v.as_str()) {
@@ -1229,7 +1261,9 @@ async fn dispatch_cmd(
             if let Some(indicator) = settings.get("indicator_mode").and_then(|v| v.as_str()) {
                 crate::registry::write_string("IndicatorMode", indicator);
             }
-            if let Some(signaling_server) = settings.get("signaling_server").and_then(|v| v.as_str()) {
+            if let Some(signaling_server) =
+                settings.get("signaling_server").and_then(|v| v.as_str())
+            {
                 crate::registry::write_string("SignalingServer", signaling_server);
             }
 
@@ -1247,11 +1281,13 @@ async fn dispatch_cmd(
 
         UiCommand::LoadSettings => {
             let mut settings_map = serde_json::Map::new();
-            
+
             // Try loading from settings.json first
             let mut loaded_json = None;
             if let Ok(appdata) = std::env::var("APPDATA") {
-                let file_path = std::path::PathBuf::from(appdata).join("Beacon").join("settings.json");
+                let file_path = std::path::PathBuf::from(appdata)
+                    .join("Beacon")
+                    .join("settings.json");
                 if let Ok(content) = std::fs::read_to_string(file_path) {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(obj) = val.as_object() {
@@ -1263,15 +1299,55 @@ async fn dispatch_cmd(
 
             // Always ensure we return all fields. Fallback to registry or default values.
             let default_keys = [
-                ("audio_enabled", "Audio", serde_json::Value::Bool(false), true),
-                ("clipboard_enabled", "Clipboard", serde_json::Value::Bool(true), true),
-                ("allow_input_control", "ControlEnabled", serde_json::Value::Bool(true), true),
-                ("bitrate_kbps", "Quality", serde_json::Value::Number(8000.into()), false),
+                (
+                    "audio_enabled",
+                    "Audio",
+                    serde_json::Value::Bool(false),
+                    true,
+                ),
+                (
+                    "clipboard_enabled",
+                    "Clipboard",
+                    serde_json::Value::Bool(true),
+                    true,
+                ),
+                (
+                    "allow_input_control",
+                    "ControlEnabled",
+                    serde_json::Value::Bool(true),
+                    true,
+                ),
+                (
+                    "bitrate_kbps",
+                    "Quality",
+                    serde_json::Value::Number(8000.into()),
+                    false,
+                ),
                 ("fps", "Fps", serde_json::Value::Number(60.into()), false),
-                ("unattended_mode", "Unattended", serde_json::Value::Bool(false), true),
-                ("tls_enabled", "TlsEnabled", serde_json::Value::Bool(false), true),
-                ("adaptive_bitrate_enabled", "AdaptiveBitrate", serde_json::Value::Bool(true), true),
-                ("start_with_windows", "StartupEnabled", serde_json::Value::Bool(false), true),
+                (
+                    "unattended_mode",
+                    "Unattended",
+                    serde_json::Value::Bool(false),
+                    true,
+                ),
+                (
+                    "tls_enabled",
+                    "TlsEnabled",
+                    serde_json::Value::Bool(false),
+                    true,
+                ),
+                (
+                    "adaptive_bitrate_enabled",
+                    "AdaptiveBitrate",
+                    serde_json::Value::Bool(true),
+                    true,
+                ),
+                (
+                    "start_with_windows",
+                    "StartupEnabled",
+                    serde_json::Value::Bool(false),
+                    true,
+                ),
             ];
 
             for (field_name, reg_key, default_val, is_bool) in default_keys.iter() {
@@ -1280,14 +1356,30 @@ async fn dispatch_cmd(
                 } else {
                     None
                 };
-                
+
                 let final_val = match val {
                     Some(v) => v,
                     None => {
                         if *is_bool {
-                            serde_json::Value::Bool(crate::registry::read_dword(reg_key).unwrap_or(if let serde_json::Value::Bool(b) = default_val { *b as u32 } else { 0 }) == 1)
+                            serde_json::Value::Bool(
+                                crate::registry::read_dword(reg_key).unwrap_or(
+                                    if let serde_json::Value::Bool(b) = default_val {
+                                        *b as u32
+                                    } else {
+                                        0
+                                    },
+                                ) == 1,
+                            )
                         } else {
-                            serde_json::Value::Number(crate::registry::read_dword(reg_key).unwrap_or(if let serde_json::Value::Number(n) = default_val { n.as_u64().unwrap_or(0) as u32 } else { 0 }).into())
+                            serde_json::Value::Number(
+                                crate::registry::read_dword(reg_key)
+                                    .unwrap_or(if let serde_json::Value::Number(n) = default_val {
+                                        n.as_u64().unwrap_or(0) as u32
+                                    } else {
+                                        0
+                                    })
+                                    .into(),
+                            )
                         }
                     }
                 };
@@ -1299,7 +1391,11 @@ async fn dispatch_cmd(
                 ("static_code", "StaticCode", ""),
                 ("encoder", "Encoder", "software"),
                 ("indicator_mode", "IndicatorMode", "always_show"),
-                ("signaling_server", "SignalingServer", "ws://127.0.0.1:45188"),
+                (
+                    "signaling_server",
+                    "SignalingServer",
+                    "ws://127.0.0.1:45188",
+                ),
             ];
 
             for (field_name, reg_key, default_str) in str_keys.iter() {
@@ -1310,19 +1406,24 @@ async fn dispatch_cmd(
                 };
                 let mut final_val = match val {
                     Some(v) => v,
-                    None => {
-                        serde_json::Value::String(crate::registry::read_string(reg_key).unwrap_or_else(|| default_str.to_string()))
-                    }
+                    None => serde_json::Value::String(
+                        crate::registry::read_string(reg_key)
+                            .unwrap_or_else(|| default_str.to_string()),
+                    ),
                 };
                 if *reg_key == "SignalingServer" {
                     if let serde_json::Value::String(ref s) = final_val {
                         let is_old_default = if s.contains(":8080") {
-                            if s.contains("127.0.0.1") || s.contains("localhost") || s.contains("::1") {
+                            if s.contains("127.0.0.1")
+                                || s.contains("localhost")
+                                || s.contains("::1")
+                            {
                                 true
                             } else if let Some(host_part) = s.strip_prefix("ws://") {
                                 let host_part = host_part.split('/').next().unwrap_or(host_part);
                                 let host_str = host_part.split(':').next().unwrap_or(host_part);
-                                let cleaned_host = host_str.trim_start_matches('[').trim_end_matches(']');
+                                let cleaned_host =
+                                    host_str.trim_start_matches('[').trim_end_matches(']');
                                 let local_ips = crate::network::broadcast::get_local_ips();
                                 local_ips.iter().any(|ip| ip == cleaned_host)
                             } else {
@@ -1349,13 +1450,15 @@ async fn dispatch_cmd(
             };
             let final_use_static = match use_static_val {
                 Some(v) => v,
-                None => {
-                    serde_json::Value::Bool(crate::registry::read_dword("UseStaticCode").unwrap_or(0) == 1)
-                }
+                None => serde_json::Value::Bool(
+                    crate::registry::read_dword("UseStaticCode").unwrap_or(0) == 1,
+                ),
             };
             settings_map.insert("use_static_code".to_string(), final_use_static);
 
-            ServiceEvent::SettingsLoaded { settings: serde_json::Value::Object(settings_map) }
+            ServiceEvent::SettingsLoaded {
+                settings: serde_json::Value::Object(settings_map),
+            }
         }
 
         UiCommand::ReadRecentLogs { log_type, limit } => {
@@ -1719,7 +1822,9 @@ async fn dispatch_cmd(
         UiCommand::SendShellInput { text } => {
             let cs = state.client_session.lock().await;
             if let Some(ref handle) = *cs {
-                if let Err(e) = handle.send_input(crate::network::ControlMessage::ShellInput { text }) {
+                if let Err(e) =
+                    handle.send_input(crate::network::ControlMessage::ShellInput { text })
+                {
                     error!(error = %e, "Failed to send ShellInput request to host");
                     return ServiceEvent::Error {
                         message: e.to_string(),
@@ -1878,9 +1983,7 @@ fn client_event_to_service(ev: client_session::ClientEvent) -> ServiceEvent {
         client_session::ClientEvent::FileActionFinished { success, error } => {
             ServiceEvent::FileActionFinished { success, error }
         }
-        client_session::ClientEvent::ShellOutput { text } => {
-            ServiceEvent::ShellOutput { text }
-        }
+        client_session::ClientEvent::ShellOutput { text } => ServiceEvent::ShellOutput { text },
     }
 }
 
@@ -2014,7 +2117,10 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
         for line in text.lines() {
             let trimmed = line.trim();
             // Match standard or localized IPv4/IP Address lines
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
+            if (trimmed.contains("IPv4")
+                || trimmed.contains("IP Address")
+                || trimmed.contains("Adresse IPv4")
+                || trimmed.contains("Dirección IPv4"))
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
@@ -2082,11 +2188,17 @@ pub async fn run_web_server(
 ) -> Result<()> {
     let listener = match crate::network::create_dual_stack_listener(port) {
         Ok(l) => {
-            info!("Web / WebSocket server listening on dual-stack port {}", port);
+            info!(
+                "Web / WebSocket server listening on dual-stack port {}",
+                port
+            );
             l
         }
         Err(e) => {
-            warn!("Web server failed to bind to dual-stack port {}: {}", port, e);
+            warn!(
+                "Web server failed to bind to dual-stack port {}: {}",
+                port, e
+            );
             return Err(e.into());
         }
     };

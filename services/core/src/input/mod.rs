@@ -392,7 +392,7 @@ pub fn inject_key_release(vk: u16, scan: u16, is_extended: bool) -> Result<()> {
 #[cfg(windows)]
 pub fn release_all_modifiers() -> Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VK_LCONTROL, VK_RCONTROL, VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN,
+        VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
     };
     let modifiers = [
         VK_LCONTROL,

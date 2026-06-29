@@ -158,7 +158,9 @@ impl UdpStreamer {
         for client in &clients {
             let mut wire = probe.to_vec();
             if let Some(ref cipher) = client.cipher {
-                let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let count = self
+                    .send_seq_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut nonce = [0u8; 12];
                 nonce[0..8].copy_from_slice(&count.to_be_bytes());
                 if cipher.encrypt_packet(nonce, &mut wire).is_ok() {
@@ -255,7 +257,6 @@ impl UdpStreamer {
         }
     }
 
-
     // ── Encoded packet → RTP + FEC ────────────────────────────────────────
 
     async fn send_packet(&mut self, packet: EncodedPacket) {
@@ -308,7 +309,9 @@ impl UdpStreamer {
             for wire in &wire_frames {
                 let mut wire_send = wire.clone();
                 if let Some(ref cipher) = client.cipher {
-                    let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let count = self
+                        .send_seq_counter
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let mut nonce = [0u8; 12];
                     nonce[0..8].copy_from_slice(&count.to_be_bytes());
                     if cipher.encrypt_packet(nonce, &mut wire_send).is_ok() {
@@ -339,7 +342,9 @@ impl UdpStreamer {
             // FEC parity
             let mut parity_send = parity_wire.clone();
             if let Some(ref cipher) = client.cipher {
-                let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let count = self
+                    .send_seq_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut nonce = [0u8; 12];
                 nonce[0..8].copy_from_slice(&count.to_be_bytes());
                 if cipher.encrypt_packet(nonce, &mut parity_send).is_ok() {

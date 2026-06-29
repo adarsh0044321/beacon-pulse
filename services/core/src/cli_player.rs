@@ -87,7 +87,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
 
     // Initialize tracing/logger for console mode
-    let is_headless = args.iter().any(|arg| arg == "--bg-service" || arg == "--startup" || arg == "headless");
+    let is_headless = args
+        .iter()
+        .any(|arg| arg == "--bg-service" || arg == "--startup" || arg == "headless");
     if !is_headless {
         let _ = tracing_subscriber::fmt()
             .with_env_filter("beacon_pulse=info")

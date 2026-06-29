@@ -176,7 +176,9 @@ mod run {
                 fn GetLastError() -> u32;
                 fn SetLastError(code: u32);
             }
-            unsafe { SetLastError(0); }
+            unsafe {
+                SetLastError(0);
+            }
             let name: Vec<u16> = "Local\\Pulse\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
@@ -220,7 +222,10 @@ mod run {
                 info!("Ctrl+C received — initiating shutdown");
                 let _ = tx.send(());
             }) {
-                tracing::warn!("Could not set Ctrl+C handler (expected if running without console): {}", e);
+                tracing::warn!(
+                    "Could not set Ctrl+C handler (expected if running without console): {}",
+                    e
+                );
             }
             rt.block_on(async_main(shutdown_tx))?;
         }

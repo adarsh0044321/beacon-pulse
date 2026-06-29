@@ -149,7 +149,9 @@ impl UdpReceiver {
         ))
     }
 
-    pub fn new_from_socket(socket: std::net::UdpSocket) -> Result<(Self, mpsc::UnboundedReceiver<ReceivedFrame>)> {
+    pub fn new_from_socket(
+        socket: std::net::UdpSocket,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<ReceivedFrame>)> {
         socket.set_read_timeout(Some(Duration::from_millis(500)))?;
 
         let (frame_tx, frame_rx) = mpsc::unbounded_channel();
@@ -189,7 +191,10 @@ impl UdpReceiver {
             // Simultaneous NAT hole punching burst on startup
             if !punched {
                 if let Some(ref candidates) = self.host_candidates {
-                    info!("Sending initial NAT hole punch burst to {} host candidates", candidates.len());
+                    info!(
+                        "Sending initial NAT hole punch burst to {} host candidates",
+                        candidates.len()
+                    );
                     for _ in 0..5 {
                         for addr in candidates {
                             let _ = self.socket.send_to(&[0x00], *addr);
@@ -204,7 +209,10 @@ impl UdpReceiver {
             // NAT Keep-Alive: send single-byte 0x00 packet every 15 seconds
             if last_keepalive.elapsed() >= Duration::from_secs(15) {
                 if let Some(ref candidates) = self.host_candidates {
-                    debug!("Sending NAT keep-alive packet to {} host candidates", candidates.len());
+                    debug!(
+                        "Sending NAT keep-alive packet to {} host candidates",
+                        candidates.len()
+                    );
                     for addr in candidates {
                         let _ = self.socket.send_to(&[0x00], *addr);
                     }
@@ -271,7 +279,9 @@ impl UdpReceiver {
 
                 // Encrypt RTCP ACK response
                 if let Some(ref cipher) = self.cipher {
-                    let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let count = self
+                        .send_seq_counter
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let mut nonce = [0u8; 12];
                     nonce[0..8].copy_from_slice(&count.to_be_bytes());
                     if cipher.encrypt_packet(nonce, &mut wire).is_ok() {

@@ -259,7 +259,10 @@ fn get_broadcast_addresses() -> Vec<String> {
         for line in text.lines() {
             let trimmed = line.trim();
             // Match standard or localized IPv4/IP Address lines
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
+            if (trimmed.contains("IPv4")
+                || trimmed.contains("IP Address")
+                || trimmed.contains("Adresse IPv4")
+                || trimmed.contains("Dirección IPv4"))
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
@@ -289,7 +292,8 @@ fn get_broadcast_addresses() -> Vec<String> {
                         if let IpAddr::V4(ip) = local_addr.ip() {
                             let octets = ip.octets();
                             if octets[0] != 127 && !(octets[0] == 169 && octets[1] == 254) {
-                                let bcast = format!("{}.{}.{}.255", octets[0], octets[1], octets[2]);
+                                let bcast =
+                                    format!("{}.{}.{}.255", octets[0], octets[1], octets[2]);
                                 if !addrs.contains(&bcast) {
                                     addrs.push(bcast);
                                 }
@@ -363,7 +367,10 @@ pub fn get_local_ips() -> Vec<String> {
         for line in text.lines() {
             let trimmed = line.trim();
             // Match standard or localized IPv4/IP Address lines
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
+            if (trimmed.contains("IPv4")
+                || trimmed.contains("IP Address")
+                || trimmed.contains("Adresse IPv4")
+                || trimmed.contains("Dirección IPv4"))
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {

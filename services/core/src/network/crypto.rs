@@ -31,18 +31,17 @@ impl EphemeralKey {
         let peer_public_key_bytes = B64
             .decode(peer_public_key_b64)
             .map_err(|e| anyhow!("Invalid base64 in peer public key: {}", e))?;
-        let peer_public_key = agreement::UnparsedPublicKey::new(&agreement::X25519, peer_public_key_bytes);
+        let peer_public_key =
+            agreement::UnparsedPublicKey::new(&agreement::X25519, peer_public_key_bytes);
 
-        let derived_key = agreement::agree_ephemeral(
-            self.private_key,
-            &peer_public_key,
-            |key_material| {
+        let derived_key =
+            agreement::agree_ephemeral(self.private_key, &peer_public_key, |key_material| {
                 let hash = digest::digest(&digest::SHA256, key_material);
                 let mut key = [0u8; 32];
                 key.copy_from_slice(hash.as_ref());
                 key
-            },
-        ).map_err(|_| anyhow!("Key agreement failed"))?;
+            })
+            .map_err(|_| anyhow!("Key agreement failed"))?;
 
         Ok(derived_key)
     }
@@ -66,7 +65,13 @@ impl SessionCipher {
         Ok(Self { key })
     }
 
-    pub fn encrypt(&self, seq: u16, timestamp_us: u64, is_rtcp: bool, payload: &mut Vec<u8>) -> Result<()> {
+    pub fn encrypt(
+        &self,
+        seq: u16,
+        timestamp_us: u64,
+        is_rtcp: bool,
+        payload: &mut Vec<u8>,
+    ) -> Result<()> {
         let nonce_bytes = make_nonce(seq, timestamp_us, is_rtcp);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
         self.key
@@ -75,7 +80,13 @@ impl SessionCipher {
         Ok(())
     }
 
-    pub fn decrypt(&self, seq: u16, timestamp_us: u64, is_rtcp: bool, ciphertext: &mut Vec<u8>) -> Result<()> {
+    pub fn decrypt(
+        &self,
+        seq: u16,
+        timestamp_us: u64,
+        is_rtcp: bool,
+        ciphertext: &mut Vec<u8>,
+    ) -> Result<()> {
         let nonce_bytes = make_nonce(seq, timestamp_us, is_rtcp);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
         let plaintext_len = {

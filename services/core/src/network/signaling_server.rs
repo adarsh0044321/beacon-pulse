@@ -1,11 +1,11 @@
+use dashmap::DashMap;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_tungstenite::accept_async;
-use futures_util::{StreamExt, SinkExt};
-use serde_json::{json, Value};
-use dashmap::DashMap;
-use tracing::{info, warn};
 use tokio::sync::mpsc;
+use tokio_tungstenite::accept_async;
+use tracing::{info, warn};
 
 type Tx = mpsc::UnboundedSender<tokio_tungstenite::tungstenite::Message>;
 
@@ -86,7 +86,7 @@ async fn handle_connection(
             let text = msg.to_text()?;
             if let Ok(data) = serde_json::from_str::<Value>(text) {
                 let msg_type = data.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                
+
                 match msg_type {
                     "register_host" => {
                         if let Some(code) = data.get("pairing_code").and_then(|v| v.as_str()) {
@@ -102,14 +102,16 @@ async fn handle_connection(
                             sessions.insert(code.to_string(), session);
                             current_code = Some(code.to_string());
                             current_role = Some("host".to_string());
-                            
+
                             let _ = tx.send(tokio_tungstenite::tungstenite::Message::Text(
                                 json!({
                                     "type": "registration_success",
                                     "role": "host",
                                     "session_token": token
-                                }).to_string().into()
-                             ));
+                                })
+                                .to_string()
+                                .into(),
+                            ));
                             info!("Host registered pairing code {} from {}", code, peer_addr);
                         }
                     }
@@ -121,7 +123,9 @@ async fn handle_connection(
                                         json!({
                                             "type": "registration_failed",
                                             "reason": "Host session full or already used"
-                                        }).to_string().into()
+                                        })
+                                        .to_string()
+                                        .into(),
                                     ));
                                 } else {
                                     session.player_tx = Some(tx.clone());
@@ -131,16 +135,23 @@ async fn handle_connection(
                                         json!({
                                             "type": "registration_success",
                                             "role": "player"
-                                        }).to_string().into()
+                                        })
+                                        .to_string()
+                                        .into(),
                                     ));
-                                    info!("Player registered pairing code {} from {}", code, peer_addr);
+                                    info!(
+                                        "Player registered pairing code {} from {}",
+                                        code, peer_addr
+                                    );
                                 }
                             } else {
                                 let _ = tx.send(tokio_tungstenite::tungstenite::Message::Text(
                                     json!({
                                         "type": "registration_failed",
                                         "reason": "Pairing code not found"
-                                    }).to_string().into()
+                                    })
+                                    .to_string()
+                                    .into(),
                                 ));
                             }
                         }
@@ -149,14 +160,18 @@ async fn handle_connection(
                         if let Some(ref code) = current_code {
                             if let Some(session) = sessions.get(code) {
                                 if let Some(ref host_tx) = session.host_tx {
-                                    let _ = host_tx.send(tokio_tungstenite::tungstenite::Message::Text(
-                                        json!({
-                                            "type": "offer",
-                                            "session_token": session.token,
-                                            "sdp": data.get("sdp"),
-                                            "candidates": data.get("candidates")
-                                        }).to_string().into()
-                                    ));
+                                    let _ = host_tx.send(
+                                        tokio_tungstenite::tungstenite::Message::Text(
+                                            json!({
+                                                "type": "offer",
+                                                "session_token": session.token,
+                                                "sdp": data.get("sdp"),
+                                                "candidates": data.get("candidates")
+                                            })
+                                            .to_string()
+                                            .into(),
+                                        ),
+                                    );
                                 }
                             }
                         }
@@ -173,13 +188,17 @@ async fn handle_connection(
                             if let Some(code) = code_found {
                                 if let Some(mut session) = sessions.get_mut(&code) {
                                     if let Some(ref player_tx) = session.player_tx {
-                                        let _ = player_tx.send(tokio_tungstenite::tungstenite::Message::Text(
-                                            json!({
-                                                "type": "answer",
-                                                "sdp": data.get("sdp"),
-                                                "candidates": data.get("candidates")
-                                            }).to_string().into()
-                                        ));
+                                        let _ = player_tx.send(
+                                            tokio_tungstenite::tungstenite::Message::Text(
+                                                json!({
+                                                    "type": "answer",
+                                                    "sdp": data.get("sdp"),
+                                                    "candidates": data.get("candidates")
+                                                })
+                                                .to_string()
+                                                .into(),
+                                            ),
+                                        );
                                         session.host_proxy_tx = Some(tx.clone());
                                         session.used = true;
                                         current_code = Some(code.clone());
@@ -202,7 +221,9 @@ async fn handle_connection(
                                     session.player_tx.as_ref()
                                 };
                                 if let Some(target) = target_tx {
-                                    let _ = target.send(tokio_tungstenite::tungstenite::Message::Text(text.into()));
+                                    let _ = target.send(
+                                        tokio_tungstenite::tungstenite::Message::Text(text.into()),
+                                    );
                                 }
                             }
                         }
@@ -219,7 +240,9 @@ async fn handle_connection(
                             session.player_tx.as_ref()
                         };
                         if let Some(target) = target_tx {
-                            let _ = target.send(tokio_tungstenite::tungstenite::Message::Text(text.to_string().into()));
+                            let _ = target.send(tokio_tungstenite::tungstenite::Message::Text(
+                                text.to_string().into(),
+                            ));
                         }
                     }
                 }
@@ -234,7 +257,9 @@ async fn handle_connection(
                         session.player_tx.as_ref()
                     };
                     if let Some(target) = target_tx {
-                        let _ = target.send(tokio_tungstenite::tungstenite::Message::Binary(msg.into_data().into()));
+                        let _ = target.send(tokio_tungstenite::tungstenite::Message::Binary(
+                            msg.into_data().into(),
+                        ));
                     }
                 }
             }
@@ -244,7 +269,10 @@ async fn handle_connection(
     // Cleanup session on disconnect
     if let Some(ref code) = current_code {
         if let Some(role) = current_role {
-            info!("Signaling connection closed for role {} under code {}", role, code);
+            info!(
+                "Signaling connection closed for role {} under code {}",
+                role, code
+            );
             if role == "host" {
                 sessions.remove(code);
                 info!("Evicted active pairing code session {}", code);
@@ -253,7 +281,7 @@ async fn handle_connection(
                     session.player_tx = None;
                     if let Some(ref host_tx) = session.host_tx {
                         let _ = host_tx.send(tokio_tungstenite::tungstenite::Message::Text(
-                            json!({ "type": "peer_disconnected" }).to_string().into()
+                            json!({ "type": "peer_disconnected" }).to_string().into(),
                         ));
                     }
                 }

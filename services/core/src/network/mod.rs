@@ -1,4 +1,5 @@
 pub mod broadcast;
+pub mod crypto;
 pub mod discovery;
 #[cfg(feature = "host")]
 pub mod listener;
@@ -12,7 +13,6 @@ pub mod signaling_server;
 pub mod streamer;
 #[cfg(feature = "host")]
 pub mod udp_stream;
-pub mod crypto;
 pub mod webrtc;
 
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,6 @@ pub struct Candidate {
     pub addr: SocketAddr,
     pub priority: u32,
 }
-
 
 pub const DEFAULT_PORT: u16 = 45100;
 pub const CONTROL_PORT: u16 = 45101;
@@ -239,11 +238,11 @@ pub enum InputMsg {
 }
 
 pub fn create_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
-    use socket2::{Socket, Domain, Type, Protocol};
+    use socket2::{Domain, Protocol, Socket, Type};
     use std::net::SocketAddr;
 
     let ipv6_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], port)); // [::]:port
-    
+
     // Try binding to IPv6 dual-stack
     if let Ok(socket) = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP)) {
         if socket.set_only_v6(false).is_ok() {
@@ -252,7 +251,9 @@ pub fn create_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpL
                     if socket.listen(128).is_ok() {
                         let std_listener: std::net::TcpListener = socket.into();
                         if std_listener.set_nonblocking(true).is_ok() {
-                            if let Ok(tokio_listener) = tokio::net::TcpListener::from_std(std_listener) {
+                            if let Ok(tokio_listener) =
+                                tokio::net::TcpListener::from_std(std_listener)
+                            {
                                 return Ok(tokio_listener);
                             }
                         }
@@ -261,7 +262,7 @@ pub fn create_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpL
             }
         }
     }
-    
+
     // Fallback to standard IPv4 binding
     let ipv4_addr = SocketAddr::from(([0, 0, 0, 0], port)); // 0.0.0.0:port
     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
@@ -274,11 +275,11 @@ pub fn create_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpL
 }
 
 pub fn create_dual_stack_udp_socket(port: u16) -> std::io::Result<std::net::UdpSocket> {
-    use socket2::{Socket, Domain, Type, Protocol};
+    use socket2::{Domain, Protocol, Socket, Type};
     use std::net::SocketAddr;
 
     let ipv6_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], port)); // [::]:port
-    
+
     // Try binding to IPv6 dual-stack
     if let Ok(socket) = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)) {
         if socket.set_only_v6(false).is_ok() {
@@ -292,7 +293,7 @@ pub fn create_dual_stack_udp_socket(port: u16) -> std::io::Result<std::net::UdpS
             }
         }
     }
-    
+
     // Fallback to standard IPv4 binding
     let ipv4_addr = SocketAddr::from(([0, 0, 0, 0], port)); // 0.0.0.0:port
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
@@ -303,5 +304,3 @@ pub fn create_dual_stack_udp_socket(port: u16) -> std::io::Result<std::net::UdpS
     let std_sock: std::net::UdpSocket = socket.into();
     Ok(std_sock)
 }
-
-

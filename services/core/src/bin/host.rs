@@ -167,7 +167,8 @@ mod run {
             Err(e) => {
                 error!(
                     "Network listener FAILED to bind to port {} — port may be in use: {}",
-                    network::CONTROL_PORT, e
+                    network::CONTROL_PORT,
+                    e
                 );
                 std::process::exit(5); // Exit with code 5 so watchdog knows it failed
             }
@@ -264,7 +265,9 @@ mod run {
                 fn GetLastError() -> u32;
                 fn SetLastError(code: u32);
             }
-            unsafe { SetLastError(0); }
+            unsafe {
+                SetLastError(0);
+            }
             let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
@@ -308,7 +311,10 @@ mod run {
                 info!("Ctrl+C received — initiating shutdown");
                 let _ = tx.send(());
             }) {
-                warn!("Could not set Ctrl+C handler (expected if running without console): {}", e);
+                warn!(
+                    "Could not set Ctrl+C handler (expected if running without console): {}",
+                    e
+                );
             }
             rt.block_on(async_main(shutdown_tx))?;
         }

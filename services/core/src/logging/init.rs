@@ -105,7 +105,8 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
     // In release mode, console_layer is omitted to avoid 'Invalid handle' crashes on headless console streams.
     #[cfg(debug_assertions)]
     {
-        let console_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
+        let console_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
         let console_layer = fmt::layer()
             .pretty()
             .with_span_events(FmtSpan::CLOSE)

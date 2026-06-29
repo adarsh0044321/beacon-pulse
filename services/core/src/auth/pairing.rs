@@ -220,7 +220,9 @@ impl PairingManager {
         if self.is_custom {
             Some(3600)
         } else if let Some(issued_at) = self.issued_at {
-            let elapsed = Instant::now().saturating_duration_since(issued_at).as_secs();
+            let elapsed = Instant::now()
+                .saturating_duration_since(issued_at)
+                .as_secs();
             if elapsed < CODE_EXPIRY_SECS {
                 Some((CODE_EXPIRY_SECS - elapsed) as u32)
             } else {

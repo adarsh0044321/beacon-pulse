@@ -371,13 +371,21 @@ pub async fn start(
                 .ok_or_else(|| anyhow!("Host closed after HMAC"))?;
             let msg2: ControlMessage = serde_json::from_str(&line2)?;
             match msg2 {
-                ControlMessage::JoinAccepted { candidates, public_key, .. } => {
+                ControlMessage::JoinAccepted {
+                    candidates,
+                    public_key,
+                    ..
+                } => {
                     info!("Pairing accepted by host");
                     if receiver.cipher.is_none() {
                         if let Some(ref host_pub_key_b64) = public_key {
                             if let Some(player_key) = player_ephemeral_key.take() {
-                                if let Ok(shared_key) = player_key.agree_and_derive(host_pub_key_b64) {
-                                    if let Ok(cipher) = crate::network::crypto::SessionCipher::new(&shared_key) {
+                                if let Ok(shared_key) =
+                                    player_key.agree_and_derive(host_pub_key_b64)
+                                {
+                                    if let Ok(cipher) =
+                                        crate::network::crypto::SessionCipher::new(&shared_key)
+                                    {
                                         receiver.cipher = Some(std::sync::Arc::new(cipher));
                                         info!("E2E Encryption derived successfully for LAN connection");
                                     }
@@ -396,14 +404,20 @@ pub async fn start(
                 _ => return Err(anyhow!("Unexpected message after HMAC")),
             }
         }
-        ControlMessage::JoinAccepted { candidates, public_key, .. } => {
+        ControlMessage::JoinAccepted {
+            candidates,
+            public_key,
+            ..
+        } => {
             // Host auto-accepted (no active pairing code)
             info!("Host auto-accepted (no pairing required)");
             if receiver.cipher.is_none() {
                 if let Some(ref host_pub_key_b64) = public_key {
                     if let Some(player_key) = player_ephemeral_key.take() {
                         if let Ok(shared_key) = player_key.agree_and_derive(host_pub_key_b64) {
-                            if let Ok(cipher) = crate::network::crypto::SessionCipher::new(&shared_key) {
+                            if let Ok(cipher) =
+                                crate::network::crypto::SessionCipher::new(&shared_key)
+                            {
                                 receiver.cipher = Some(std::sync::Arc::new(cipher));
                                 info!("E2E Encryption derived successfully for LAN connection");
                             }

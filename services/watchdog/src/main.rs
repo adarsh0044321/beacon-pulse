@@ -210,7 +210,9 @@ fn main() {
             fn GetLastError() -> u32;
             fn SetLastError(code: u32);
         }
-        unsafe { SetLastError(0); }
+        unsafe {
+            SetLastError(0);
+        }
         let mutex_name = format!("Local\\Watchdog_{}\0", target_bin.replace(".exe", ""));
         let name: Vec<u16> = mutex_name.encode_utf16().collect();
         let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
