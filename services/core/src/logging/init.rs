@@ -101,27 +101,34 @@ pub fn init(session_id: &str) -> Result<LogGuard> {
         .with_writer(metrics_writer)
         .with_filter(EnvFilter::new("beacon_pulse::telemetry=trace"));
 
-    // Console layer — always the same concrete type to keep the subscriber
-    // stack shape identical in debug and release.  In release builds the
-    // EnvFilter is set to "off" which suppresses all output at zero cost.
-    let console_filter = if cfg!(debug_assertions) {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
-    } else {
-        EnvFilter::new("off")
-    };
-    let console_layer = fmt::layer()
-        .pretty()
-        .with_span_events(FmtSpan::CLOSE)
-        .with_filter(console_filter);
-
     // Wire all layers into the global subscriber
-    tracing_subscriber::registry()
-        .with(service_layer)
-        .with(capture_layer)
-        .with(network_layer)
-        .with(metrics_layer)
-        .with(console_layer)
-        .init();
+    // In release mode, console_layer is omitted to avoid 'Invalid handle' crashes on headless console streams.
+    #[cfg(debug_assertions)]
+    {
+        let console_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
+        let console_layer = fmt::layer()
+            .pretty()
+            .with_span_events(FmtSpan::CLOSE)
+            .with_filter(console_filter);
+
+        tracing_subscriber::registry()
+            .with(service_layer)
+            .with(capture_layer)
+            .with(network_layer)
+            .with(metrics_layer)
+            .with(console_layer)
+            .init();
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        tracing_subscriber::registry()
+            .with(service_layer)
+            .with(capture_layer)
+            .with(network_layer)
+            .with(metrics_layer)
+            .init();
+    }
 
     tracing::info!(
         session_id = %session_id,

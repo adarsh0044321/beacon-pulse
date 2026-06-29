@@ -52,6 +52,24 @@ fn start_watchdog(app: &tauri::App, is_player: bool) {
 
         let target_bin = if is_player { "pulse.exe" } else { "beacon.exe" };
 
+        if !is_player {
+            // Delete stale session keys so the watchdog never auto-starts a previous share.
+            // Using delete_value is safer than writing empty strings — it guarantees no
+            // stale data survives even if the watchdog's empty-string filter logic changes.
+            for key in &[
+                "LastWindowProcess",
+                "LastWindowTitle",
+                "LastTargetType",
+                "LastTargetDisplay",
+                "LastSharingTarget",
+                "LastSharingMode",
+                "LastSharingDisplay",
+                "PairingCode",
+            ] {
+                lanshare_service::registry::delete_value(key);
+            }
+        }
+
         // 1. Terminate any orphan background watchdog or service processes from a previous run.
         // This releases socket ports (45100, 45101, 45102, 45199) and named pipe handles.
         // We use status() to wait for taskkill to finish cleanly.
@@ -404,7 +422,7 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
     #[cfg(windows)]
     {
         if let Some(bitrate) = settings.get("bitrate_kbps").and_then(Value::as_u64) {
-            lanshare_service::registry::write_dword("Quality", (bitrate / 1000) as u32);
+            lanshare_service::registry::write_dword("Quality", bitrate as u32);
         }
         if let Some(fps) = settings.get("fps").and_then(Value::as_u64) {
             lanshare_service::registry::write_dword("Fps", fps as u32);
@@ -437,11 +455,14 @@ async fn save_settings(settings: Value, _state: State<'_, AppData>) -> Result<()
             .get("use_static_code")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if use_static {
-            if let Some(code) = settings.get("static_code").and_then(Value::as_str) {
+        lanshare_service::registry::write_dword("UseStaticCode", if use_static { 1 } else { 0 });
+        if let Some(code) = settings.get("static_code").and_then(Value::as_str) {
+            lanshare_service::registry::write_string("StaticCode", code);
+            if use_static {
                 lanshare_service::registry::write_string("PairingCode", code);
             }
-        } else {
+        }
+        if !use_static {
             lanshare_service::registry::delete_value("PairingCode");
         }
         if let Some(start_with_windows) =

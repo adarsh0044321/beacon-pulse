@@ -87,10 +87,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
 
     // Initialize tracing/logger for console mode
-    tracing_subscriber::fmt()
-        .with_env_filter("beacon_pulse=info")
-        .with_writer(std::io::stdout)
-        .init();
+    let is_headless = args.iter().any(|arg| arg == "--bg-service" || arg == "--startup" || arg == "headless");
+    if !is_headless {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("beacon_pulse=info")
+            .with_writer(std::io::stdout)
+            .try_init();
+    }
 
     // Start async runtime
     let rt = tokio::runtime::Runtime::new()?;
@@ -194,7 +197,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
         // Connect using default client receive port 45102 or custom port if specified
         let recv_port = player_args.recv_port.unwrap_or(45102);
         let tls_enabled = crate::registry::read_dword("TlsEnabled").unwrap_or(0) == 1;
-        let session_handle = client_session::start(recv_port, host_addr, pairing_code, tls_enabled, event_tx).await?;
+        let session_handle = client_session::start(recv_port, host_addr, pairing_code, tls_enabled, event_tx, None, None, None).await?;
 
         // Store input channel in Window State
         win_state.lock().input_tx = Some(session_handle.input_tx.clone());

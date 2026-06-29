@@ -17,7 +17,7 @@ export type Page = 'home' | 'host' | 'client' | 'settings';
 // ─────────────────────────────────────────────────────────────────────────────
 
 function useGlobalIpcEvents() {
-  const { setEncoderInfo, updateStats, setShareActive, addConnectedClient, removeConnectedClient } = useSessionStore();
+  const { setEncoderInfo, updateStats, setShareActive, addConnectedClient, removeConnectedClient, setPairingCode } = useSessionStore();
   const { addToast } = useToastStore();
 
   useEffect(() => {
@@ -84,6 +84,11 @@ function useGlobalIpcEvents() {
       }
     });
 
+    // pairing_code — service notifies when a new pairing code is generated
+    const unlistenPairingCode = listen<{ code: string; expires_in: number }>('pairing_code', (event) => {
+      setPairingCode(event.payload.code, event.payload.expires_in);
+    });
+
     return () => {
       unlistenEncoder.then(f => f());
       unlistenStats.then(f => f());
@@ -91,8 +96,9 @@ function useGlobalIpcEvents() {
       unlistenStopped.then(f => f());
       unlistenClientConnected.then(f => f());
       unlistenClientDisconnected.then(f => f());
+      unlistenPairingCode.then(f => f());
     };
-  }, [setEncoderInfo, updateStats, setShareActive, addConnectedClient, removeConnectedClient, addToast]);
+  }, [setEncoderInfo, updateStats, setShareActive, addConnectedClient, removeConnectedClient, setPairingCode, addToast]);
 }
 
 export const App: React.FC = () => {

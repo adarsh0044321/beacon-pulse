@@ -89,6 +89,8 @@ pub struct AppState {
     /// Active sharing target
     #[cfg(feature = "host")]
     pub active_target: Arc<Mutex<Option<CaptureTarget>>>,
+    /// Active connection mode ("lan", "wan", "both")
+    pub connection_mode: Arc<Mutex<Option<String>>>,
     /// Active client receive session (None when not watching)
     #[cfg(feature = "player")]
     pub client_session: Arc<Mutex<Option<ClientSessionHandle>>>,

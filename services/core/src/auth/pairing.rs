@@ -148,4 +148,86 @@ impl PairingManager {
             false
         }
     }
+
+    /// Generate a stateless cryptographic challenge without mutating active_challenge.
+    pub fn generate_challenge_stateless(&self) -> Option<String> {
+        if !self.has_valid_code() {
+            warn!("generate_challenge_stateless called with no active pairing code");
+            return None;
+        }
+        let mut challenge = [0u8; CHALLENGE_LEN];
+        rand::thread_rng().fill(&mut challenge);
+        Some(B64.encode(challenge))
+    }
+
+    /// Verify an HMAC-SHA256 response against a stateless challenge.
+    pub fn verify_hmac_with_challenge(&self, challenge_b64: &str, response_b64: &str) -> bool {
+        let (code, issued_at) = match (&self.current_code, self.issued_at) {
+            (Some(c), Some(i)) => (c.clone(), i),
+            _ => {
+                warn!("verify_hmac_with_challenge: no active pairing session");
+                return false;
+            }
+        };
+
+        // Check expiry
+        if !self.is_custom
+            && Instant::now().saturating_duration_since(issued_at)
+                > Duration::from_secs(CODE_EXPIRY_SECS)
+        {
+            warn!("Pairing: HMAC challenge expired");
+            return false;
+        }
+
+        let challenge = match B64.decode(challenge_b64) {
+            Ok(c) => c,
+            Err(_) => {
+                warn!("Pairing: invalid base64 in challenge");
+                return false;
+            }
+        };
+
+        let response = match B64.decode(response_b64) {
+            Ok(r) => r,
+            Err(_) => {
+                warn!("Pairing: invalid base64 in HMAC response");
+                return false;
+            }
+        };
+
+        let key = hmac::Key::new(hmac::HMAC_SHA256, code.as_bytes());
+        match hmac::verify(&key, &challenge, &response) {
+            Ok(()) => {
+                info!("Pairing: HMAC verification succeeded");
+                true
+            }
+            Err(_) => {
+                warn!("Pairing: HMAC mismatch — rejecting client");
+                false
+            }
+        }
+    }
+
+    pub fn current_code(&self) -> Option<String> {
+        if self.has_valid_code() {
+            self.current_code.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn expires_in_secs(&self) -> Option<u32> {
+        if self.is_custom {
+            Some(3600)
+        } else if let Some(issued_at) = self.issued_at {
+            let elapsed = Instant::now().saturating_duration_since(issued_at).as_secs();
+            if elapsed < CODE_EXPIRY_SECS {
+                Some((CODE_EXPIRY_SECS - elapsed) as u32)
+            } else {
+                Some(0)
+            }
+        } else {
+            None
+        }
+    }
 }

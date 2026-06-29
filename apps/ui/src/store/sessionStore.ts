@@ -78,6 +78,7 @@ interface SessionState {
   isSharing: boolean;
   activeHwnd: number | null;
   activeTarget: any | null;
+  activeConnectionMode: string | null;
   pairingCode: string | null;
   pairingExpiresIn: number;
   connectedClients: ConnectedClient[];
@@ -106,7 +107,7 @@ interface SessionState {
   killHostProcess: (pid: number) => Promise<void>;
   setHostProcesses: (processes: ProcessInfo[]) => void;
   fetchMonitors: () => Promise<void>;
-  startShare: (target: any) => Promise<void>;
+  startShare: (target: any, connectionMode: string) => Promise<void>;
   stopShare: () => Promise<void>;
   fetchActiveShare: () => Promise<void>;
   generatePairingCode: () => Promise<void>;
@@ -119,6 +120,7 @@ interface SessionState {
   setShareActive: (active: boolean, target?: any) => void;
   addConnectedClient: (client: ConnectedClient) => void;
   removeConnectedClient: (clientId: string) => void;
+  setPairingCode: (code: string | null, expires_in?: number) => void;
   /// Phase 3
   encoderInfo: EncoderInfo | null;
   setEncoderInfo: (info: EncoderInfo) => void;
@@ -129,6 +131,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   isSharing: false,
   activeHwnd: null,
   activeTarget: null,
+  activeConnectionMode: null,
   pairingCode: null,
   pairingExpiresIn: 120,
   connectedClients: [],
@@ -177,16 +180,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  startShare: async (target: any) => {
+  startShare: async (target: any, connectionMode: string) => {
     try {
-      await invoke('start_share', { target });
+      await invoke('start_share', { target, connection_mode: connectionMode });
       let activeHwnd = null;
       if (target && target.kind === 'window') {
         activeHwnd = target.data;
       } else if (target && target.kind === 'display') {
         activeHwnd = target.data;
       }
-      set({ isSharing: true, activeTarget: target, activeHwnd });
+      set({ isSharing: true, activeTarget: target, activeHwnd, activeConnectionMode: connectionMode });
     } catch (e) {
       console.error('Failed to start share:', e);
     }
@@ -202,6 +205,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         connectedClients: [],
         pairingCode: null,
         encoderInfo: null,
+        activeConnectionMode: null,
       });
     } catch (e) {
       console.error('Failed to stop share:', e);
@@ -210,17 +214,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   fetchActiveShare: async () => {
     try {
-      const target = await invoke<any>('get_active_share');
-      if (target) {
+      const response = await invoke<any>('get_active_share');
+      if (response && response.target) {
+        const target = response.target;
         let activeHwnd = null;
         if (target.kind === 'window') {
           activeHwnd = target.data;
         } else if (target.kind === 'display') {
           activeHwnd = target.data;
         }
-        set({ isSharing: true, activeTarget: target, activeHwnd });
+        set({
+          isSharing: true,
+          activeTarget: target,
+          activeHwnd,
+          pairingCode: response.pairing_code || null,
+          pairingExpiresIn: response.pairing_expires_in !== undefined ? response.pairing_expires_in : 120,
+          activeConnectionMode: response.connection_mode || null,
+        });
       } else {
-        set({ isSharing: false, activeTarget: null, activeHwnd: null });
+        set({ isSharing: false, activeTarget: null, activeHwnd: null, pairingCode: null, activeConnectionMode: null });
       }
     } catch (e) {
       console.error('Failed to fetch active share:', e);
@@ -326,7 +338,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           activeTarget: target ?? null,
           activeHwnd: target && target.kind === 'window' ? target.data : (typeof target === 'number' ? target : null)
         }
-      : { isSharing: false, activeTarget: null, activeHwnd: null, connectedClients: [] }),
+      : { isSharing: false, activeTarget: null, activeHwnd: null, connectedClients: [], activeConnectionMode: null }),
 
   addConnectedClient: (client: ConnectedClient) => set((state) => {
     if (state.connectedClients.some(c => c.client_id === client.client_id)) {
@@ -338,6 +350,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   removeConnectedClient: (clientId: string) => set((state) => ({
     connectedClients: state.connectedClients.filter(c => c.client_id !== clientId)
   })),
+
+  setPairingCode: (code: string | null, expires_in = 120) => set({ pairingCode: code, pairingExpiresIn: expires_in }),
 
   // Phase 3
   setEncoderInfo: (info: EncoderInfo) => set({ encoderInfo: info }),

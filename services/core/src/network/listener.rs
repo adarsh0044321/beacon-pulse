@@ -19,6 +19,11 @@ pub static CLIPBOARD_CHANNEL: Lazy<tokio::sync::broadcast::Sender<(String, Contr
         let (tx, _) = tokio::sync::broadcast::channel(16);
         tx
     });
+
+pub static SHARE_STOP_CHANNEL: Lazy<tokio::sync::broadcast::Sender<()>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(16);
+    tx
+});
 use crate::AppState;
 
 fn generate_tls_config() -> Result<rustls::ServerConfig> {
@@ -79,7 +84,33 @@ pub async fn run_with_listener(state: Arc<AppState>, listener: TcpListener) -> R
         match listener.accept().await {
             Ok((stream, peer_addr)) => {
                 info!("Incoming connection from {}", peer_addr);
+                let peer_ip = peer_addr.ip();
+                let is_loopback = peer_ip.is_loopback() || match peer_ip {
+                    std::net::IpAddr::V6(v6) => {
+                        if let Some(v4) = v6.to_ipv4_mapped() {
+                            v4.is_loopback()
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                let conn_mode = {
+                    let mode_lock = state.connection_mode.lock().await;
+                    mode_lock.clone()
+                };
+                if let Some(mode) = conn_mode {
+                    if mode == "wan" && !is_loopback {
+                        info!("Rejecting direct external connection from {} in WAN-only mode", peer_addr);
+                        continue;
+                    }
+                }
                 let _ = stream.set_nodelay(true);
+                let sock_ref = socket2::SockRef::from(&stream);
+                let mut keepalive = socket2::TcpKeepalive::new();
+                keepalive = keepalive.with_time(std::time::Duration::from_secs(30));
+                keepalive = keepalive.with_interval(std::time::Duration::from_secs(5));
+                let _ = sock_ref.set_tcp_keepalive(&keepalive);
                 let state = Arc::clone(&state);
                 let tls_acceptor = tls_acceptor.clone();
                 tokio::spawn(async move {
@@ -117,44 +148,8 @@ where
     let mut lines = BufReader::new(reader).lines();
     let peer_ip = peer_addr.ip();
 
-    let session_id_shared = Arc::new(std::sync::Mutex::new(String::new()));
-    let session_id_clone = Arc::clone(&session_id_shared);
-
-    let mut cursor_rx = CURSOR_CHANNEL.subscribe();
-    let mut clipboard_rx = CLIPBOARD_CHANNEL.subscribe();
-    let writer_clone = Arc::clone(&writer_shared);
-    let mut session_cleanup_rx = state.shutdown_tx.subscribe();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Ok(cursor_msg) = cursor_rx.recv() => {
-                    if let Ok(json) = serde_json::to_string(&cursor_msg) {
-                        let mut w = writer_clone.lock().await;
-                        if w.write_all((json + "\n").as_bytes()).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                Ok((sender_id, clipboard_msg)) = clipboard_rx.recv() => {
-                    let my_id = session_id_clone.lock().unwrap().clone();
-                    if !my_id.is_empty() && sender_id != my_id {
-                        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
-                        if clipboard_enabled {
-                            if let Ok(json) = serde_json::to_string(&clipboard_msg) {
-                                let mut w = writer_clone.lock().await;
-                                if w.write_all((json + "\n").as_bytes()).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                _ = session_cleanup_rx.recv() => {
-                    break;
-                }
-            }
-        }
-    });
+    // Spawning of the cursor/clipboard relay loop is deferred until the client
+    // successfully completes the handshake (i.e. inside JoinRequest handling).
 
     // Tracks the authenticated session so we can clean up on disconnect.
     let mut session_id = String::new();
@@ -173,6 +168,8 @@ where
                     crate::input::inject_key_release(*vk, *scan, *is_extended).ok();
                 }
             }
+            // Release all modifier keys unconditionally to prevent sticky keys
+            crate::input::release_all_modifiers().ok();
         }
     }
     let mut cleanup_guard = KeyboardCleanupGuard {
@@ -183,13 +180,35 @@ where
     let mut last_seen_max_bitrate = crate::registry::read_dword("Quality").unwrap_or(4000) * 1000;
     let mut current_bitrate_bps = last_seen_max_bitrate;
     let mut current_target_fps = 60u32;
+    let mut last_keyframe_request = std::time::Instant::now() - std::time::Duration::from_secs(10);
     let mut registered_udp_port = 0u16;
     let mut registered_display_name = "Player".to_string();
+    let mut registered_candidates: Option<Vec<super::Candidate>> = None;
+    let mut registered_peer_public_key: Option<String> = None;
+    let mut session_cipher: Option<Arc<super::crypto::SessionCipher>> = None;
     let mut shell_stdin_tx: Option<tokio::sync::mpsc::Sender<String>> = None;
     let mut shell_kill_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
 
+    let mut share_stop_rx = SHARE_STOP_CHANNEL.subscribe();
     let result = async {
-        while let Some(line) = lines.next_line().await? {
+        loop {
+            let line = tokio::select! {
+                res = lines.next_line() => {
+                    match res? {
+                        Some(l) => l,
+                        None => break,
+                    }
+                }
+                _ = share_stop_rx.recv() => {
+                    info!("Share stopped signal received, disconnecting client {}", peer_addr);
+                    let disconnect_msg = ControlMessage::Disconnect { reason: "Share stopped by host".to_string() };
+                    if let Ok(json) = serde_json::to_string(&disconnect_msg) {
+                        let mut w = writer_shared.lock().await;
+                        let _ = w.write_all((json + "\n").as_bytes()).await;
+                    }
+                    break;
+                }
+            };
             let msg: ControlMessage = serde_json::from_str(&line)?;
             match msg {
                 // ─── Handshake ───────────────────────────────────────────────────
@@ -198,9 +217,16 @@ where
                     display_name,
                     version,
                     udp_port,
+                    candidates,
+                    public_key,
                 } => {
                     registered_udp_port = udp_port;
                     registered_display_name = display_name.clone();
+                    registered_candidates = candidates;
+                    registered_peer_public_key = public_key;
+
+
+
 
                     info!(
                         client_id = %client_id,
@@ -213,15 +239,12 @@ where
                     // Pairing is OPTIONAL.
                     // If the host has an active pairing code, verify it (HMAC challenge).
                     // If no pairing code is active, auto-accept (direct-IP connections always work).
-                    let challenge_opt = {
-                        let mut pm = state.pairing_manager.write().await;
-                        pm.generate_challenge()
-                    };
+                    let challenge_opt = state.pairing_manager.read().await.generate_challenge_stateless();
 
                     if let Some(challenge) = challenge_opt {
                         // Send challenge
                         let json =
-                            serde_json::to_string(&ControlMessage::PairingRequired { challenge })?
+                            serde_json::to_string(&ControlMessage::PairingRequired { challenge: challenge.clone() })?
                                 + "\n";
                         writer_shared.lock().await.write_all(json.as_bytes()).await?;
 
@@ -235,7 +258,7 @@ where
                         };
 
                         // Verify HMAC
-                        let verified = state.pairing_manager.write().await.verify_hmac(&hmac);
+                        let verified = state.pairing_manager.read().await.verify_hmac_with_challenge(&challenge, &hmac);
                         if !verified {
                             let reject = ControlMessage::JoinRejected {
                                 reason: "Invalid pairing code".to_string(),
@@ -271,15 +294,6 @@ where
 
                     // Accept: generate session, reply with UDP stream port
                     session_id = uuid::Uuid::new_v4().to_string();
-                    *session_id_shared.lock().unwrap() = session_id.clone();
-                    let stream_port = {
-                        let hs = state.host_session.lock().await;
-                        if let Some(ref handle) = *hs {
-                            handle.stream_port
-                        } else {
-                            super::DEFAULT_PORT
-                        }
-                    };
                     let permissions = {
                         let input_control =
                             crate::registry::read_dword("ControlEnabled").unwrap_or(1) == 1;
@@ -291,10 +305,69 @@ where
                             audio,
                         }
                     };
+                    // Gather Host's candidates (LAN, IPv6, and Public STUN)
+                    let mut host_candidates = Vec::new();
+                    let stream_port = {
+                        let hs = state.host_session.lock().await;
+                        if let Some(ref handle) = *hs {
+                            if let Some(stun_addr) = *handle.public_stun_addr.read().unwrap() {
+                                host_candidates.push(super::Candidate {
+                                    candidate_type: super::CandidateType::Public,
+                                    addr: stun_addr,
+                                    priority: 80,
+                                });
+                            }
+                            handle.stream_port
+                        } else {
+                            super::DEFAULT_PORT
+                        }
+                    };
+
+                    let local_ips = crate::network::broadcast::get_local_ips();
+                    for ip_str in local_ips {
+                        if let Ok(ip) = ip_str.parse::<std::net::IpAddr>() {
+                            if ip.is_loopback() {
+                                continue;
+                            }
+                            let addr = SocketAddr::new(ip, stream_port);
+                            let candidate_type = if ip.is_ipv6() {
+                                super::CandidateType::IPv6
+                            } else {
+                                super::CandidateType::Lan
+                            };
+                            let priority = match candidate_type {
+                                super::CandidateType::Lan => 100,
+                                super::CandidateType::IPv6 => 90,
+                                _ => 0,
+                            };
+                            host_candidates.push(super::Candidate {
+                                candidate_type,
+                                addr,
+                                priority,
+                            });
+                        }
+                    }
+
+                    // Generate Host's X25519 keypair and derive shared key
+                    let mut host_pub_key_b64 = None;
+                    if let Some(ref peer_pub_key_b64) = registered_peer_public_key {
+                        if let Ok(host_key) = super::crypto::EphemeralKey::new() {
+                            host_pub_key_b64 = Some(host_key.public_key_b64());
+                            if let Ok(shared_key) = host_key.agree_and_derive(peer_pub_key_b64) {
+                                if let Ok(cipher) = super::crypto::SessionCipher::new(&shared_key) {
+                                    session_cipher = Some(Arc::new(cipher));
+                                    info!("E2E Encryption derived successfully for connection");
+                                }
+                            }
+                        }
+                    }
+
                     let accept = ControlMessage::JoinAccepted {
                         session_id: session_id.clone(),
                         stream_port,
                         permissions,
+                        candidates: Some(host_candidates),
+                        public_key: host_pub_key_b64,
                     };
                     let json = serde_json::to_string(&accept)? + "\n";
                     writer_shared.lock().await.write_all(json.as_bytes()).await?;
@@ -306,11 +379,35 @@ where
                         "Client accepted"
                     );
 
-                    // Register client's UDP endpoint with the host streamer.
-                    let udp_addr = SocketAddr::new(peer_ip, udp_port);
+                    // Build the primary UDP address from the TCP connection's peer IP.
+                    // On WAN the TCP peer_ip IS the player's public/NAT address — always
+                    // routable from the host.  LAN candidates (sent in JoinRequest) are
+                    // only valid when host and player share the same subnet.
+                    // Strategy:
+                    //   1. Use peer_ip:udp_port as the PRIMARY send target (WAN-safe).
+                    //   2. Keep all other candidates for hole-punch switching later.
+                    let primary_udp_addr = SocketAddr::new(peer_ip, udp_port);
+                    let mut client_udp_candidates = vec![primary_udp_addr];
+                    if let Some(ref list) = registered_candidates {
+                        for cand in list {
+                            if !client_udp_candidates.contains(&cand.addr) {
+                                client_udp_candidates.push(cand.addr);
+                            }
+                        }
+                    }
+                    // primary_udp_addr is already first — use it directly.
+                    let udp_addr = primary_udp_addr;
+
                     let hs = state.host_session.lock().await;
                     if let Some(ref handle) = *hs {
-                        handle.add_client(session_id.clone(), display_name.clone(), udp_addr);
+                        handle.add_client(
+                            session_id.clone(),
+                            display_name.clone(),
+                            udp_addr,
+                            client_udp_candidates,
+                            session_cipher.clone(),
+                        );
+
                         info!(udp_addr = %udp_addr, session_id = %session_id, "Registered UDP endpoint");
                     } else {
                         warn!(
@@ -318,6 +415,43 @@ where
                             "No active host session — client will get frames when sharing starts"
                         );
                     }
+
+                    // Spawn the cursor and clipboard relay loop now that the client is authenticated
+                    let mut cursor_rx = CURSOR_CHANNEL.subscribe();
+                    let mut clipboard_rx = CLIPBOARD_CHANNEL.subscribe();
+                    let writer_clone = Arc::clone(&writer_shared);
+                    let mut session_cleanup_rx = state.shutdown_tx.subscribe();
+                    let my_id = session_id.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                Ok(cursor_msg) = cursor_rx.recv() => {
+                                    if let Ok(json) = serde_json::to_string(&cursor_msg) {
+                                        let mut w = writer_clone.lock().await;
+                                        if w.write_all((json + "\n").as_bytes()).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Ok((sender_id, clipboard_msg)) = clipboard_rx.recv() => {
+                                    if sender_id != my_id {
+                                        let clipboard_enabled = crate::registry::read_dword("Clipboard").unwrap_or(1) == 1;
+                                        if clipboard_enabled {
+                                            if let Ok(json) = serde_json::to_string(&clipboard_msg) {
+                                                let mut w = writer_clone.lock().await;
+                                                if w.write_all((json + "\n").as_bytes()).await.is_err() {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                _ = session_cleanup_rx.recv() => {
+                                    break;
+                                }
+                            }
+                        }
+                    });
                 }
 
                 // ─── Adaptive bitrate feedback ────────────────────────────────────
@@ -405,13 +539,21 @@ where
                     }
 
                     if packet_loss_percent > 5.0 {
-                        warn!(
-                            packet_loss_percent,
-                            "High packet loss — requesting keyframe recovery"
-                        );
-                        let hs = state.host_session.lock().await;
-                        if let Some(ref handle) = *hs {
-                            handle.request_keyframe();
+                        if last_keyframe_request.elapsed() >= std::time::Duration::from_secs(3) {
+                            warn!(
+                                packet_loss_percent,
+                                "High packet loss — requesting keyframe recovery"
+                            );
+                            let hs = state.host_session.lock().await;
+                            if let Some(ref handle) = *hs {
+                                handle.request_keyframe();
+                            }
+                            last_keyframe_request = std::time::Instant::now();
+                        } else {
+                            tracing::debug!(
+                                packet_loss_percent,
+                                "High packet loss but keyframe request is in cooldown"
+                            );
                         }
                     }
                 }
@@ -453,6 +595,14 @@ where
                     return Ok(());
                 }
 
+                ControlMessage::RequestKeyframe => {
+                    info!("Keyframe requested by client {}", peer_addr);
+                    let hs = state.host_session.lock().await;
+                    if let Some(ref handle) = *hs {
+                        handle.request_keyframe();
+                    }
+                }
+
                 ControlMessage::FileStart { name, size } => {
                     let file_transfer_enabled = crate::registry::read_dword("FileTransfer").unwrap_or(1) == 1;
                     if !file_transfer_enabled {
@@ -460,23 +610,49 @@ where
                         current_file = None;
                     } else {
                         info!("File transfer started: {}, size: {}", name, size);
-                        let normalized_name = name.replace('\\', "/");
-                        let file_name = normalized_name
-                            .split('/')
-                            .last()
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty() && *s != "." && *s != "..")
-                            .unwrap_or("received_file");
+                        let name_path = std::path::PathBuf::from(&name);
+                        let has_root_prefix = name_path.is_absolute() && {
+                            #[cfg(windows)]
+                            {
+                                name.contains(':') || name.starts_with("\\\\")
+                            }
+                            #[cfg(not(windows))]
+                            {
+                                name.starts_with('/')
+                            }
+                        };
 
-                        let mut dest_path = dirs_next::download_dir()
-                            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                        let dest_path = if has_root_prefix {
+                            name_path
+                        } else {
+                            let mut p = dirs_next::download_dir()
+                                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                            let file_name = name
+                                .replace('\\', "/")
+                                .split('/')
+                                .last()
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+                                .unwrap_or("received_file")
+                                .to_string();
+                            p.push(file_name);
+                            p
+                        };
 
-                        dest_path.push(file_name);
+                        // Ensure parent directories exist
+                        if let Some(parent) = dest_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+
+                        let display_name = dest_path
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "received_file".to_string());
 
                         match std::fs::File::create(&dest_path) {
                             Ok(file) => {
                                 info!("Creating file at {:?}", dest_path);
-                                current_file = Some((file_name.to_string(), file));
+                                current_file = Some((display_name, file));
                             }
                             Err(e) => {
                                 error!("Failed to create file at {:?}: {}", dest_path, e);
@@ -571,10 +747,26 @@ where
                     match crate::host_session::start(new_target, port, host_event_tx) {
                         Ok(handle) => {
                             if registered_udp_port != 0 {
+                                let mut client_udp_candidates = Vec::new();
+                                if let Some(ref list) = registered_candidates {
+                                    for cand in list {
+                                        if !client_udp_candidates.contains(&cand.addr) {
+                                            client_udp_candidates.push(cand.addr);
+                                        }
+                                    }
+                                }
+                                let primary_udp_addr = SocketAddr::new(peer_addr.ip(), registered_udp_port);
+                                if !client_udp_candidates.contains(&primary_udp_addr) {
+                                    client_udp_candidates.push(primary_udp_addr);
+                                }
+                                let udp_addr = client_udp_candidates[0];
+
                                 handle.add_client(
                                     session_id.clone(),
                                     registered_display_name.clone(),
-                                    SocketAddr::new(peer_addr.ip(), registered_udp_port),
+                                    udp_addr,
+                                    client_udp_candidates,
+                                    session_cipher.clone(),
                                 );
                             }
                             *session = Some(handle);
@@ -598,45 +790,71 @@ where
                 }
 
                 ControlMessage::BrowseDirectoryRequest { path } => {
-                    let path_to_read = if path.is_empty() {
-                        dirs_next::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
-                    } else {
-                        std::path::PathBuf::from(&path)
-                    };
-
                     let mut entries = Vec::new();
                     let mut err_str = None;
+                    let mut returned_path = path.clone();
 
-                    match std::fs::read_dir(&path_to_read) {
-                        Ok(dir_entries) => {
-                            for entry_res in dir_entries {
-                                if let Ok(entry) = entry_res {
-                                    let name = entry.file_name().to_string_lossy().to_string();
-                                    let metadata = entry.metadata();
-                                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                                    let modified = metadata.as_ref().ok()
-                                        .and_then(|m| m.modified().ok())
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_millis() as u64)
-                                        .unwrap_or(0);
-
+                    if path.is_empty() {
+                        #[cfg(windows)]
+                        {
+                            use windows::Win32::Storage::FileSystem::GetLogicalDrives;
+                            let mask = unsafe { GetLogicalDrives() };
+                            for i in 0..26 {
+                                if (mask & (1 << i)) != 0 {
+                                    let letter = (b'A' + i) as char;
+                                    let drive_name = format!("{}:\\", letter);
                                     entries.push(super::FileEntry {
-                                        name,
-                                        is_dir,
-                                        size,
-                                        modified,
+                                        name: drive_name,
+                                        is_dir: true,
+                                        size: 0,
+                                        modified: 0,
                                     });
                                 }
                             }
                         }
-                        Err(e) => {
-                            err_str = Some(e.to_string());
+                        #[cfg(not(windows))]
+                        {
+                            entries.push(super::FileEntry {
+                                name: "/".to_string(),
+                                is_dir: true,
+                                size: 0,
+                                modified: 0,
+                            });
+                        }
+                    } else {
+                        let path_to_read = std::path::PathBuf::from(&path);
+                        returned_path = path_to_read.to_string_lossy().to_string();
+                        match std::fs::read_dir(&path_to_read) {
+                            Ok(dir_entries) => {
+                                for entry_res in dir_entries {
+                                    if let Ok(entry) = entry_res {
+                                        let name = entry.file_name().to_string_lossy().to_string();
+                                        let metadata = entry.metadata();
+                                        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                                        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                                        let modified = metadata.as_ref().ok()
+                                            .and_then(|m| m.modified().ok())
+                                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                            .map(|d| d.as_millis() as u64)
+                                            .unwrap_or(0);
+
+                                        entries.push(super::FileEntry {
+                                            name,
+                                            is_dir,
+                                            size,
+                                            modified,
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                err_str = Some(e.to_string());
+                            }
                         }
                     }
 
                     let response = ControlMessage::BrowseDirectoryResponse {
-                        path: path_to_read.to_string_lossy().to_string(),
+                        path: returned_path,
                         entries,
                         error: err_str,
                     };
@@ -809,7 +1027,14 @@ where
                     shell_stdin_tx = None;
 
                     let mut shell_cmd = if cfg!(windows) {
-                        tokio::process::Command::new("cmd.exe")
+                        let mut c = tokio::process::Command::new("cmd.exe");
+                        #[cfg(windows)]
+                        {
+                            #[allow(unused_imports)]
+                            use std::os::windows::process::CommandExt;
+                            c.creation_flags(0x0800_0000);
+                        }
+                        c
                     } else {
                         tokio::process::Command::new("sh")
                     };
@@ -836,6 +1061,14 @@ where
                             tokio::spawn(async move {
                                 use tokio::io::AsyncWriteExt;
                                 let mut stdin_piped = stdin;
+
+                                // On Windows, force the command shell to use UTF-8 output encoding (code page 65001)
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let _ = stdin_piped.write_all(b"chcp 65001\r\n").await;
+                                    let _ = stdin_piped.flush().await;
+                                }
+
                                 while let Some(input) = stdin_rx.recv().await {
                                     if let Err(e) = stdin_piped.write_all(input.as_bytes()).await {
                                         error!("Failed to write to shell stdin: {}", e);

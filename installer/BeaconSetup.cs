@@ -22,17 +22,37 @@ class BeaconSetup {
 
   static void Header() {
     Console.Clear();
-    Console.Title = "Beacon Setup v1.1.4";
+    Console.Title = "Beacon Setup v1.1.7";
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine();
     Console.WriteLine("  ╔══════════════════════════════════════╗");
-    Console.WriteLine("  ║     Beacon Setup  v1.1.4             ║");
+    Console.WriteLine("  ║     Beacon Setup  v1.1.7             ║");
     Console.WriteLine("  ║     LAN Screen Sharing               ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();
   }
 
   static void Main() {
+    // Check for administrator rights
+    var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+    if (!principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator)) {
+      var exe = Assembly.GetExecutingAssembly().Location;
+      var pi = new ProcessStartInfo(exe) {
+        Verb = "runas",
+        UseShellExecute = true
+      };
+      try {
+        Process.Start(pi);
+      } catch (Exception ex) {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("\n  Error: Setup must be run as Administrator: " + ex.Message);
+        Console.ResetColor();
+        Console.ReadLine();
+      }
+      return;
+    }
+
     Header();
 
     string dir = Path.Combine(
@@ -236,11 +256,30 @@ class BeaconSetup {
       if (_q != null) _q.WaitForExit(5000);
     } catch { }
 
-    // ── Step 7: Launch ───────────────────────────────────────────────────
+    // ── Step 7: Clear stale session registry keys ─────────────────────
+    // Prevents the watchdog from auto-starting a previous sharing session
+    // on first launch or reinstall. The user must explicitly start sharing.
+    Msg("Resetting session state...");
+    try {
+      using (var rk = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Beacon", true)) {
+        if (rk != null) {
+          foreach (var key in new[] {
+            "LastSharingTarget", "LastSharingMode",
+            "LastWindowProcess", "LastWindowTitle",
+            "LastTargetType",   "LastTargetDisplay",
+            "LastSharingDisplay"
+          }) {
+            try { rk.DeleteValue(key, false); } catch { }
+          }
+        }
+      }
+    } catch { }
+
+    // ── Step 8: Launch ───────────────────────────────────────────────────
     Msg("Starting Beacon...");
     try {
       Process.Start(new ProcessStartInfo(Path.Combine(dir, "beacon-watchdog.exe")) {
-        WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true
+        WorkingDirectory = dir, UseShellExecute = true
       });
       if (uiMode == 1) {
         System.Threading.Thread.Sleep(500); // Give the background web server a moment to bind
@@ -256,7 +295,7 @@ class BeaconSetup {
     string label = isReinstall ? "Reinstall" : "Installation";
     Console.WriteLine("  ╔══════════════════════════════════════╗");
     Console.WriteLine("  ║  " + label.PadRight(35) + "║");
-    Console.WriteLine("  ║  complete!                          ║");
+    Console.WriteLine("  ║  complete! (v1.1.7)                 ║");
     Console.WriteLine("  ║  Desktop shortcut: Beacon           ║");
     Console.WriteLine("  ╚══════════════════════════════════════╝");
     Console.ResetColor(); Console.WriteLine();

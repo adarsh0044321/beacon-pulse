@@ -1,4 +1,4 @@
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // #![deny(warnings)]
 
 #[cfg(feature = "player")]
@@ -101,6 +101,7 @@ mod run {
             host_session: Arc::new(Mutex::new(None)),
             #[cfg(feature = "host")]
             active_target: Arc::new(Mutex::new(None)),
+            connection_mode: Arc::new(Mutex::new(None)),
             #[cfg(feature = "host")]
             host_event_rx: Arc::new(Mutex::new(dummy_rx)),
             client_session: Arc::new(Mutex::new(None)),
@@ -173,7 +174,9 @@ mod run {
             extern "system" {
                 fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut u8;
                 fn GetLastError() -> u32;
+                fn SetLastError(code: u32);
             }
+            unsafe { SetLastError(0); }
             let name: Vec<u16> = "Local\\Pulse\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
@@ -213,10 +216,12 @@ mod run {
             let rt = tokio::runtime::Runtime::new()?;
             let (shutdown_tx, _) = broadcast::channel(1);
             let tx = shutdown_tx.clone();
-            ctrlc::set_handler(move || {
+            if let Err(e) = ctrlc::set_handler(move || {
                 info!("Ctrl+C received — initiating shutdown");
                 let _ = tx.send(());
-            })?;
+            }) {
+                tracing::warn!("Could not set Ctrl+C handler (expected if running without console): {}", e);
+            }
             rt.block_on(async_main(shutdown_tx))?;
         }
 

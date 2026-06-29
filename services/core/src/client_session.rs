@@ -154,11 +154,17 @@ pub struct ClientSessionHandle {
     running: Arc<AtomicBool>,
     _thread: Option<thread::JoinHandle<()>>,
     pub input_tx: mpsc::UnboundedSender<ControlMessage>,
+    shutdown_tx: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl ClientSessionHandle {
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
+        if let Ok(mut guard) = self.shutdown_tx.lock() {
+            if let Some(tx) = guard.take() {
+                let _ = tx.send(());
+            }
+        }
     }
 
     pub fn send_input(&self, msg: ControlMessage) -> Result<()> {
@@ -199,33 +205,88 @@ fn compute_hmac_response(pairing_code: &str, challenge_b64: &str) -> Result<Stri
 ///   3. Handle optional PairingRequired → HMAC → JoinAccepted
 ///   4. Bind UDP recv socket on recv_port
 ///   5. Spawn recv + forwarding threads
+///   4. Bind UDP recv socket on recv_port
+///   5. Spawn recv + forwarding threads
 pub async fn start(
     recv_port: u16,
     host_addr: SocketAddr,
     pairing_code: Option<String>,
     tls: bool,
     event_tx: mpsc::UnboundedSender<ClientEvent>,
+    prebound_socket: Option<std::net::UdpSocket>,
+    host_candidates: Option<Vec<crate::network::Candidate>>,
+    cipher: Option<crate::network::crypto::SessionCipher>,
 ) -> Result<ClientSessionHandle> {
     // ── Step 1: Bind UDP recv socket first ───────────────────────────────────
-    let (mut receiver, frame_rx) = match UdpReceiver::new(recv_port) {
-        Ok(r) => r,
-        Err(e) => {
-            if recv_port == 45102 {
-                info!(
-                    "Failed to bind to default UDP port 45102: {}. Trying a random free port...",
-                    e
-                );
-                UdpReceiver::new(0).context("Failed to bind UDP receiver to any port")?
-            } else {
-                return Err(e).context(format!(
-                    "Failed to bind to requested UDP port {}",
-                    recv_port
-                ));
+    let (mut receiver, frame_rx) = if let Some(sock) = prebound_socket {
+        UdpReceiver::new_from_socket(sock)?
+    } else {
+        match UdpReceiver::new(recv_port) {
+            Ok(r) => r,
+            Err(e) => {
+                if recv_port == 45102 {
+                    info!(
+                        "Failed to bind to default UDP port 45102: {}. Trying a random free port...",
+                        e
+                    );
+                    UdpReceiver::new(0).context("Failed to bind UDP receiver to any port")?
+                } else {
+                    return Err(e).context(format!(
+                        "Failed to bind to requested UDP port {}",
+                        recv_port
+                    ));
+                }
             }
         }
     };
     let actual_udp_port = receiver.local_addr()?.port();
     info!(udp_port = actual_udp_port, "UDP receiver socket bound");
+
+    // Set WAN mode setup details if present, otherwise set up for LAN mode key exchange
+    let mut player_ephemeral_key = None;
+    let mut join_candidates = None;
+    let mut join_pub_key = None;
+
+    if let Some(c) = cipher {
+        receiver.cipher = Some(std::sync::Arc::new(c));
+        if let Some(candidates) = host_candidates {
+            let addrs: Vec<SocketAddr> = candidates.iter().map(|c| c.addr).collect();
+            receiver.host_candidates = Some(addrs);
+        }
+    } else {
+        // Direct LAN mode key exchange setup
+        if let Ok(key) = crate::network::crypto::EphemeralKey::new() {
+            join_pub_key = Some(key.public_key_b64());
+            player_ephemeral_key = Some(key);
+        }
+        // Gather local candidates on actual_udp_port
+        let mut cands = Vec::new();
+        let local_ips = crate::network::broadcast::get_local_ips();
+        for ip_str in local_ips {
+            if let Ok(ip) = ip_str.parse::<std::net::IpAddr>() {
+                if ip.is_loopback() {
+                    continue;
+                }
+                let addr = SocketAddr::new(ip, actual_udp_port);
+                let candidate_type = if ip.is_ipv6() {
+                    crate::network::CandidateType::IPv6
+                } else {
+                    crate::network::CandidateType::Lan
+                };
+                let priority = match candidate_type {
+                    crate::network::CandidateType::Lan => 100,
+                    crate::network::CandidateType::IPv6 => 90,
+                    _ => 0,
+                };
+                cands.push(crate::network::Candidate {
+                    candidate_type,
+                    addr,
+                    priority,
+                });
+            }
+        }
+        join_candidates = Some(cands);
+    }
 
     // ── Step 2: TCP connect to control port ──────────────────────────────────
     let control_addr = host_addr;
@@ -279,6 +340,8 @@ pub async fn start(
         display_name: hostname,
         version: env!("CARGO_PKG_VERSION").to_string(),
         udp_port: actual_udp_port,
+        candidates: join_candidates,
+        public_key: join_pub_key,
     };
     let req_json = serde_json::to_string(&req)? + "\n";
     writer.write_all(req_json.as_bytes()).await?;
@@ -308,8 +371,24 @@ pub async fn start(
                 .ok_or_else(|| anyhow!("Host closed after HMAC"))?;
             let msg2: ControlMessage = serde_json::from_str(&line2)?;
             match msg2 {
-                ControlMessage::JoinAccepted { .. } => {
+                ControlMessage::JoinAccepted { candidates, public_key, .. } => {
                     info!("Pairing accepted by host");
+                    if receiver.cipher.is_none() {
+                        if let Some(ref host_pub_key_b64) = public_key {
+                            if let Some(player_key) = player_ephemeral_key.take() {
+                                if let Ok(shared_key) = player_key.agree_and_derive(host_pub_key_b64) {
+                                    if let Ok(cipher) = crate::network::crypto::SessionCipher::new(&shared_key) {
+                                        receiver.cipher = Some(std::sync::Arc::new(cipher));
+                                        info!("E2E Encryption derived successfully for LAN connection");
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(list) = candidates {
+                            let addrs: Vec<SocketAddr> = list.iter().map(|c| c.addr).collect();
+                            receiver.host_candidates = Some(addrs);
+                        }
+                    }
                 }
                 ControlMessage::JoinRejected { reason } => {
                     return Err(anyhow!("Pairing rejected: {}", reason));
@@ -317,9 +396,25 @@ pub async fn start(
                 _ => return Err(anyhow!("Unexpected message after HMAC")),
             }
         }
-        ControlMessage::JoinAccepted { .. } => {
+        ControlMessage::JoinAccepted { candidates, public_key, .. } => {
             // Host auto-accepted (no active pairing code)
             info!("Host auto-accepted (no pairing required)");
+            if receiver.cipher.is_none() {
+                if let Some(ref host_pub_key_b64) = public_key {
+                    if let Some(player_key) = player_ephemeral_key.take() {
+                        if let Ok(shared_key) = player_key.agree_and_derive(host_pub_key_b64) {
+                            if let Ok(cipher) = crate::network::crypto::SessionCipher::new(&shared_key) {
+                                receiver.cipher = Some(std::sync::Arc::new(cipher));
+                                info!("E2E Encryption derived successfully for LAN connection");
+                            }
+                        }
+                    }
+                }
+                if let Some(list) = candidates {
+                    let addrs: Vec<SocketAddr> = list.iter().map(|c| c.addr).collect();
+                    receiver.host_candidates = Some(addrs);
+                }
+            }
         }
         ControlMessage::JoinRejected { reason } => {
             return Err(anyhow!("Connection rejected by host: {}", reason));
@@ -370,12 +465,18 @@ pub async fn start(
         .await;
     });
 
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
     // Keep TCP alive in background and handle writing inputs / reading host messages
     let fwd_event_tx_loop = event_tx.clone();
     tokio::spawn(async move {
         let mut writer = writer;
         loop {
             tokio::select! {
+                _ = &mut shutdown_rx => {
+                    info!("Client session shutdown signal received, closing TCP control loop");
+                    break;
+                }
                 // Inbound: read a line from host
                 line_res = lines.next_line() => {
                     match line_res {
@@ -446,11 +547,19 @@ pub async fn start(
                     }
                 }
                 // Outbound: write input / control messages from client to host
-                Some(msg) = input_rx.recv() => {
-                    if let Ok(mut json) = serde_json::to_string(&msg) {
-                        json.push('\n');
-                        if let Err(e) = writer.write_all(json.as_bytes()).await {
-                            tracing::error!("Failed to write control message to host: {}", e);
+                msg_opt = input_rx.recv() => {
+                    match msg_opt {
+                        Some(msg) => {
+                            if let Ok(mut json) = serde_json::to_string(&msg) {
+                                json.push('\n');
+                                if let Err(e) = writer.write_all(json.as_bytes()).await {
+                                    tracing::error!("Failed to write control message to host: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        None => {
+                            info!("input_tx dropped, closing TCP loop");
                             break;
                         }
                     }
@@ -469,6 +578,7 @@ pub async fn start(
         running,
         _thread: Some(recv_thread),
         input_tx,
+        shutdown_tx: std::sync::Mutex::new(Some(shutdown_tx)),
     })
 }
 

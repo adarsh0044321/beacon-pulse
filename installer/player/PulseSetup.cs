@@ -33,6 +33,26 @@ class PulseSetup {
   }
 
   static void Main() {
+    // Check for administrator rights
+    var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+    if (!principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator)) {
+      var exe = Assembly.GetExecutingAssembly().Location;
+      var pi = new ProcessStartInfo(exe) {
+        Verb = "runas",
+        UseShellExecute = true
+      };
+      try {
+        Process.Start(pi);
+      } catch (Exception ex) {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("\n  Error: Setup must be run as Administrator: " + ex.Message);
+        Console.ResetColor();
+        Console.ReadLine();
+      }
+      return;
+    }
+
     Header();
 
     string dir = Path.Combine(
@@ -242,7 +262,7 @@ class PulseSetup {
     Msg("Starting Pulse...");
     try {
       Process.Start(new ProcessStartInfo(Path.Combine(dir, "pulse.exe")) {
-        WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true
+        WorkingDirectory = dir, UseShellExecute = true
       });
     } catch { }
 

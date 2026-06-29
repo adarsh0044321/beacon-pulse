@@ -3,13 +3,14 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{error, info, warn};
+
+use super::{Candidate, CandidateType};
 
 /// Signaling message envelope for client-host broker communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,31 +24,42 @@ pub enum SignalingMessage {
     },
     RegistrationSuccess {
         role: String,
+        #[serde(default)]
+        session_token: Option<String>,
     },
     RegistrationFailed {
         reason: String,
     },
     Offer {
+        #[serde(default)]
+        session_token: String,
         sdp: String,
-        candidate_addr: String, // Public socket address for UDP punch
+        candidates: Vec<Candidate>,
     },
     Answer {
+        #[serde(default)]
+        session_token: String,
         sdp: String,
-        candidate_addr: String, // Public socket address for UDP punch
+        candidates: Vec<Candidate>,
+    },
+    Heartbeat {
+        session_token: String,
     },
     PeerDisconnected,
 }
 
 /// Query a STUN server (RFC 5389) over UDP to discover the public mapped IP and port.
-///
-/// Sends a Binding Request and parses the response for `MAPPED-ADDRESS` (0x0001)
-/// or `XOR-MAPPED-ADDRESS` (0x0020) attributes.
 pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    query_stun_server_on_socket(&socket, server_addr).await
+}
+
+/// Query a STUN server on a pre-existing persistent socket.
+pub async fn query_stun_server_on_socket(socket: &UdpSocket, server_addr: &str) -> Result<SocketAddr> {
     let mut resolved_addr = server_addr.to_string();
     if !resolved_addr.contains(':') {
         resolved_addr.push_str(":3478");
     }
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
     // Resolve STUN server address
     let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&resolved_addr).await?.collect();
@@ -55,7 +67,6 @@ pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
         .iter()
         .find(|addr| addr.is_ipv4())
         .ok_or_else(|| anyhow!("Failed to resolve STUN server IPv4 address"))?;
-    socket.connect(*dest).await?;
 
     // RFC 5389 STUN binding request header (20 bytes)
     // - STUN Message Type: 0x0001 (Binding Request)
@@ -70,11 +81,11 @@ pub async fn query_stun_server(server_addr: &str) -> Result<SocketAddr> {
     let transaction_id: [u8; 12] = rand::random();
     request[8..20].copy_from_slice(&transaction_id);
 
-    socket.send(&request).await?;
+    socket.send_to(&request, *dest).await?;
 
     // Buffer for STUN response
     let mut response = [0u8; 1024];
-    let len = timeout(Duration::from_secs(3), socket.recv(&mut response))
+    let (len, _src) = timeout(Duration::from_secs(3), socket.recv_from(&mut response))
         .await
         .map_err(|_| anyhow!("STUN query timed out"))??;
 
@@ -166,80 +177,183 @@ pub async fn run_host_signaling_loop(
     signaling_url: String,
     pairing_code: String,
     local_control_port: u16,
-    stun_server: String,
+    _stun_server: String,
+    state: std::sync::Arc<crate::AppState>,
 ) -> Result<()> {
     info!(signaling_url = %signaling_url, pairing_code = %pairing_code, "Starting host signaling WebSocket registration");
 
-    let (ws_stream, _) = connect_async(&signaling_url)
-        .await
-        .map_err(|e| anyhow!("Failed to connect to signaling server: {}", e))?;
-
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
-
-    // Register as host
-    let reg = SignalingMessage::RegisterHost { pairing_code };
-    let reg_msg = serde_json::to_string(&reg)?;
-    ws_tx.send(Message::Text(reg_msg.into())).await?;
-
-    info!("Host registration request sent to signaling server");
-
-    while let Some(msg_res) = ws_rx.next().await {
-        let msg = match msg_res {
-            Ok(Message::Text(txt)) => txt,
-            Ok(Message::Close(_)) => {
-                info!("Signaling connection closed by server");
-                break;
-            }
-            Err(e) => {
-                error!("Error receiving from signaling server: {}", e);
-                break;
-            }
-            _ => continue,
-        };
-
-        let sig_msg: SignalingMessage = match serde_json::from_str(&msg) {
-            Ok(m) => m,
-            Err(e) => {
-                warn!("Bad signaling message: {}, error: {}", msg, e);
-                continue;
-            }
-        };
-
-        match sig_msg {
-            SignalingMessage::RegistrationSuccess { role } => {
-                info!(role = %role, "Signaling registration confirmed");
-            }
-            SignalingMessage::RegistrationFailed { reason } => {
-                error!(reason = %reason, "Signaling registration rejected");
-                return Err(anyhow!("Signaling registration failed: {}", reason));
-            }
-            SignalingMessage::Offer {
-                sdp,
-                candidate_addr,
-            } => {
-                info!(player_addr = %candidate_addr, "Received SDP connection offer from player");
-
-                // Query our own public IP to send as host candidate
-                let host_public_addr = match query_stun_server(&stun_server).await {
-                    Ok(addr) => addr.to_string(),
-                    Err(e) => {
-                        warn!("Failed to query STUN: {}. Using localhost.", e);
-                        format!("127.0.0.1:{}", local_control_port)
+    // Automatically spawn the built-in local signaling server if targeting localhost/127.0.0.1
+    // or any of our local interfaces on port 45188, and the server is currently offline.
+    let is_local_target = {
+        let mut is_local = false;
+        if let Some(host_part) = signaling_url.strip_prefix("ws://") {
+            let host_part = host_part.split('/').next().unwrap_or(host_part);
+            if let Some((host_str, port_str)) = host_part.rsplit_once(':') {
+                if port_str == "45188" {
+                    let cleaned_host = host_str.trim_start_matches('[').trim_end_matches(']');
+                    if cleaned_host == "127.0.0.1" || cleaned_host == "localhost" || cleaned_host == "::1" || cleaned_host == "0.0.0.0" {
+                        is_local = true;
+                    } else {
+                        let local_ips = super::broadcast::get_local_ips();
+                        if local_ips.iter().any(|ip| ip == cleaned_host) {
+                            is_local = true;
+                        }
                     }
-                };
+                }
+            }
+        }
+        is_local
+    };
 
-                // Spawn a local connection handler bridging the proxy
-                let s_url = signaling_url.clone();
-                tokio::spawn(async move {
-                    if let Err(e) =
-                        handle_proxied_connection(sdp, local_control_port, host_public_addr, s_url)
-                            .await
-                    {
-                        error!("Proxied connection error: {}", e);
+    if is_local_target {
+        if tokio::net::TcpStream::connect("127.0.0.1:45188").await.is_err() {
+            info!("Local signaling server is offline; spawning in-process signaling server on port 45188");
+            let _ = crate::network::signaling_server::start_local_signaling_server(45188).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+
+    let mut backoff = Duration::from_secs(2);
+
+    loop {
+        // 1. Check if host session has stopped
+        if state.host_session.lock().await.is_none() {
+            info!("Host session stopped, exiting signaling loop");
+            break;
+        }
+
+        // 2. Check if pairing code has changed or been deleted in registry
+        let reg_code = crate::registry::read_string("PairingCode");
+        if reg_code.as_deref() != Some(&pairing_code) {
+            info!("Pairing code changed or removed in registry, exiting signaling loop");
+            break;
+        }
+
+        match connect_async(&signaling_url).await {
+            Ok((ws_stream, _)) => {
+                backoff = Duration::from_secs(2); // Reset backoff on successful connect
+                let (mut ws_tx, mut ws_rx) = ws_stream.split();
+
+                // Register as host
+                let reg = SignalingMessage::RegisterHost { pairing_code: pairing_code.clone() };
+                let reg_msg = serde_json::to_string(&reg)?;
+                if ws_tx.send(Message::Text(reg_msg.into())).await.is_err() {
+                    warn!("Failed to send registration message to signaling server, retrying...");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+
+                info!("Host registration request sent to signaling server");
+
+                // Channel for forwarding session token to heartbeat loop
+                let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<String>(1);
+
+                // Spawn background heartbeat task
+                let heartbeat_handle = tokio::spawn(async move {
+                    if let Some(token) = token_rx.recv().await {
+                        let mut interval = tokio::time::interval(Duration::from_secs(10));
+                        interval.tick().await;
+                        loop {
+                            interval.tick().await;
+                            let heartbeat = SignalingMessage::Heartbeat {
+                                session_token: token.clone(),
+                            };
+                            if let Ok(heartbeat_msg) = serde_json::to_string(&heartbeat) {
+                                if ws_tx.send(Message::Text(heartbeat_msg.into())).await.is_err() {
+                                    error!("Failed to send heartbeat to signaling server");
+                                    break;
+                                }
+                            }
+                        }
                     }
                 });
+
+                let mut error_occurred = false;
+                while let Some(msg_res) = ws_rx.next().await {
+                    // Check if loop should terminate
+                    if state.host_session.lock().await.is_none() {
+                        break;
+                    }
+                    let reg_code = crate::registry::read_string("PairingCode");
+                    if reg_code.as_deref() != Some(&pairing_code) {
+                        break;
+                    }
+
+                    let msg = match msg_res {
+                        Ok(Message::Text(txt)) => txt,
+                        Ok(Message::Close(_)) => {
+                            info!("Signaling connection closed by server");
+                            break;
+                        }
+                        Err(e) => {
+                            error!("Error receiving from signaling server: {}", e);
+                            error_occurred = true;
+                            break;
+                        }
+                        _ => continue,
+                    };
+
+                    let sig_msg: SignalingMessage = match serde_json::from_str(&msg) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("Bad signaling message: {}, error: {}", msg, e);
+                            continue;
+                        }
+                    };
+
+                    match sig_msg {
+                        SignalingMessage::RegistrationSuccess { role, session_token } => {
+                            info!(role = %role, "Signaling registration confirmed");
+                            if let Some(token) = session_token {
+                                let _ = token_tx.send(token).await;
+                            }
+                        }
+                        SignalingMessage::RegistrationFailed { reason } => {
+                            error!(reason = %reason, "Signaling registration rejected");
+                            error_occurred = true;
+                            break;
+                        }
+                        SignalingMessage::Offer {
+                            session_token,
+                            sdp,
+                            candidates,
+                        } => {
+                            info!(player_candidates_count = candidates.len(), "Received SDP connection offer from player");
+
+                            let s_url = signaling_url.clone();
+                            let l_port = local_control_port;
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    handle_proxied_connection(sdp, l_port, session_token, s_url)
+                                        .await
+                                {
+                                    error!("Proxied connection error: {}", e);
+                                }
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+
+                heartbeat_handle.abort();
+                if state.host_session.lock().await.is_none() {
+                    break;
+                }
+                let reg_code = crate::registry::read_string("PairingCode");
+                if reg_code.as_deref() != Some(&pairing_code) {
+                    break;
+                }
+
+                // If error occurred or connection closed, sleep and retry
+                warn!("Signaling connection lost or failed. Reconnecting in {}s...", backoff.as_secs());
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
             }
-            _ => {}
+            Err(e) => {
+                warn!("Failed to connect to signaling server: {}. Retrying in {}s...", e, backoff.as_secs());
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
+            }
         }
     }
 
@@ -249,7 +363,7 @@ pub async fn run_host_signaling_loop(
 async fn handle_proxied_connection(
     player_sdp: String,
     local_control_port: u16,
-    host_public_addr: String,
+    session_token: String,
     signaling_url: String,
 ) -> Result<()> {
     // 1. Establish local loopback connection to host service
@@ -276,15 +390,26 @@ async fn handle_proxied_connection(
         return Err(anyhow!("Local host service closed connection immediately"));
     }
 
+    // Parse host response to extract candidates
+    let host_response_json = String::from_utf8(buf[..n].to_vec())?;
+    let mut host_candidates = Vec::new();
+    for line in host_response_json.lines() {
+        if let Ok(super::ControlMessage::JoinAccepted { candidates: Some(ref cands), .. }) = serde_json::from_str::<super::ControlMessage>(line) {
+            host_candidates = cands.clone();
+            break;
+        }
+    }
+
     // 5. Send host response back as SDP Answer via new WebSocket connection
     let host_sdp = B64.encode(&buf[..n]);
     let answer = SignalingMessage::Answer {
+        session_token,
         sdp: host_sdp,
-        candidate_addr: host_public_addr,
+        candidates: host_candidates,
     };
 
     let (ws_stream, _) = connect_async(&signaling_url).await?;
-    let (mut ws_tx, _) = ws_stream.split();
+    let (mut ws_tx, mut ws_rx) = ws_stream.split();
     ws_tx
         .send(Message::Text(serde_json::to_string(&answer)?.into()))
         .await?;
@@ -293,12 +418,10 @@ async fn handle_proxied_connection(
 
     // 6. Continue bi-directional proxying of TCP control stream
     let (mut tcp_read, mut tcp_write) = local_stream.into_split();
-    let (ws_stream_full, _) = connect_async(&signaling_url).await?;
-    let (mut ws_tx_full, mut ws_rx_full) = ws_stream_full.split();
 
     // Read from websocket, write to local TCP
-    let t1 = tokio::spawn(async move {
-        while let Some(msg_res) = ws_rx_full.next().await {
+    let mut t1 = tokio::spawn(async move {
+        while let Some(msg_res) = ws_rx.next().await {
             match msg_res {
                 Ok(Message::Text(txt)) => {
                     if let Ok(data) = B64.decode(&txt) {
@@ -315,14 +438,14 @@ async fn handle_proxied_connection(
     });
 
     // Read from local TCP, write to websocket
-    let t2 = tokio::spawn(async move {
+    let mut t2 = tokio::spawn(async move {
         let mut tcp_buf = vec![0u8; 4096];
         loop {
             match tcp_read.read(&mut tcp_buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(bytes) => {
                     let b64_str = B64.encode(&tcp_buf[..bytes]);
-                    if ws_tx_full
+                    if ws_tx
                         .send(Message::Text(b64_str.into()))
                         .await
                         .is_err()
@@ -334,44 +457,96 @@ async fn handle_proxied_connection(
         }
     });
 
-    let _ = tokio::join!(t1, t2);
+    tokio::select! {
+        _ = &mut t1 => {
+            t2.abort();
+        }
+        _ = &mut t2 => {
+            t1.abort();
+        }
+    }
     info!("Signaling proxy connection finished");
     Ok(())
 }
 
+pub struct PlayerWanSetup {
+    pub socket: std::net::UdpSocket,
+    pub host_candidates: Vec<Candidate>,
+    pub cipher: Option<super::crypto::SessionCipher>,
+}
+
 /// Runs a signaling proxy on the player side.
 ///
-/// Binds a local TCP listener on `local_port`. When the player session connects to it,
+/// Binds a local TCP listener on `local_proxy_port`. When the player session connects to it,
 /// it queries the signaling server using the `pairing_code` to locate the host.
 /// It swaps SDP offers and answers, performs NAT traversal, and forwards the control traffic.
 pub async fn run_player_signaling_loop(
     signaling_url: String,
     pairing_code: String,
     local_proxy_port: u16,
-) -> Result<SocketAddr> {
+    recv_port: u16,
+) -> Result<PlayerWanSetup> {
     info!(
         signaling_url = %signaling_url,
         pairing_code = %pairing_code,
         "Starting player signaling WebSocket connection"
     );
 
-    let (ws_stream, _) = connect_async(&signaling_url)
-        .await
-        .map_err(|e| anyhow!("Failed to connect to signaling server: {}", e))?;
+    // 1. Pre-bind the persistent UDP socket and query STUN
+    let std_sock = super::create_dual_stack_udp_socket(recv_port)
+        .map_err(|e| anyhow!("Failed to bind persistent receiver socket: {}", e))?;
+    std_sock.set_nonblocking(true)?;
+    let socket = UdpSocket::from_std(std_sock.try_clone()?)?;
 
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
+    let stun_server = crate::registry::read_string("StunServer")
+        .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+    
+    let mut player_candidates = Vec::new();
+    
+    // Add public candidate
+    match query_stun_server_on_socket(&socket, &stun_server).await {
+        Ok(public_addr) => {
+            info!(public_addr = %public_addr, "STUN public candidate discovered for player");
+            player_candidates.push(Candidate {
+                candidate_type: CandidateType::Public,
+                addr: public_addr,
+                priority: 80,
+            });
+        }
+        Err(e) => {
+            warn!("Failed to query STUN on receiver socket: {}", e);
+        }
+    }
 
-    // Register as player
-    let reg = SignalingMessage::RegisterPlayer { pairing_code };
-    let reg_msg = serde_json::to_string(&reg)?;
-    ws_tx.send(Message::Text(reg_msg.into())).await?;
+    // Add LAN and IPv6 candidates
+    let local_ips = crate::network::broadcast::get_local_ips();
+    for ip_str in local_ips {
+        if let Ok(ip) = ip_str.parse::<std::net::IpAddr>() {
+            if ip.is_loopback() {
+                continue;
+            }
+            let addr = SocketAddr::new(ip, recv_port);
+            let candidate_type = if ip.is_ipv6() {
+                CandidateType::IPv6
+            } else {
+                CandidateType::Lan
+            };
+            let priority = match candidate_type {
+                CandidateType::Lan => 100,
+                CandidateType::IPv6 => 90,
+                _ => 0,
+            };
+            player_candidates.push(Candidate {
+                candidate_type,
+                addr,
+                priority,
+            });
+        }
+    }
 
-    info!("Player registration request sent to signaling server");
 
-    // Wait for registration confirmation and connection answer
-    let mut host_candidate_addr: Option<SocketAddr> = None;
 
-    // We will run a local TCP listener to intercept the player's connection.
+    // 3. Bind the local proxy TCP listener
     let local_listener =
         tokio::net::TcpListener::bind(format!("127.0.0.1:{}", local_proxy_port)).await?;
     info!(
@@ -379,124 +554,199 @@ pub async fn run_player_signaling_loop(
         local_proxy_port
     );
 
-    // In parallel, wait for the player session to connect, and read its JoinRequest (SDP Offer)
-    let ws_tx_arc = Arc::new(tokio::sync::Mutex::new(ws_tx));
-
-    // Spawn task to handle local player socket and send SDP Offer
-    let ws_tx_clone = Arc::clone(&ws_tx_arc);
     let s_url = signaling_url.clone();
+    let p_code = pairing_code.clone();
 
-    let local_listener_task = tokio::spawn(async move {
-        let (mut local_stream, _) = local_listener.accept().await?;
+    // 4. Spawn background task to run the handshake proxy
+    tokio::spawn(async move {
+        // Await local connection from player client session
+        let (mut local_stream, _) = match local_listener.accept().await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Player proxy local listener accept failed: {}", e);
+                return;
+            }
+        };
+        drop(local_listener); // Drop the listener immediately to free up port 45105 for future connection attempts
         let _ = local_stream.set_nodelay(true);
         info!("Local player session connected to player signaling proxy");
 
         // Read JoinRequest (SDP Offer)
         let mut buf = vec![0u8; 8192];
-        let n = local_stream.read(&mut buf).await?;
-        if n == 0 {
-            return Err(anyhow!("Player closed connection immediately"));
+        let n = match local_stream.read(&mut buf).await {
+            Ok(0) | Err(_) => {
+                error!("Player closed connection before handshake");
+                return;
+            }
+            Ok(bytes) => bytes,
+        };
+
+        // Connect to signaling server
+        let ws_stream = match connect_async(&s_url).await {
+            Ok((s, _)) => s,
+            Err(e) => {
+                error!("Player proxy failed to connect to signaling server: {}", e);
+                return;
+            }
+        };
+        let (mut ws_tx, mut ws_rx) = ws_stream.split();
+
+        // Register as player
+        let reg = SignalingMessage::RegisterPlayer { pairing_code: p_code };
+        if let Ok(reg_msg) = serde_json::to_string(&reg) {
+            if ws_tx.send(Message::Text(reg_msg.into())).await.is_err() {
+                error!("Player proxy failed to send registration message");
+                return;
+            }
         }
+
+        // Wait for registration confirmation
+        if let Some(msg_res) = ws_rx.next().await {
+            match msg_res {
+                Ok(Message::Text(txt)) => {
+                    if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&txt) {
+                        if let SignalingMessage::RegistrationFailed { reason } = sig_msg {
+                            error!("Player signaling registration failed: {}", reason);
+                            return;
+                        }
+                    }
+                }
+                _ => {
+                    error!("Unexpected message from signaling server during registration");
+                    return;
+                }
+            }
+        }
+
+        // Parse JoinRequest JSON to inject candidates and public key
+        let mut join_req: serde_json::Value = match serde_json::from_slice(&buf[..n]) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Failed to parse JoinRequest JSON: {}", e);
+                return;
+            }
+        };
+        if let Some(obj) = join_req.as_object_mut() {
+            if let Ok(cands_val) = serde_json::to_value(&player_candidates) {
+                obj.insert("candidates".to_string(), cands_val);
+            }
+        }
+        let updated_join_req = match serde_json::to_vec(&join_req) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to serialize updated JoinRequest: {}", e);
+                return;
+            }
+        };
 
         // Send JoinRequest as SDP Offer via WebSocket
-        let offer_sdp = B64.encode(&buf[..n]);
+        let offer_sdp = B64.encode(updated_join_req);
         let offer = SignalingMessage::Offer {
+            session_token: String::new(),
             sdp: offer_sdp,
-            candidate_addr: "127.0.0.1:45102".to_string(), // Player local UDP recv port
+            candidates: player_candidates,
         };
+        if let Ok(offer_msg) = serde_json::to_string(&offer) {
+            if ws_tx.send(Message::Text(offer_msg.into())).await.is_err() {
+                error!("Player proxy failed to send SDP Offer");
+                return;
+            }
+            info!("SDP Offer sent to host via signaling server");
+        }
 
-        let mut tx = ws_tx_clone.lock().await;
-        tx.send(Message::Text(serde_json::to_string(&offer)?.into()))
-            .await?;
-        info!("SDP Offer sent to host via signaling server");
+        // Wait for the Answer from the host containing its candidates list
+        let mut answer_sdp = String::new();
+        while let Some(msg_res) = ws_rx.next().await {
+            let msg = match msg_res {
+                Ok(Message::Text(txt)) => txt,
+                _ => continue,
+            };
+            if let Ok(sig_msg) = serde_json::from_str::<SignalingMessage>(&msg) {
+                match sig_msg {
+                    SignalingMessage::Answer { sdp, .. } => {
+                        answer_sdp = sdp;
+                        break;
+                    }
+                    SignalingMessage::RegistrationFailed { reason } => {
+                        error!("Player signaling registration failed during wait: {}", reason);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
 
-        // Continue proxying...
-        Ok(local_stream)
+        if answer_sdp.is_empty() {
+            error!("Failed to receive SDP Answer from host");
+            return;
+        }
+
+        // Write the Answer back to the local TCP connection
+        let answer_bytes = match B64.decode(&answer_sdp) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to decode SDP Answer: {}", e);
+                return;
+            }
+        };
+        if local_stream.write_all(&answer_bytes).await.is_err() {
+            error!("Failed to write SDP Answer back to player session");
+            return;
+        }
+        info!("SDP Answer proxied back to player session");
+
+        // Continue full proxying loop between local TCP and WS connection
+        let (mut tcp_read, mut tcp_write) = local_stream.into_split();
+
+        let mut t1 = tokio::spawn(async move {
+            while let Some(msg_res) = ws_rx.next().await {
+                match msg_res {
+                    Ok(Message::Text(txt)) => {
+                        if let Ok(data) = B64.decode(&txt) {
+                            if tcp_write.write_all(&data).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(Message::Close(_)) | Err(_) => break,
+                    _ => {}
+                }
+            }
+        });
+
+        let mut t2 = tokio::spawn(async move {
+            let mut tcp_buf = vec![0u8; 4096];
+            loop {
+                match tcp_read.read(&mut tcp_buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(bytes) => {
+                        let b64_str = B64.encode(&tcp_buf[..bytes]);
+                        if ws_tx
+                            .send(Message::Text(b64_str.into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        tokio::select! {
+            _ = &mut t1 => {
+                t2.abort();
+            }
+            _ = &mut t2 => {
+                t1.abort();
+            }
+        }
+        info!("Signaling proxy connection finished");
     });
 
-    // Wait for the Answer from the host containing its public candidate IP/port
-    while let Some(msg_res) = ws_rx.next().await {
-        let msg = match msg_res {
-            Ok(Message::Text(txt)) => txt,
-            _ => continue,
-        };
-
-        let sig_msg: SignalingMessage = match serde_json::from_str(&msg) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
-        match sig_msg {
-            SignalingMessage::Answer {
-                sdp,
-                candidate_addr,
-            } => {
-                info!("Received SDP Answer from host at {}", candidate_addr);
-                if let Ok(addr) = candidate_addr.parse::<SocketAddr>() {
-                    host_candidate_addr = Some(addr);
-                }
-
-                // Decode SDP Answer (host's JoinAccepted or PairingRequired response)
-                let answer_bytes = B64.decode(sdp)?;
-
-                // Write the Answer back to the local TCP connection
-                if let Ok(Ok(Ok(mut local_stream))) =
-                    timeout(Duration::from_secs(5), local_listener_task).await
-                {
-                    local_stream.write_all(&answer_bytes).await?;
-                    info!("SDP Answer proxied back to player session");
-
-                    // Continue full proxying loop between local TCP and WS connection
-                    let (mut tcp_read, mut tcp_write) = local_stream.into_split();
-
-                    // We need a fresh WS connection for subsequent full control channel proxying
-                    let (ws_stream_full, _) = connect_async(&s_url).await?;
-                    let (mut ws_tx_full, mut ws_rx_full) = ws_stream_full.split();
-
-                    tokio::spawn(async move {
-                        while let Some(msg_res) = ws_rx_full.next().await {
-                            match msg_res {
-                                Ok(Message::Text(txt)) => {
-                                    if let Ok(data) = B64.decode(&txt) {
-                                        if tcp_write.write_all(&data).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                                Ok(Message::Close(_)) => break,
-                                Err(_) => break,
-                                _ => {}
-                            }
-                        }
-                    });
-
-                    tokio::spawn(async move {
-                        let mut tcp_buf = vec![0u8; 4096];
-                        loop {
-                            match tcp_read.read(&mut tcp_buf).await {
-                                Ok(0) | Err(_) => break,
-                                Ok(bytes) => {
-                                    let b64_str = B64.encode(&tcp_buf[..bytes]);
-                                    if ws_tx_full
-                                        .send(Message::Text(b64_str.into()))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-                break;
-            }
-            SignalingMessage::RegistrationFailed { reason } => {
-                return Err(anyhow!("Player signaling registration failed: {}", reason));
-            }
-            _ => {}
-        }
-    }
-
-    host_candidate_addr.ok_or_else(|| anyhow!("Failed to receive STUN candidate address from host"))
+    Ok(PlayerWanSetup {
+        socket: std_sock,
+        host_candidates: Vec::new(),
+        cipher: None,
+    })
 }

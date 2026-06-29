@@ -220,13 +220,46 @@ fn bind_broadcast_listener() -> Option<UdpSocket> {
 fn get_broadcast_addresses() -> Vec<String> {
     let mut addrs = Vec::new();
 
-    // Method 1: Parse ipconfig for all IPv4 addresses
-    if let Ok(output) = std::process::Command::new("ipconfig").output() {
+    // 1. Try hostname lookup first to resolve local IPs and compute broadcasts
+    if let Ok(hostname) = hostname::get() {
+        let hostname_str = hostname.to_string_lossy();
+        use std::net::ToSocketAddrs;
+        if let Ok(socket_addrs) = (hostname_str.as_ref(), 0).to_socket_addrs() {
+            for addr in socket_addrs {
+                if let std::net::IpAddr::V4(ip) = addr.ip() {
+                    let octets = ip.octets();
+                    if octets[0] != 127 && !(octets[0] == 169 && octets[1] == 254) {
+                        let bcast = format!("{}.{}.{}.255", octets[0], octets[1], octets[2]);
+                        if !addrs.contains(&bcast) {
+                            addrs.push(bcast);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Parse ipconfig for all IPv4 addresses using absolute system32 path on Windows
+    #[cfg(windows)]
+    let ipconfig_path = {
+        let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        format!("{}\\{}\\{}", sys_root, "System32", "ipconfig.exe")
+    };
+    #[cfg(not(windows))]
+    let ipconfig_path = "ipconfig";
+
+    let mut cmd = std::process::Command::new(ipconfig_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    if let Ok(output) = cmd.output() {
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
             let trimmed = line.trim();
-            // Match lines like "IPv4 Address. . . . . . . . . . . : 192.168.137.1"
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address"))
+            // Match standard or localized IPv4/IP Address lines
+            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
@@ -247,15 +280,21 @@ fn get_broadcast_addresses() -> Vec<String> {
         }
     }
 
-    // Method 2: Fallback — default route detection
+    // 3. Fallback — default route detection using multiple offline/online fallback targets
     if addrs.is_empty() {
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect("8.8.8.8:53").is_ok() {
-                if let Ok(local_addr) = socket.local_addr() {
-                    if let IpAddr::V4(ip) = local_addr.ip() {
-                        let octets = ip.octets();
-                        let bcast = format!("{}.{}.{}.255", octets[0], octets[1], octets[2]);
-                        addrs.push(bcast);
+            for fallback_target in &["255.255.255.255:53", "224.0.0.1:53", "8.8.8.8:53"] {
+                if socket.connect(fallback_target).is_ok() {
+                    if let Ok(local_addr) = socket.local_addr() {
+                        if let IpAddr::V4(ip) = local_addr.ip() {
+                            let octets = ip.octets();
+                            if octets[0] != 127 && !(octets[0] == 169 && octets[1] == 254) {
+                                let bcast = format!("{}.{}.{}.255", octets[0], octets[1], octets[2]);
+                                if !addrs.contains(&bcast) {
+                                    addrs.push(bcast);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -265,16 +304,66 @@ fn get_broadcast_addresses() -> Vec<String> {
     addrs
 }
 
+fn is_valid_external_ip(ip: std::net::IpAddr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        return false;
+    }
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // Filter out APIPA (link-local)
+            !(octets[0] == 169 && octets[1] == 254)
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            let octets = ipv6.octets();
+            // Filter out link-local (fe80::/10)
+            !((octets[0] == 0xfe) && (octets[1] & 0xc0 == 0x80))
+        }
+    }
+}
+
 /// Get all local IP addresses (for filtering out self-broadcasts).
 pub fn get_local_ips() -> Vec<String> {
     let mut ips = vec!["127.0.0.1".to_string()];
 
-    // Parse ipconfig for all our IPs
-    if let Ok(output) = std::process::Command::new("ipconfig").output() {
+    // 1. Try hostname lookup first to resolve local IPs
+    if let Ok(hostname) = hostname::get() {
+        let hostname_str = hostname.to_string_lossy();
+        use std::net::ToSocketAddrs;
+        if let Ok(socket_addrs) = (hostname_str.as_ref(), 0).to_socket_addrs() {
+            for addr in socket_addrs {
+                let ip = addr.ip();
+                if is_valid_external_ip(ip) {
+                    let ip_str = ip.to_string();
+                    if !ips.contains(&ip_str) {
+                        ips.push(ip_str);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Parse ipconfig for all our IPs using absolute system32 path on Windows
+    #[cfg(windows)]
+    let ipconfig_path = {
+        let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        format!("{}\\{}\\{}", sys_root, "System32", "ipconfig.exe")
+    };
+    #[cfg(not(windows))]
+    let ipconfig_path = "ipconfig";
+
+    let mut cmd = std::process::Command::new(ipconfig_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    if let Ok(output) = cmd.output() {
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
             let trimmed = line.trim();
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address"))
+            // Match standard or localized IPv4/IP Address lines
+            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
                 && trimmed.contains(": ")
             {
                 if let Some(ip_str) = trimmed.split(": ").last() {
@@ -285,22 +374,29 @@ pub fn get_local_ips() -> Vec<String> {
                         .unwrap_or(ip_str)
                         .trim()
                         .to_string();
-                    if clean_ip.parse::<std::net::IpAddr>().is_ok() && !ips.contains(&clean_ip) {
-                        ips.push(clean_ip);
+                    if let Ok(ip) = clean_ip.parse::<std::net::IpAddr>() {
+                        if is_valid_external_ip(ip) && !ips.contains(&clean_ip) {
+                            ips.push(clean_ip);
+                        }
                     }
                 }
             }
         }
     }
 
-    // Fallback
+    // 3. Fallback — default route detection using multiple offline/online fallback targets
     if ips.len() <= 1 {
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect("8.8.8.8:53").is_ok() {
-                if let Ok(local_addr) = socket.local_addr() {
-                    let ip = local_addr.ip().to_string();
-                    if !ips.contains(&ip) {
-                        ips.push(ip);
+            for fallback_target in &["255.255.255.255:53", "224.0.0.1:53", "8.8.8.8:53"] {
+                if socket.connect(fallback_target).is_ok() {
+                    if let Ok(local_addr) = socket.local_addr() {
+                        let ip = local_addr.ip();
+                        if is_valid_external_ip(ip) {
+                            let ip_str = ip.to_string();
+                            if !ips.contains(&ip_str) {
+                                ips.push(ip_str);
+                            }
+                        }
                     }
                 }
             }

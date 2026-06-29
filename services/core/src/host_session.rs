@@ -40,6 +40,7 @@ pub struct HostSessionHandle {
     pub clients: Arc<RwLock<HashMap<String, StreamClient>>>,
     event_tx: mpsc::UnboundedSender<HostEvent>,
     pub stream_port: u16,
+    pub public_stun_addr: Arc<RwLock<Option<SocketAddr>>>,
 }
 
 #[allow(dead_code)]
@@ -68,15 +69,25 @@ impl HostSessionHandle {
     pub fn stop(&self) {
         let _ = self.cmd_tx.send(SessionCmd::Stop);
     }
-    pub fn add_client(&self, session_id: String, display_name: String, addr: SocketAddr) {
+    pub fn add_client(
+        &self,
+        session_id: String,
+        display_name: String,
+        addr: SocketAddr,
+        candidates: Vec<SocketAddr>,
+        cipher: Option<Arc<crate::network::crypto::SessionCipher>>,
+    ) {
         UdpStreamer::add_client(
             &self.clients,
             StreamClient {
                 session_id: session_id.clone(),
                 display_name: display_name.clone(),
                 addr,
+                candidates,
+                cipher,
             },
         );
+
         let _ = self.cmd_tx.send(SessionCmd::AddClient {
             session_id: session_id.clone(),
             addr,
@@ -131,9 +142,11 @@ pub fn start(
         mpsc::channel::<EncodedPacket>(crate::network::streamer::STREAM_QUEUE_CAP);
 
     let clients: Arc<RwLock<HashMap<String, StreamClient>>> = Arc::new(RwLock::new(HashMap::new()));
+    let public_stun_addr = Arc::new(RwLock::new(None));
+    let public_stun_addr_clone = Arc::clone(&public_stun_addr);
 
     // Spawn the UDP streamer task
-    let streamer = UdpStreamer::new(stream_port, enc_rx, Arc::clone(&clients))
+    let streamer = UdpStreamer::new(stream_port, enc_rx, Arc::clone(&clients), public_stun_addr_clone)
         .with_context(|| format!("Cannot bind UDP stream port {}", stream_port))?;
     tokio::spawn(streamer.run());
 
@@ -160,6 +173,7 @@ pub fn start(
         clients,
         event_tx,
         stream_port,
+        public_stun_addr,
     };
     info!(target = ?target, port = stream_port, "Host session started");
     Ok(handle)

@@ -208,7 +208,9 @@ fn main() {
         extern "system" {
             fn CreateMutexW(attrs: *const u8, initial_owner: i32, name: *const u16) -> *mut u8;
             fn GetLastError() -> u32;
+            fn SetLastError(code: u32);
         }
+        unsafe { SetLastError(0); }
         let mutex_name = format!("Local\\Watchdog_{}\0", target_bin.replace(".exe", ""));
         let name: Vec<u16> = mutex_name.encode_utf16().collect();
         let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
@@ -333,7 +335,8 @@ fn main() {
             }
             if let Some(q) = reg_read_dword("Quality") {
                 cmd.arg("--quality");
-                cmd.arg(q.to_string());
+                let mbps = if q > 1000 { q / 1000 } else { q };
+                cmd.arg(mbps.to_string());
             }
             if let Some(fps) = reg_read_dword("Fps") {
                 cmd.arg("--fps");

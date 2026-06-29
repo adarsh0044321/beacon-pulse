@@ -7,13 +7,33 @@ pub mod receiver;
 pub mod rtp;
 pub mod session;
 pub mod signaling;
+pub mod signaling_server;
 #[cfg(feature = "host")]
 pub mod streamer;
 #[cfg(feature = "host")]
 pub mod udp_stream;
+pub mod crypto;
 pub mod webrtc;
 
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateType {
+    Lan,
+    Public,
+    IPv6,
+    Relay,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Candidate {
+    pub candidate_type: CandidateType,
+    pub addr: SocketAddr,
+    pub priority: u32,
+}
+
 
 pub const DEFAULT_PORT: u16 = 45100;
 pub const CONTROL_PORT: u16 = 45101;
@@ -30,7 +50,12 @@ pub enum ControlMessage {
         version: String,
         /// UDP port the client is listening on for incoming video frames
         udp_port: u16,
+        #[serde(default)]
+        candidates: Option<Vec<Candidate>>,
+        #[serde(default)]
+        public_key: Option<String>,
     },
+
     PairingCode {
         /// base64(HMAC-SHA256(key=pairing_code, data=challenge))
         hmac: String,
@@ -70,6 +95,10 @@ pub enum ControlMessage {
         session_id: String,
         stream_port: u16,
         permissions: Permissions,
+        #[serde(default)]
+        candidates: Option<Vec<Candidate>>,
+        #[serde(default)]
+        public_key: Option<String>,
     },
     JoinRejected {
         reason: String,
@@ -208,3 +237,71 @@ pub enum InputMsg {
         is_extended: bool,
     },
 }
+
+pub fn create_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    use socket2::{Socket, Domain, Type, Protocol};
+    use std::net::SocketAddr;
+
+    let ipv6_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], port)); // [::]:port
+    
+    // Try binding to IPv6 dual-stack
+    if let Ok(socket) = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP)) {
+        if socket.set_only_v6(false).is_ok() {
+            if socket.set_reuse_address(true).is_ok() {
+                if socket.bind(&ipv6_addr.into()).is_ok() {
+                    if socket.listen(128).is_ok() {
+                        let std_listener: std::net::TcpListener = socket.into();
+                        if std_listener.set_nonblocking(true).is_ok() {
+                            if let Ok(tokio_listener) = tokio::net::TcpListener::from_std(std_listener) {
+                                return Ok(tokio_listener);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback to standard IPv4 binding
+    let ipv4_addr = SocketAddr::from(([0, 0, 0, 0], port)); // 0.0.0.0:port
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&ipv4_addr.into())?;
+    socket.listen(128)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    std_listener.set_nonblocking(true)?;
+    tokio::net::TcpListener::from_std(std_listener)
+}
+
+pub fn create_dual_stack_udp_socket(port: u16) -> std::io::Result<std::net::UdpSocket> {
+    use socket2::{Socket, Domain, Type, Protocol};
+    use std::net::SocketAddr;
+
+    let ipv6_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], port)); // [::]:port
+    
+    // Try binding to IPv6 dual-stack
+    if let Ok(socket) = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)) {
+        if socket.set_only_v6(false).is_ok() {
+            if socket.set_reuse_address(true).is_ok() {
+                let _ = socket.set_recv_buffer_size(2 * 1024 * 1024);
+                let _ = socket.set_send_buffer_size(2 * 1024 * 1024);
+                if socket.bind(&ipv6_addr.into()).is_ok() {
+                    let std_sock: std::net::UdpSocket = socket.into();
+                    return Ok(std_sock);
+                }
+            }
+        }
+    }
+    
+    // Fallback to standard IPv4 binding
+    let ipv4_addr = SocketAddr::from(([0, 0, 0, 0], port)); // 0.0.0.0:port
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    let _ = socket.set_recv_buffer_size(2 * 1024 * 1024);
+    let _ = socket.set_send_buffer_size(2 * 1024 * 1024);
+    socket.bind(&ipv4_addr.into())?;
+    let std_sock: std::net::UdpSocket = socket.into();
+    Ok(std_sock)
+}
+
+

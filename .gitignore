@@ -60,3 +60,13 @@ apps/ui-android/app/build/
 apps/ui-android/.gradle/
 apps/ui-android/local.properties
 .gradle/
+
+# AI Agent Memory Files (Keep Local)
+BRAIN.md
+ROADMAP.md
+DECISIONS.md
+HANDOVER.md
+SESSION.md
+response.md
+.agents/
+AGENTS.md

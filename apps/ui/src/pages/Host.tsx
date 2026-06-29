@@ -25,7 +25,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   const {
     availableWindows, windowsLoading, fetchWindows,
     availableMonitors, monitorsLoading, fetchMonitors,
-    isSharing, activeHwnd, activeTarget, startShare, stopShare,
+    isSharing, activeHwnd, activeTarget, activeConnectionMode, startShare, stopShare,
     pairingCode, pairingExpiresIn, generatePairingCode,
     connectedClients, kickClient, fetchActiveClients,
     stats, updateStats,
@@ -46,6 +46,15 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     }
   };
 
+  const copyShareLink = () => {
+    if (pairingCode) {
+      const link = `http://localhost:45200/?code=${pairingCode}`;
+      navigator.clipboard.writeText(link)
+        .then(() => addToast('Link Copied', 'Direct connection link copied to clipboard!', 'success'))
+        .catch(() => addToast('Error', 'Failed to copy link', 'error'));
+    }
+  };
+
   const [tab, setTab] = useState<'share' | 'devices' | 'performance' | 'logs'>('share');
   const [selectedHwnd, setSelectedHwnd] = useState<number | null>(null);
   const [selectedMonitor, setSelectedMonitor] = useState<number | null>(null);
@@ -54,7 +63,14 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
   const [codeTimer, setCodeTimer] = useState(0);
   const [windowSearch, setWindowSearch] = useState('');
   const [hostIps, setHostIps] = useState<string[]>([]);
-  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [connectionMode, setConnectionMode] = useState<'lan' | 'wan' | 'both'>(
+    () => (localStorage.getItem('beacon_connection_mode') as any) || 'both'
+  );
+
+  const handleSetConnectionMode = (mode: 'lan' | 'wan' | 'both') => {
+    setConnectionMode(mode);
+    localStorage.setItem('beacon_connection_mode', mode);
+  };
 
   // Fetch host IPs on mount
   useEffect(() => {
@@ -65,15 +81,16 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
       .catch(console.error);
   }, []);
 
-  // Render QR code to canvas
-  useEffect(() => {
-    if (qrCanvasRef.current && pairingCode && hostIps.length > 0) {
+  // Callback ref for QR code canvas. This ensures that the QR code is always
+  // drawn immediately whenever the canvas element is mounted (e.g. after tab switching).
+  const qrCanvasRef = useCallback((node: HTMLCanvasElement | null) => {
+    if (node && pairingCode && hostIps.length > 0) {
       const payload = JSON.stringify({
         ips: hostIps,
         port: 45101,
         code: pairingCode
       });
-      QRCode.toCanvas(qrCanvasRef.current, payload, {
+      QRCode.toCanvas(node, payload, {
         width: 120,
         margin: 1,
         color: {
@@ -347,8 +364,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
     }
 
     if (!target) return;
-    await startShare(target);
-    await generatePairingCode();
+    await startShare(target, connectionMode);
   };
 
   const parseLogLine = (line: string): ParsedLog => {
@@ -695,6 +711,76 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                     )
                   )}
 
+                  {/* Connection Mode Selection */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', marginTop: '12px' }}>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Connection Mode:</span>
+                    <div className="tab-group" style={{ 
+                      display: 'flex', 
+                      background: 'rgba(255,255,255,0.03)', 
+                      border: '1px solid rgba(255,255,255,0.08)', 
+                      borderRadius: 'var(--radius-md)', 
+                      padding: '3px' 
+                    }}>
+                      <button 
+                        type="button"
+                        className={`tab-btn ${connectionMode === 'lan' ? 'active' : ''}`}
+                        onClick={() => handleSetConnectionMode('lan')}
+                        style={{ 
+                          flex: 1, 
+                          padding: '6px', 
+                          fontSize: '0.8rem', 
+                          borderRadius: 'calc(var(--radius-md) - 2px)', 
+                          border: 'none', 
+                          background: connectionMode === 'lan' ? 'var(--success)' : 'transparent', 
+                          color: connectionMode === 'lan' ? '#fff' : 'rgba(255,255,255,0.45)', 
+                          cursor: 'pointer',
+                          fontWeight: connectionMode === 'lan' ? 'bold' : 'normal',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        LAN (Local Only)
+                      </button>
+                      <button 
+                        type="button"
+                        className={`tab-btn ${connectionMode === 'wan' ? 'active' : ''}`}
+                        onClick={() => handleSetConnectionMode('wan')}
+                        style={{ 
+                          flex: 1, 
+                          padding: '6px', 
+                          fontSize: '0.8rem', 
+                          borderRadius: 'calc(var(--radius-md) - 2px)', 
+                          border: 'none', 
+                          background: connectionMode === 'wan' ? 'var(--success)' : 'transparent', 
+                          color: connectionMode === 'wan' ? '#fff' : 'rgba(255,255,255,0.45)', 
+                          cursor: 'pointer',
+                          fontWeight: connectionMode === 'wan' ? 'bold' : 'normal',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        WAN (Online Only)
+                      </button>
+                      <button 
+                        type="button"
+                        className={`tab-btn ${connectionMode === 'both' ? 'active' : ''}`}
+                        onClick={() => handleSetConnectionMode('both')}
+                        style={{ 
+                          flex: 1, 
+                          padding: '6px', 
+                          fontSize: '0.8rem', 
+                          borderRadius: 'calc(var(--radius-md) - 2px)', 
+                          border: 'none', 
+                          background: connectionMode === 'both' ? 'var(--success)' : 'transparent', 
+                          color: connectionMode === 'both' ? '#fff' : 'rgba(255,255,255,0.45)', 
+                          cursor: 'pointer',
+                          fontWeight: connectionMode === 'both' ? 'bold' : 'normal',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        Both
+                      </button>
+                    </div>
+                  </div>
+
                   <button
                     id="btn-start-share"
                     className="btn btn-success btn-lg btn-full"
@@ -739,7 +825,7 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
                         <Key size={16} />
                         <span style={{ fontSize: '0.875rem' }}>Scan QR or Enter Code</span>
-                        {codeTimer > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({codeTimer}s)</span>}
+                        {codeTimer > 0 && codeTimer < 3600 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({codeTimer}s)</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', justifyContent: 'center', width: '100%' }}>
                         <div className="pairing-code" style={{ minWidth: '120px', textAlign: 'center' }}>{pairingCode ?? '------'}</div>
@@ -749,12 +835,33 @@ export const Host: React.FC<HostProps> = ({ onNavigate }) => {
                           </div>
                         )}
                       </div>
-                      <button className="btn btn-ghost btn-sm" onClick={generatePairingCode}>Cycle Pairing Code</button>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button className="btn btn-ghost btn-sm" onClick={generatePairingCode}>Cycle Pairing Code</button>
+                        {pairingCode && (
+                          <button className="btn btn-ghost btn-sm" onClick={copyShareLink} style={{ color: 'var(--accent-purple)' }}>Copy Share Link</button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Streaming Session</h3>
                       
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Host Local IPs:</span>
+                        <span style={{ color: '#fff', fontWeight: 600, fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                          {hostIps.length > 0 ? hostIps.join(', ') : 'None'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Connection Mode:</span>
+                        <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>
+                          {activeConnectionMode === 'lan' ? 'LAN Only' :
+                           activeConnectionMode === 'wan' ? 'WAN Only' :
+                           activeConnectionMode === 'both' ? 'LAN + WAN' : 'Unknown'}
+                        </span>
+                      </div>
+
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                         <span style={{ color: 'var(--text-secondary)' }}>Sharing Mode:</span>
                         <span style={{ color: 'var(--accent)', fontWeight: 600 }}>

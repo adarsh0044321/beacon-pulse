@@ -382,6 +382,36 @@ npm run tauri build
 
 ## 📋 Changelog
 
+### v1.1.3 (2026-06-29)
+
+**WAN Screen Sharing & NAT Traversal**
+- **In-Process Signaling Server** — Added a built-in local WebSocket signaling broker running on port 45188 (upgraded from 8080 to prevent conflicts) that auto-spawns on the Host when a WAN or hybrid connection mode is active.
+- **NAT Traversal & Punching** — Integrated eager STUN pre-discovery, 15-second UDP keep-alive pings, and simultaneous bi-directional packet punching to safely traverse Address-Restricted and Symmetric NAT firewalls without cloud relays.
+- **Auto-Upgrade Registry Migrations** — Added startup hooks that scan settings and automatically migrate legacy signaling server config ports from 8080 to 45188.
+- **Non-JSON Text Proxying** — Hardened signaling proxies to safely forward base64-encoded raw TCP control stream data between registered peers.
+
+**UDP Socket Buffer Tuning & Network Stabilization**
+- **2 MB Socket Buffers** — Configured the OS send and receive buffer sizes (SO_SNDBUF and SO_RCVBUF) to 2 MB on all streaming and receiving UDP sockets. This eliminates kernel-level packet drops during massive frame bursts, resolving 1-2 FPS flickering and black screens.
+- **WAN Congestion Collapse Prevention** — Constrained maximum RTP payloads to 1173 bytes (limiting UDP packets to 1200 bytes) to fit comfortably under PPPoE/VPN MTU ceilings without undergoing IP-layer fragmentation.
+
+**End-to-End Keyframe Recovery & WebCodecs Auto-Reset**
+- **Stateful WebCodecs Recovery** — Integrated browser-side hooks to automatically catch decoder errors and re-initialize the WebCodecs VideoDecoder.
+- **Host-Side IDR Trigger** — Added a player-to-host keyframe request protocol over the TCP control connection. When the Player's decoder resets or encounters errors, it immediately requests an IDR keyframe from the Host's encoder to restore the stream instantly.
+
+**Interface Segregation & On-Screen Connection Instructions**
+- **Settings Separation** — Restructured the Settings panel inside the player client dashboard to hide Host-specific configurations (static pairing code PINs, unattended modes, encoder selectors, startup settings) and only expose the Signaling Server URL.
+- **Detailed Connection Walkthroughs** — Added a comprehensive on-screen "How to Connect?" overlay detailing step-by-step IP and port-forwarding instructions for same-network (LAN) and remote-network (WAN) sessions.
+
+**Clean Session Disconnection & Firewall Hardening**
+- **UI-Close Event Sync** — Added WebSocket close handlers on the Player daemon to monitor UI window exits and immediately terminate the active control session, cleanly removing the client from the Host UI list.
+- **WAN-Mode Direct Block** — Enforced loopback-only peer IP checks on the Host control listener during WAN sessions to reject unauthorized direct LAN connections.
+- **Elevated Installer Configurations** — Enforced UAC elevation on the C# setup installers to ensure Windows Firewall rules for UDP/TCP sharing ports are successfully registered.
+
+**Terminal Spawning & Subsystem Subversion**
+- **Terminal Flashing Prevention** — Configured command spawning (ipconfig, cmd.exe) with the CREATE_NO_WINDOW flag on Windows to eliminate flashing console windows during subnet scanning and CLI sessions.
+- **QuickEdit Freeze Prevention** — Compiled binaries with the windows_subsystem = "windows" directive to remove console subsystems from release builds, preventing Windows QuickEdit mode from freezing background tasks.
+- **Detached installer service spawning** — Spawn background watchdog and player processes using UseShellExecute = true to protect background processes from parent installer exit signals.
+
 ### v1.1.2 (2026-06-22)
 
 **Android Player Touch Control Enhancements**
@@ -397,36 +427,6 @@ npm run tauri build
 - **Localhost Web UI Default** — Defaulted `UiMode` to `1` (Localhost Web UI) in the codebase and setup programs, ensuring a smooth first-run web app experience.
 - **Crash Session Recovery** — Configured Watchdog to auto-resume multi-window, dual-window, and display sharing modes by tracking target metadata in the registry.
 - **Idle Recovery Fallback** — Handled stale startup window targets gracefully to prevent crash/failure loops.
-
-### v1.1.3 (2026-06-24)
-
-**Localhost Chrome UI H.264 Playback**
-- **Annex-B to AVCC Conversion** — Implemented dynamic byte stream conversion in the browser player (`Client.tsx`) to prefix NAL units with 4-byte lengths.
-- **Out-of-band SPS/PPS Configuration** — Parsed SPS and PPS parameter sets from incoming H.264 keyframes to construct the `AVCDecoderConfigurationRecord` description block dynamically, fully resolving Chrome's `VideoDecoder` decoding failure and black screen loops.
-- **Browser Logs HUD** — Integrated browser console logging visibility into the player dashboard overlay for troubleshooting.
-
-**mDNS & Local Loopback Discovery**
-- **Local Host Loopback Scan** — Added parallel TCP checks for loopback interfaces (`127.0.0.1`/`127.0.0.2`) on the player discovery panel.
-- **Retrieve Host IPs API** — Exposed active host network interfaces via named-pipe IPC.
-
-**Headless Installer Mode**
-- **Headless Setup Spawning** — Fixed `PulseSetup` tool to correctly spawn background player process silently when headless mode is selected.
-
-### v1.1.2 (2026-06-24)
-
-**Android Player Touch Control Enhancements**
-- **Direct Touch Mapping** — Corrected click input mapping to send left clicks instead of right clicks, and mapped long-press gestures to absolute remote right clicks.
-- **Relative Trackpad Mode** — Added a virtual laptop trackpad emulator with client-side cursor acceleration, tap-to-click, and click-and-drag gestures.
-- **Multi-Touch Gestures** — Added support for two-finger vertical scrolling (mouse wheel).
-- **Active Toggle Button** — Configured the touch settings button to act as a toggle between touch modes.
-
-**Localhost Chrome UI Video Playback Fix**
-- **H.264 Codec Upgrade** — Upgraded the WebCodecs decoding profile configuration in `Client.tsx` from Constrained Baseline (`avc1.42c033`) to High Profile (`avc1.640033`).
-
-**Watchdog & Startup Settings**
-- **UI Mode Defaults** — Updated default UI mode to Localhost Web UI (1) for hosts, players, and installers.
-- **Target Session Recovery** — Enhanced registry state persistence to allow the Watchdog service to auto-resume active sessions on crash/restart.
-- **Stale Target Handling** — Prevented host startup failure loops by falling back to idle mode and clearing configuration keys if the target window is closed.
 
 ### v1.1.1 (2026-06-21)
 

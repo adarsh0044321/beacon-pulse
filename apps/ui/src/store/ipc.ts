@@ -98,6 +98,7 @@ function responseMatchesCommand(event: string | undefined, cmd: string): boolean
     case 'get_active_share': return event === 'active_share';
     case 'generate_pairing_code': return event === 'pairing_code';
     case 'get_host_ips': return event === 'host_ips';
+    case 'read_recent_logs': return event === 'recent_logs';
     case 'get_active_clients': return event === 'active_clients';
     case 'discover_hosts': return event === 'host_list';
     case 'connect_to_host': return event === 'stream_connected';
@@ -152,9 +153,11 @@ function resolveNextPending(responseData: any) {
       } else if (req.cmd === 'get_active_clients') {
         req.resolve(responseData.clients || []);
       } else if (req.cmd === 'get_active_share') {
-        req.resolve(responseData.target || null);
+        req.resolve(responseData);
       } else if (req.cmd === 'get_host_ips') {
         req.resolve(responseData.ips || []);
+      } else if (req.cmd === 'read_recent_logs') {
+        req.resolve(responseData.lines || []);
       } else if (req.cmd === 'load_settings') {
         req.resolve(responseData.settings || {});
       } else if (req.cmd === 'list_host_monitors') {
@@ -174,9 +177,6 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
     return tauriInvoke<T>(cmd, args);
   }
 
-  if (cmd === 'read_recent_logs') {
-    return Promise.resolve(["Logs are only available in desktop standalone mode."] as any);
-  }
   if (cmd === 'send_wol_packet') {
     return Promise.resolve({} as T);
   }
@@ -194,7 +194,7 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       payload = { cmd: 'get_active_share' };
       break;
     case 'start_share':
-      payload = { cmd: 'start_share', target: args.target };
+      payload = { cmd: 'start_share', target: args.target, connection_mode: args.connection_mode };
       break;
     case 'stop_share':
       payload = { cmd: 'stop_share' };
@@ -207,6 +207,9 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
       break;
     case 'get_host_ips':
       payload = { cmd: 'get_host_ips' };
+      break;
+    case 'read_recent_logs':
+      payload = { cmd: 'read_recent_logs', log_type: args.logType, limit: args.limit };
       break;
     case 'kick_client':
       payload = { cmd: 'kick_client', client_id: args.clientId };

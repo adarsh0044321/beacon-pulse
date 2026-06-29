@@ -383,7 +383,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     name: *const u16,
                 ) -> *mut std::ffi::c_void;
                 fn GetLastError() -> u32;
+                fn SetLastError(code: u32);
             }
+            unsafe { SetLastError(0); }
             let name: Vec<u16> = "Local\\Beacon\0".encode_utf16().collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
             if h.is_null() || unsafe { GetLastError() } == 183 {
@@ -397,9 +399,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
         // Ensure console is hidden
         hide_console_window();
 
-        let wins = window_list::list_visible_windows()?;
         let mut selected_win = None;
         if let Some(ref title) = host_args.window_title {
+            let wins = window_list::list_visible_windows()?;
             let matched: Vec<_> = wins
                 .iter()
                 .filter(|w| {
@@ -878,7 +880,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     registry::delete_value("ControlPort");
                 }
                 if let Some(q) = final_args.quality {
-                    registry::write_dword("Quality", q);
+                    let kbps = if q > 1000 { q } else { q * 1000 };
+                    registry::write_dword("Quality", kbps);
                 } else {
                     registry::delete_value("Quality");
                 }
@@ -1076,37 +1079,45 @@ fn start_sharing_service(
     is_bg_service: bool,
 ) -> Result<()> {
     // Apply quality settings
-    if let Some(mbps) = host_args.quality {
-        println!("  Quality: {} Mbps (custom)", mbps);
-    } else {
-        println!("  Quality: 20 Mbps (LAN default)");
+    if !silent_startup {
+        if let Some(mbps) = host_args.quality {
+            println!("  Quality: {} Mbps (custom)", mbps);
+        } else {
+            println!("  Quality: 20 Mbps (LAN default)");
+        }
+
+        if let Some(fps) = host_args.fps {
+            println!("  Frame Rate: {} FPS (custom)", fps);
+        } else {
+            println!("  Frame Rate: 60 FPS (default)");
+        }
+
+        if let Some(audio) = host_args.audio {
+            println!(
+                "  Audio Sharing: {}",
+                if audio { "ENABLED" } else { "DISABLED" }
+            );
+        }
+
+        if let Some(cb) = host_args.clipboard {
+            println!(
+                "  Clipboard Sync: {}",
+                if cb { "ENABLED" } else { "DISABLED" }
+            );
+        }
     }
 
-    if let Some(fps) = host_args.fps {
-        println!("  Frame Rate: {} FPS (custom)", fps);
-    } else {
-        println!("  Frame Rate: 60 FPS (default)");
-    }
-
-    if let Some(audio) = host_args.audio {
-        println!(
-            "  Audio Sharing: {}",
-            if audio { "ENABLED" } else { "DISABLED" }
-        );
-    }
-
-    if let Some(cb) = host_args.clipboard {
-        println!(
-            "  Clipboard Sync: {}",
-            if cb { "ENABLED" } else { "DISABLED" }
-        );
-    }
-
-    // Initialize tracing (logs go to stderr/files)
-    tracing_subscriber::fmt()
-        .with_env_filter("beacon_pulse=info")
-        .with_writer(std::io::stderr)
-        .init();
+    // Initialize core multi-subsystem rolling daily log files and install crash handler
+    let session_id = SessionId::new();
+    let _log_guard = match crate::logging::init::init(session_id.as_str()) {
+        Ok(g) => Some(g),
+        Err(e) => {
+            eprintln!("Failed to initialize logging files: {}", e);
+            None
+        }
+    };
+    let log_dir = crate::logging::init::log_dir();
+    crate::logging::crash_handler::install(&log_dir);
 
     // Start async runtime
     let rt = tokio::runtime::Runtime::new()?;
@@ -1124,6 +1135,7 @@ fn start_sharing_service(
             session_id,
             host_session: Arc::new(Mutex::new(None)),
             active_target: Arc::new(Mutex::new(None)),
+            connection_mode: Arc::new(Mutex::new(None)),
             #[cfg(feature = "player")]
             client_session: Arc::new(Mutex::new(None)),
             host_event_rx: Arc::new(Mutex::new(dummy_rx)),
@@ -1161,8 +1173,12 @@ fn start_sharing_service(
         let control_port = host_args.control_port.unwrap_or(network::CONTROL_PORT);
 
         // If user specified a custom quality, set the bitrate on the encoder config
-        if let Some(mbps) = host_args.quality {
-            let bps = mbps * 1_000_000;
+        if let Some(q_val) = host_args.quality {
+            let bps = if q_val > 1000 {
+                q_val as u64 * 1000
+            } else {
+                q_val as u64 * 1_000_000
+            };
             std::env::set_var("BEACON_BITRATE_BPS", bps.to_string());
         }
 
@@ -1228,9 +1244,21 @@ fn start_sharing_service(
                 println!("  │  No pairing code required to connect.    │");
             }
             println!("  │                                          │");
-            println!("  │  Stream Port:   {}                    │", stream_port);
-            println!("  │  Control Port:  {}                    │", control_port);
+            let stream_line = format!("Stream Port:   {}", stream_port);
+            let control_line = format!("Control Port:  {}", control_port);
+            println!("  │  {:<40} │", stream_line);
+            println!("  │  {:<40} │", control_line);
             println!("  │                                          │");
+            let local_ips = crate::network::broadcast::get_local_ips();
+            let ips_filtered: Vec<String> = local_ips.into_iter().filter(|ip| ip != "127.0.0.1").collect();
+            if !ips_filtered.is_empty() {
+                println!("  │  Local IP Targets (LAN/Direct Mode):     │");
+                for ip in ips_filtered {
+                    let line = format!("    - {}", ip);
+                    println!("  │  {:<40} │", line);
+                }
+                println!("  │                                          │");
+            }
             if unattended {
                 println!("  │  Starting background service...          │");
             } else {
@@ -1267,11 +1295,10 @@ fn start_sharing_service(
 
         // Start control channel TCP listener
         // Bind TCP listener first to verify port is free and service is healthy!
-        let addr = format!("0.0.0.0:{}", control_port);
-        let listener = match tokio::net::TcpListener::bind(&addr).await {
+        let listener = match crate::network::create_dual_stack_listener(control_port) {
             Ok(l) => l,
             Err(e) => {
-                error!("Network listener FAILED to bind to {} — port may be in use: {}", addr, e);
+                error!("Network listener FAILED to bind to port {} — port may be in use: {}", control_port, e);
                 std::process::exit(5); // Exit with code 5 so watchdog knows it failed
             }
         };

@@ -25,7 +25,9 @@ impl UdpStreamer {
     }
 
     pub async fn bind(&mut self, port: u16) -> Result<()> {
-        let sock = UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
+        let std_sock = super::create_dual_stack_udp_socket(port)?;
+        std_sock.set_nonblocking(true)?;
+        let sock = UdpSocket::from_std(std_sock)?;
         self.socket = Some(sock);
         Ok(())
     }

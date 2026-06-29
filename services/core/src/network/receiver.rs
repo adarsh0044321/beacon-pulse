@@ -107,6 +107,9 @@ pub struct UdpReceiver {
     fec_recoveries: u64,
     seq_tracker: SeqTracker,
     pub latest_rtt_ms: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    pub cipher: Option<std::sync::Arc<super::crypto::SessionCipher>>,
+    pub host_candidates: Option<Vec<std::net::SocketAddr>>,
+    send_seq_counter: std::sync::atomic::AtomicU64,
 }
 
 impl UdpReceiver {
@@ -117,9 +120,8 @@ impl UdpReceiver {
     }
 
     pub fn new(bind_port: u16) -> Result<(Self, mpsc::UnboundedReceiver<ReceivedFrame>)> {
-        let bind_addr = format!("0.0.0.0:{}", bind_port);
-        let socket = UdpSocket::bind(&bind_addr)
-            .with_context(|| format!("UDP recv bind failed on {}", bind_addr))?;
+        let socket = super::create_dual_stack_udp_socket(bind_port)
+            .with_context(|| format!("UDP recv bind failed on port {}", bind_port))?;
         socket.set_read_timeout(Some(Duration::from_millis(500)))?;
 
         let (frame_tx, frame_rx) = mpsc::unbounded_channel();
@@ -139,6 +141,37 @@ impl UdpReceiver {
                 fec_recoveries: 0,
                 seq_tracker: SeqTracker::new(),
                 latest_rtt_ms: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                cipher: None,
+                host_candidates: None,
+                send_seq_counter: std::sync::atomic::AtomicU64::new(0),
+            },
+            frame_rx,
+        ))
+    }
+
+    pub fn new_from_socket(socket: std::net::UdpSocket) -> Result<(Self, mpsc::UnboundedReceiver<ReceivedFrame>)> {
+        socket.set_read_timeout(Some(Duration::from_millis(500)))?;
+
+        let (frame_tx, frame_rx) = mpsc::unbounded_channel();
+        info!("UDP receiver socket initialized from pre-bound socket");
+
+        Ok((
+            Self {
+                socket,
+                frame_tx,
+                reassembler: Reassembler::new(),
+                stats_interval: Duration::from_secs(1),
+                last_stats: Instant::now(),
+                frames_received: 0,
+                packets_received: 0,
+                bytes_received: 0,
+                parse_errors: 0,
+                fec_recoveries: 0,
+                seq_tracker: SeqTracker::new(),
+                latest_rtt_ms: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                cipher: None,
+                host_candidates: None,
+                send_seq_counter: std::sync::atomic::AtomicU64::new(0),
             },
             frame_rx,
         ))
@@ -149,7 +182,36 @@ impl UdpReceiver {
         let mut buf = vec![0u8; 2048];
         info!("UdpReceiver receive loop started");
 
+        let mut last_keepalive = Instant::now();
+        let mut punched = false;
+
         while running.load(std::sync::atomic::Ordering::Relaxed) {
+            // Simultaneous NAT hole punching burst on startup
+            if !punched {
+                if let Some(ref candidates) = self.host_candidates {
+                    info!("Sending initial NAT hole punch burst to {} host candidates", candidates.len());
+                    for _ in 0..5 {
+                        for addr in candidates {
+                            let _ = self.socket.send_to(&[0x00], *addr);
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                punched = true;
+                last_keepalive = Instant::now();
+            }
+
+            // NAT Keep-Alive: send single-byte 0x00 packet every 15 seconds
+            if last_keepalive.elapsed() >= Duration::from_secs(15) {
+                if let Some(ref candidates) = self.host_candidates {
+                    debug!("Sending NAT keep-alive packet to {} host candidates", candidates.len());
+                    for addr in candidates {
+                        let _ = self.socket.send_to(&[0x00], *addr);
+                    }
+                }
+                last_keepalive = Instant::now();
+            }
+
             let (n, src) = match self.socket.recv_from(&mut buf) {
                 Ok(v) => v,
                 Err(e)
@@ -167,7 +229,32 @@ impl UdpReceiver {
                 }
             };
 
-            let data = &buf[..n];
+            let mut data = &buf[..n];
+            let decrypted_data_holder;
+
+            // Ignore raw single-byte keep-alive / punch packets (0x00)
+            if n == 1 && buf[0] == 0x00 {
+                continue;
+            }
+
+            // Decrypt packet payload if cipher is enabled
+            if let Some(ref cipher) = self.cipher {
+                if n >= 12 + 16 {
+                    let mut nonce = [0u8; 12];
+                    nonce.copy_from_slice(&buf[0..12]);
+                    let mut ciphertext = buf[12..n].to_vec();
+                    if cipher.decrypt_packet(nonce, &mut ciphertext).is_ok() {
+                        decrypted_data_holder = ciphertext;
+                        data = &decrypted_data_holder;
+                    } else {
+                        debug!("Decryption failed on received UDP packet");
+                        continue;
+                    }
+                } else {
+                    debug!("Received encrypted packet too short: {} bytes", n);
+                    continue;
+                }
+            }
 
             // ── 4a: RTCP-lite ─────────────────────────────────────────────
             if let Some((RTCP_TYPE_PROBE, ts)) = parse_rtcp(data) {
@@ -180,7 +267,22 @@ impl UdpReceiver {
                     .store(rtt_ms, std::sync::atomic::Ordering::Relaxed);
 
                 let ack = build_rtcp(RTCP_TYPE_ACK, ts);
-                let _ = self.socket.send_to(&ack, src);
+                let mut wire = ack.to_vec();
+
+                // Encrypt RTCP ACK response
+                if let Some(ref cipher) = self.cipher {
+                    let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut nonce = [0u8; 12];
+                    nonce[0..8].copy_from_slice(&count.to_be_bytes());
+                    if cipher.encrypt_packet(nonce, &mut wire).is_ok() {
+                        let mut encrypted_wire = Vec::with_capacity(12 + wire.len());
+                        encrypted_wire.extend_from_slice(&nonce);
+                        encrypted_wire.extend_from_slice(&wire);
+                        wire = encrypted_wire;
+                    }
+                }
+
+                let _ = self.socket.send_to(&wire, src);
                 debug!(ts, rtt_ms, "RTCP probe echoed as ack");
                 continue;
             }

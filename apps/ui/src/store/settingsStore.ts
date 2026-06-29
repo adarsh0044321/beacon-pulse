@@ -19,6 +19,7 @@ interface Settings {
   static_code: string;
   tls_enabled: boolean;
   adaptive_bitrate_enabled: boolean;
+  signaling_server: string;
 
   // Actions
   setBitrate: (kbps: number) => void;
@@ -35,6 +36,7 @@ interface Settings {
   setIndicatorMode: (mode: IndicatorMode) => void;
   toggleTls: () => void;
   toggleAdaptiveBitrate: () => void;
+  setSignalingServer: (url: string) => void;
   save: () => Promise<void>;
   load: () => Promise<void>;
 }
@@ -54,6 +56,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   static_code: '',
   tls_enabled: false,
   adaptive_bitrate_enabled: true,
+  signaling_server: 'ws://127.0.0.1:45188',
 
   setBitrate: (kbps) => set({ bitrate_kbps: kbps }),
   setFps: (fps) => set({ fps }),
@@ -69,6 +72,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
   setIndicatorMode: (mode) => set({ indicator_mode: mode }),
   toggleTls: () => set(s => ({ tls_enabled: !s.tls_enabled })),
   toggleAdaptiveBitrate: () => set(s => ({ adaptive_bitrate_enabled: !s.adaptive_bitrate_enabled })),
+  setSignalingServer: (signaling_server) => set({ signaling_server }),
 
   save: async () => {
     const s = get();
@@ -88,6 +92,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
         static_code: s.static_code,
         tls_enabled: s.tls_enabled,
         adaptive_bitrate_enabled: s.adaptive_bitrate_enabled,
+        signaling_server: s.signaling_server,
       }
     });
   },
@@ -104,6 +109,7 @@ export const useSettingsStore = create<Settings>((set, get) => ({
         'clipboard_enabled', 'allow_input_control', 'start_with_windows',
         'unattended_mode', 'unattended_pin', 'indicator_mode',
         'use_static_code', 'static_code', 'tls_enabled', 'adaptive_bitrate_enabled',
+        'signaling_server',
       ] as const;
       const safe: Record<string, unknown> = {};
       for (const key of safeKeys) {

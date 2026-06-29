@@ -42,7 +42,7 @@ fun StreamingScreen(
     var statsText by remember { mutableStateOf("Latency: --ms  |  FPS: --") }
     
     var viewSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1920, 1080)) }
-    var isTrackpadMode by remember { mutableStateOf(false) }
+    var isTrackpadMode by remember { mutableStateOf(true) }
     var virtualCursorX by remember { mutableStateOf(0.5f) }
     var virtualCursorY by remember { mutableStateOf(0.5f) }
     
@@ -631,7 +631,7 @@ fun StreamingScreen(
                             containerColor = if (isTrackpadMode) Color(0xFF6366F1) else Color(0xFF334155)
                         )
                     ) {
-                        Text(if (isTrackpadMode) "🖱️ Trackpad" else "📱 Direct Touch", color = Color.White, fontSize = 12.sp)
+                        Text(if (isTrackpadMode) "🖱️ Virtual Mouse" else "📱 Direct Touch", color = Color.White, fontSize = 12.sp)
                     }
 
                     // Disconnect button
@@ -646,6 +646,116 @@ fun StreamingScreen(
                     ) {
                         Text("Disconnect", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+
+        // Virtual Cursor overlay (only in Trackpad/Virtual Mouse mode)
+        if (isTrackpadMode) {
+            Box(
+                modifier = Modifier
+                    .offset {
+                        val pxX = (virtualCursorX * viewSize.width).toInt()
+                        val pxY = (virtualCursorY * viewSize.height).toInt()
+                        androidx.compose.ui.unit.IntOffset(pxX, pxY)
+                    }
+                    .size(24.dp)
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(0f, 0f)
+                        lineTo(15.dp.toPx(), 15.dp.toPx())
+                        lineTo(9.dp.toPx(), 15.dp.toPx())
+                        lineTo(14.dp.toPx(), 24.dp.toPx())
+                        lineTo(11.dp.toPx(), 25.dp.toPx())
+                        lineTo(6.dp.toPx(), 16.dp.toPx())
+                        lineTo(2.dp.toPx(), 20.dp.toPx())
+                        close()
+                    }
+                    drawPath(path, color = Color.White)
+                    drawPath(path, color = Color.Black, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                }
+            }
+        }
+
+        // Left & Right Click overlay buttons (only in Trackpad/Virtual Mouse mode)
+        if (isTrackpadMode && connectionStatus == "Connected" && !showMenu) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp)
+                    .background(Color(0x800F172A), RoundedCornerShape(12.dp))
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val client = activeClient ?: return@Button
+                        val width = viewSize.width
+                        val height = viewSize.height
+                        val clickDown = JSONObject().apply {
+                            put("kind", "mouse_button")
+                            put("button", 0) // Left click
+                            put("pressed", true)
+                            put("x", virtualCursorX)
+                            put("y", virtualCursorY)
+                            put("viewport_w", width)
+                            put("viewport_h", height)
+                            put("display_id", 0)
+                        }
+                        val clickUp = JSONObject().apply {
+                            put("kind", "mouse_button")
+                            put("button", 0)
+                            put("pressed", false)
+                            put("x", virtualCursorX)
+                            put("y", virtualCursorY)
+                            put("viewport_w", width)
+                            put("viewport_h", height)
+                            put("display_id", 0)
+                        }
+                        client.sendInputEvent(clickDown)
+                        client.sendInputEvent(clickUp)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.height(38.dp)
+                ) {
+                    Text("L-Click", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = {
+                        val client = activeClient ?: return@Button
+                        val width = viewSize.width
+                        val height = viewSize.height
+                        val clickDown = JSONObject().apply {
+                            put("kind", "mouse_button")
+                            put("button", 1) // Right click
+                            put("pressed", true)
+                            put("x", virtualCursorX)
+                            put("y", virtualCursorY)
+                            put("viewport_w", width)
+                            put("viewport_h", height)
+                            put("display_id", 0)
+                        }
+                        val clickUp = JSONObject().apply {
+                            put("kind", "mouse_button")
+                            put("button", 1)
+                            put("pressed", false)
+                            put("x", virtualCursorX)
+                            put("y", virtualCursorY)
+                            put("viewport_w", width)
+                            put("viewport_h", height)
+                            put("display_id", 0)
+                        }
+                        client.sendInputEvent(clickDown)
+                        client.sendInputEvent(clickUp)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.height(38.dp)
+                ) {
+                    Text("R-Click", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

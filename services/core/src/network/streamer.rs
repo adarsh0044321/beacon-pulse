@@ -40,6 +40,8 @@ pub struct StreamClient {
     pub session_id: String,
     pub display_name: String,
     pub addr: SocketAddr,
+    pub candidates: Vec<SocketAddr>,
+    pub cipher: Option<Arc<super::crypto::SessionCipher>>,
 }
 
 pub struct UdpStreamer {
@@ -47,6 +49,8 @@ pub struct UdpStreamer {
     clients: Arc<RwLock<HashMap<String, StreamClient>>>,
     socket: UdpSocket,
     seq: u16,
+    public_stun_addr: Arc<RwLock<Option<SocketAddr>>>,
+    send_seq_counter: std::sync::atomic::AtomicU64,
 }
 
 impl UdpStreamer {
@@ -54,10 +58,10 @@ impl UdpStreamer {
         bind_port: u16,
         packet_rx: mpsc::Receiver<EncodedPacket>,
         clients: Arc<RwLock<HashMap<String, StreamClient>>>,
+        public_stun_addr: Arc<RwLock<Option<SocketAddr>>>,
     ) -> Result<Self> {
-        let bind_addr = format!("0.0.0.0:{}", bind_port);
-        let std_sock = std::net::UdpSocket::bind(&bind_addr)
-            .with_context(|| format!("UDP stream bind failed on {}", bind_addr))?;
+        let std_sock = super::create_dual_stack_udp_socket(bind_port)
+            .with_context(|| format!("UDP stream bind failed on port {}", bind_port))?;
         std_sock
             .set_nonblocking(true)
             .context("Failed to set UDP socket non-blocking")?;
@@ -69,6 +73,8 @@ impl UdpStreamer {
             clients,
             socket,
             seq: 0,
+            public_stun_addr,
+            send_seq_counter: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -91,6 +97,20 @@ impl UdpStreamer {
 
     pub async fn run(mut self) {
         info!("UdpStreamer started");
+
+        // Eager STUN query on startup using the persistent streaming socket
+        let stun_server = crate::registry::read_string("StunServer")
+            .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+        match super::signaling::query_stun_server_on_socket(&self.socket, &stun_server).await {
+            Ok(addr) => {
+                info!(public_addr = %addr, "STUN public candidate discovered on streamer socket");
+                *self.public_stun_addr.write().unwrap() = Some(addr);
+            }
+            Err(e) => {
+                warn!("Failed to query STUN on streamer socket: {}", e);
+            }
+        }
+
         let mut probe_interval = tokio::time::interval(Duration::from_secs(1));
 
         loop {
@@ -136,7 +156,20 @@ impl UdpStreamer {
         let clients: Vec<StreamClient> =
             { self.clients.read().unwrap().values().cloned().collect() };
         for client in &clients {
-            if let Err(e) = self.socket.send_to(&probe, client.addr).await {
+            let mut wire = probe.to_vec();
+            if let Some(ref cipher) = client.cipher {
+                let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut nonce = [0u8; 12];
+                nonce[0..8].copy_from_slice(&count.to_be_bytes());
+                if cipher.encrypt_packet(nonce, &mut wire).is_ok() {
+                    let mut encrypted_wire = Vec::with_capacity(12 + wire.len());
+                    encrypted_wire.extend_from_slice(&nonce);
+                    encrypted_wire.extend_from_slice(&wire);
+                    wire = encrypted_wire;
+                }
+            }
+
+            if let Err(e) = self.socket.send_to(&wire, client.addr).await {
                 warn!(client = %client.addr, error = %e, "RTCP probe send failed");
             }
         }
@@ -145,9 +178,74 @@ impl UdpStreamer {
 
     /// Non-blocking drain of incoming RTCP acks on the socket.
     fn drain_rtcp_acks(&self) {
-        let mut buf = [0u8; 64];
-        while let Ok((n, _src)) = self.socket.try_recv_from(&mut buf) {
-            if let Some((RTCP_TYPE_ACK, echo_ts)) = parse_rtcp(&buf[..n]) {
+        let mut buf = [0u8; 128];
+        while let Ok((n, src)) = self.socket.try_recv_from(&mut buf) {
+            let mut data = buf[..n].to_vec();
+
+            // Decrypt if client has a cipher
+            let mut dec_client_id = None;
+            {
+                let clients_read = self.clients.read().unwrap();
+                for (id, client) in clients_read.iter() {
+                    if client.candidates.contains(&src) && client.cipher.is_some() {
+                        dec_client_id = Some(id.clone());
+                        break;
+                    }
+                }
+            }
+
+            if let Some(id) = dec_client_id {
+                let clients_read = self.clients.read().unwrap();
+                if let Some(client) = clients_read.get(&id) {
+                    if let Some(ref cipher) = client.cipher {
+                        if data.len() >= 12 + 16 {
+                            let mut nonce = [0u8; 12];
+                            nonce.copy_from_slice(&data[0..12]);
+                            let mut ciphertext = data[12..].to_vec();
+                            if cipher.decrypt_packet(nonce, &mut ciphertext).is_ok() {
+                                data = ciphertext;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check if it's keep-alive/punch (1-byte [0x00])
+            if data.len() == 1 && data[0] == 0x00 {
+                let mut clients_write = self.clients.write().unwrap();
+                for client in clients_write.values_mut() {
+                    if client.candidates.contains(&src) && client.addr != src {
+                        info!(
+                            session_id = %client.session_id,
+                            old_addr = %client.addr,
+                            new_addr = %src,
+                            "UDP path verified (via punch): switched to active candidate"
+                        );
+                        client.addr = src;
+                    }
+                }
+                continue;
+            }
+
+            let is_lrcp = parse_rtcp(&data).is_some();
+            let is_punch = &data == b"PUNCH";
+
+            if is_lrcp || is_punch {
+                let mut clients_write = self.clients.write().unwrap();
+                for client in clients_write.values_mut() {
+                    if client.candidates.contains(&src) && client.addr != src {
+                        info!(
+                            session_id = %client.session_id,
+                            old_addr = %client.addr,
+                            new_addr = %src,
+                            "UDP path verified: switched to active candidate"
+                        );
+                        client.addr = src;
+                    }
+                }
+            }
+
+            if let Some((RTCP_TYPE_ACK, echo_ts)) = parse_rtcp(&data) {
                 let rtt_us = crate::telemetry::now_us().saturating_sub(echo_ts);
                 METRICS
                     .rtt_us
@@ -156,6 +254,7 @@ impl UdpStreamer {
             }
         }
     }
+
 
     // ── Encoded packet → RTP + FEC ────────────────────────────────────────
 
@@ -207,7 +306,20 @@ impl UdpStreamer {
         for client in &client_list {
             // Data fragments
             for wire in &wire_frames {
-                match self.socket.send_to(wire, client.addr).await {
+                let mut wire_send = wire.clone();
+                if let Some(ref cipher) = client.cipher {
+                    let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut nonce = [0u8; 12];
+                    nonce[0..8].copy_from_slice(&count.to_be_bytes());
+                    if cipher.encrypt_packet(nonce, &mut wire_send).is_ok() {
+                        let mut encrypted_wire = Vec::with_capacity(12 + wire_send.len());
+                        encrypted_wire.extend_from_slice(&nonce);
+                        encrypted_wire.extend_from_slice(&wire_send);
+                        wire_send = encrypted_wire;
+                    }
+                }
+
+                match self.socket.send_to(&wire_send, client.addr).await {
                     Ok(sent) => {
                         METRICS
                             .bytes_sent
@@ -225,7 +337,20 @@ impl UdpStreamer {
                 }
             }
             // FEC parity
-            match self.socket.send_to(&parity_wire, client.addr).await {
+            let mut parity_send = parity_wire.clone();
+            if let Some(ref cipher) = client.cipher {
+                let count = self.send_seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut nonce = [0u8; 12];
+                nonce[0..8].copy_from_slice(&count.to_be_bytes());
+                if cipher.encrypt_packet(nonce, &mut parity_send).is_ok() {
+                    let mut encrypted_wire = Vec::with_capacity(12 + parity_send.len());
+                    encrypted_wire.extend_from_slice(&nonce);
+                    encrypted_wire.extend_from_slice(&parity_send);
+                    parity_send = encrypted_wire;
+                }
+            }
+
+            match self.socket.send_to(&parity_send, client.addr).await {
                 Ok(sent) => {
                     METRICS
                         .bytes_sent

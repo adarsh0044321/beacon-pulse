@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users, Trash2, History, Cpu } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Wifi, WifiOff, Maximize2, Minimize2, Activity, Settings as SettingsIcon, Play, Terminal, Users, Trash2, History, Cpu, Power } from 'lucide-react';
 import type { Page } from '../App';
 import { useSessionStore, type DiscoveredHost } from '../store/sessionStore';
 import { useToastStore } from '../store/toastStore';
@@ -325,6 +325,7 @@ function useMultiWebCodecsDecoder() {
         error: (e: DOMException) => {
           console.error(`[WebCodecs] Decoder error on display ${displayId}:`, e);
           setErrors(prev => ({ ...prev, [displayId]: `Decoder error: ${e.message}` }));
+          invoke('request_keyframe').catch(console.error);
         },
       });
 
@@ -398,6 +399,7 @@ function useMultiWebCodecsDecoder() {
 
     if (needsInit) {
       initDecoder(displayId, width, height, targetCodec, description);
+      invoke('request_keyframe').catch(console.error);
     }
     const decoder = instance.decoder;
     if (!decoder || decoder.state !== 'configured') return;
@@ -581,6 +583,17 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
   const { addToast } = useToastStore();
 
+  const handleShutdown = async () => {
+    if (window.confirm("Are you sure you want to stop the Player service completely? This will terminate the background player process.")) {
+      try {
+        await invoke('shutdown');
+        addToast('Service Stopped', 'The Player service is shutting down...', 'success');
+      } catch (err: any) {
+        addToast('Error', err.message || 'Failed to stop service', 'error');
+      }
+    }
+  };
+
   const [activeDisplays, setActiveDisplays] = useState<number[]>([0]);
   const [activeDisplayTab, setActiveDisplayTab] = useState<number | 'grid'>(0);
 
@@ -592,6 +605,8 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
   const decodeError = decodeErrors[activeStatsId] || null;
 
   const [tab, setTab] = useState<'join' | 'stream' | 'performance' | 'logs' | 'remote_manager'>('join');
+  const [connectionMode, setConnectionMode] = useState<'wan' | 'lan'>('wan');
+  const [showInstructions, setShowInstructions] = useState(false);
   const [pairingInput, setPairingInput] = useState('');
   const [connectingHost, setConnectingHost] = useState<DiscoveredHost | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -778,6 +793,29 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
         clearInterval(recordingTimerRef.current);
       }
     };
+  }, []);
+
+  // Auto-connect from URL parameters (e.g. ?code=955458 or ?connect=192.168.1.15)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const codeParam = params.get('code') || params.get('connect');
+    if (codeParam) {
+      if (codeParam.length === 6 && /^\d+$/.test(codeParam)) {
+        setConnectionMode('wan');
+        setManualIp(codeParam);
+        setTimeout(() => {
+          handleConnect({ name: codeParam, address: codeParam, port: 45101 }, true);
+        }, 800);
+      } else {
+        setConnectionMode('lan');
+        setManualIp(codeParam);
+      }
+      
+      // Clear query params so refresh/relaunch doesn't auto-trigger connection
+      const url = new URL(window.location.href);
+      url.search = '';
+      window.history.replaceState({}, '', url.toString());
+    }
   }, []);
 
   // Load recent connections on load/tab switch
@@ -1267,9 +1305,14 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
 
   // Keyboard Event Hooks
   useEffect(() => {
-    if (!streamConnected) return;
+    if (!streamConnected || tab !== 'stream') return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
       const keysToPrevent = ['Backspace', 'Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
       if (keysToPrevent.includes(e.code) || e.key === ' ') {
         e.preventDefault();
@@ -1294,6 +1337,11 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
       const keysToPrevent = ['Backspace', 'Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
       if (keysToPrevent.includes(e.code) || e.key === ' ') {
         e.preventDefault();
@@ -1332,12 +1380,12 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
     return () => {
-      pressedKeysRef.current.clear();
+      handleBlur();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [streamConnected]);
+  }, [streamConnected, tab]);
 
   // Cleanup decoder on unmount to prevent WebCodecs resource leak
   useEffect(() => {
@@ -1543,6 +1591,10 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
               <ArrowLeft size={14} /> Main Menu
             </button>
           )}
+
+          <button className="btn btn-ghost btn-sm btn-full" onClick={handleShutdown} style={{ marginTop: '6px', background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#ef4444' }}>
+            <Power size={14} style={{ marginRight: '6px' }} /> Stop Player Service
+          </button>
         </div>
       </div>
 
@@ -1655,19 +1707,124 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {/* Pairing code inputs */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <h3>Connection Pairing Code</h3>
-                <input
-                  id="pairing-code-input"
-                  type="text"
-                  placeholder="Enter pairing code or unattended password"
-                  maxLength={32}
-                  value={pairingInput}
-                  onChange={e => setPairingInput(e.target.value)}
-                  style={{ fontSize: '1.4rem', letterSpacing: '0.25em', textAlign: 'center', fontFamily: 'monospace' }}
-                />
-                {error && <p style={{ color: 'var(--danger)', fontSize: '0.8rem' }}>{error}</p>}
+              {/* Connection Mode Toggle and Instructions */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <button
+                      className={`btn btn-sm ${connectionMode === 'wan' ? 'btn-success' : 'btn-ghost'}`}
+                      onClick={() => {
+                        setConnectionMode('wan');
+                        setManualIp('');
+                        setError(null);
+                      }}
+                      style={{ padding: '6px 16px', fontSize: '0.85rem', borderRadius: '6px' }}
+                    >
+                      WAN (Online Mode)
+                    </button>
+                    <button
+                      className={`btn btn-sm ${connectionMode === 'lan' ? 'btn-success' : 'btn-ghost'}`}
+                      onClick={() => {
+                        setConnectionMode('lan');
+                        setManualIp('');
+                        setError(null);
+                      }}
+                      style={{ padding: '6px 16px', fontSize: '0.85rem', borderRadius: '6px' }}
+                    >
+                      LAN (Local Mode)
+                    </button>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowInstructions(!showInstructions)}
+                    style={{ fontSize: '0.82rem', color: 'var(--accent-purple)', textDecoration: 'underline' }}
+                  >
+                    {showInstructions ? 'Hide Instructions' : 'How to Connect?'}
+                  </button>
+                </div>
+
+                {showInstructions && (
+                  <div className="glass-panel" style={{
+                    padding: '14px 16px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid var(--border)',
+                    fontSize: '0.82rem',
+                    lineHeight: '1.5',
+                    color: 'var(--text-secondary)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    {connectionMode === 'wan' ? (
+                      <>
+                        <h4 style={{ color: '#fff', margin: '0 0 4px 0', fontSize: '0.88rem' }}>WAN Connecting Steps:</h4>
+                        <ol style={{ paddingLeft: '20px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <li><strong>Signaling Server Configuration</strong>:
+                            <ul style={{ paddingLeft: '15px', marginTop: '4px', listStyleType: 'disc', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <li>If on the <strong>same PC (localhost)</strong>: The Signaling Server defaults to <code>ws://127.0.0.1:45188</code> and is auto-started by the Host.</li>
+                              <li>If on the <strong>same local network (LAN / same Wi-Fi)</strong>: Open Settings on Host and set to <code>ws://127.0.0.1:45188</code> (auto-spawns on Host). Open Settings on Client and set the URL to <code>ws://&lt;HOST_LOCAL_IP&gt;:45188</code> (replace with the Host's LAN IP address shown on the Host dashboard, e.g. <code>10.148.251.18</code>).</li>
+                              <li>If on <strong>different networks (WAN / different Wi-Fi or remote)</strong>: Open Settings on Host and set to <code>ws://127.0.0.1:45188</code> (auto-spawns on Host). Open Settings on Client and set the URL to <code>ws://&lt;HOST_PUBLIC_IP&gt;:45188</code> (replace with the Host's public/WAN IP address, e.g., by searching "what is my ip" on Google from the Host PC). Ensure port <code>45188</code> (TCP) is port-forwarded on the Host's router to the Host PC's LAN IP.</li>
+                            </ul>
+                          </li>
+                          <li>Open the <strong>Host UI</strong>, choose <strong>WAN Only</strong> or <strong>LAN + WAN</strong>, and click <strong>Start Share</strong>.</li>
+                          <li>Find the generated <strong>6-digit WAN pairing code</strong> (e.g. <code>050109</code>).</li>
+                          <li>Enter that 6-digit code in the manual input below and click <strong>Establish</strong>.</li>
+                        </ol>
+                      </>
+                    ) : (
+                      <>
+                        <h4 style={{ color: '#fff', margin: '0 0 4px 0', fontSize: '0.88rem' }}>LAN Connecting Steps:</h4>
+                        <ol style={{ paddingLeft: '20px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <li>Ensure both devices are on the same local subnet (Wi-Fi or Ethernet).</li>
+                          <li>If the Host has a pairing code or static password enabled, enter it in the <strong>Connection Password / Pairing Code</strong> field below first.</li>
+                          <li>Select the discovered host from the list above, or enter the LAN IP target (e.g. <code>10.148.251.18:45101</code>) below and click <strong>Establish</strong>.</li>
+                        </ol>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Connection Panel */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 style={{ margin: 0 }}>
+                  {connectionMode === 'wan' ? 'Connect via WAN Pairing Code' : 'Connect via LAN IP Address'}
+                </h3>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input
+                      id="manual-ip-input"
+                      placeholder={connectionMode === 'wan' ? 'Enter 6-digit WAN pairing code (e.g. 955458)' : 'Enter LAN IP target (e.g. 192.168.1.50:45101)'}
+                      value={manualIp}
+                      onChange={e => setManualIp(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button className="btn btn-primary" onClick={handleManualConnect} style={{ padding: '0 24px' }}>
+                      Establish
+                    </button>
+                  </div>
+
+                  {connectionMode === 'lan' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        Connection Password / Pairing Code (Optional):
+                      </span>
+                      <input
+                        id="pairing-code-input"
+                        type="text"
+                        placeholder="Enter pairing code if host requires password"
+                        maxLength={32}
+                        value={pairingInput}
+                        onChange={e => setPairingInput(e.target.value)}
+                        style={{ fontSize: '1.1rem', textAlign: 'center', fontFamily: 'monospace', letterSpacing: '0.1em' }}
+                      />
+                    </div>
+                  )}
+
+                  {error && <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '4px 0 0 0' }}>{error}</p>}
+                </div>
               </div>
 
               {/* Wake-on-LAN (WoL) */}
@@ -1691,20 +1848,6 @@ export const Client: React.FC<ClientProps> = ({ onNavigate }) => {
                   </button>
                 </div>
                 {wolStatus && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{wolStatus}</p>}
-              </div>
-
-              {/* Manual Direct-IP Connect */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <h3>Manual Connect By IP</h3>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input
-                    id="manual-ip-input"
-                    placeholder="192.168.1.x:45101"
-                    value={manualIp}
-                    onChange={e => setManualIp(e.target.value)}
-                  />
-                  <button className="btn btn-ghost" onClick={handleManualConnect}>Establish</button>
-                </div>
               </div>
             </div>
           )}

@@ -1,25 +1,3 @@
-📡 Beacon & Pulse v1.1.4 - Release Notes
-=======================================
-
-Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen sharing and control system over local networks built entirely in Rust.
-
-What's New in v1.1.4
--------------------
-
-⚙️ UI Settings & Windows Registry Synchronization
-- Bidirectional IPC Binding: Integrated Chrome UI settings toggles (e.g. sharing audio, enabling control, quality, custom pins, adaptive bitrate) to write directly to the Windows Registry and %APPDATA%/Beacon/settings.json configurations via named-pipe WebSocket IPC.
-- Persistent Startup Handler: Enabling the "Start with Windows" toggle automatically manages the Windows registry startup entries for the service daemon.
-
-📈 Adaptive Network Engine Frame Rate Auto-Tuning
-- Network-Aware Frame Rate Control: Expanded the adaptive rate controller to dynamically throttle host capture frame rates down to 30 FPS under network constraints (packet loss > 3% or RTT > 80ms) and restore it to 60 FPS once connection parameters recover (packet loss < 0.5%, RTT < 40ms, bitrate >= 12 Mbps).
-
-💻 Interactive Remote Terminal Console
-- WebSocket IPC Shell Streaming: Embedded asynchronous interactive command shell execution (cmd.exe on Windows, sh on non-Windows) in the network control thread.
-- Terminal Viewport: Spawned command piping, stream readers/writers, and lossy UTF-8 formatting, rendering a full monospaced command console inside the player's file/task manager sidebar.
-
-🖥️ Player Multi-Monitor Selection Switcher
-- Target Display Switcher: Exposed the host's monitor list and active display pointer switching protocols in the browser player toolbar, allowing client-initiated dynamic monitor target sharing on-the-fly.
-
 📡 Beacon & Pulse v1.1.3 - Release Notes
 =======================================
 
@@ -28,17 +6,33 @@ Beacon & Pulse is a low-latency, hardware-accelerated remote desktop screen shar
 What's New in v1.1.3
 -------------------
 
-🌐 Localhost Chrome UI Video Playback Fix
-- Annex-B to AVCC Conversion: Implemented dynamic byte stream conversion in the browser player (`Client.tsx`) to prefix NAL units with 4-byte lengths.
-- Out-of-band SPS/PPS Decoder Configuration: Parsed SPS and PPS parameter sets from incoming H.264 keyframes to construct the `AVCDecoderConfigurationRecord` description block dynamically, resolving Chrome's `VideoDecoder` decoding failure (blank black screen).
-- Browser Console Logs: Integrated browser console logging visibility into the player dashboard overlay for troubleshooting.
+🌐 Wide-Area Network (WAN) Remote Screen Sharing & NAT Traversal
+- In-Process Signaling Server: Added a built-in local WebSocket signaling broker running on port 45188 (upgraded from 8080 to prevent conflicts) that auto-spawns on the Host when a WAN or hybrid connection mode is active.
+- NAT Traversal & Punching: Integrated eager STUN pre-discovery, 15-second UDP keep-alive pings, and simultaneous bi-directional packet punching to safely traverse Address-Restricted and Symmetric NAT firewalls without cloud relays.
+- Auto-Upgrade Registry Migrations: Added startup hooks that scan settings and automatically migrate legacy signaling server config ports from 8080 to 45188.
+- Non-JSON Text Proxying: Hardened signaling proxies to safely forward base64-encoded raw TCP control stream data between registered peers.
 
-🖥️ Discovery & Network Telemetry
-- Local Host Loopback Scan: Added mDNS and parallel TCP port checks for loopback interfaces (`127.0.0.1`/`127.0.0.2`) on the player discovery panel.
-- Retrieve Host IPs API: Added a command to get the host's active network IPs via named-pipe IPC.
+🛠️ UDP Socket Buffer Tuning & Network Stabilization
+- 2 MB Socket Buffers: Configured the OS send and receive buffer sizes (SO_SNDBUF and SO_RCVBUF) to 2 MB on all streaming and receiving UDP sockets. This eliminates kernel-level packet drops during massive frame bursts, resolving 1-2 FPS flickering and black screens.
+- WAN Congestion Collapse Prevention: Constrained maximum RTP payloads to 1173 bytes (limiting UDP packets to 1200 bytes) to fit comfortably under PPPoE/VPN MTU ceilings without undergoing IP-layer fragmentation.
 
-⚙️ Setup Installer Fixes
-- Headless Setup Launch: Updated `PulseSetup.cs` to launch the player in silent background headless mode when configured.
+🔄 End-to-End Keyframe Recovery & WebCodecs Auto-Reset
+- Stateful WebCodecs Recovery: Integrated browser-side hooks to automatically catch decoder errors and re-initialize the WebCodecs VideoDecoder.
+- Host-Side IDR Trigger: Added a player-to-host keyframe request protocol over the TCP control connection. When the Player's decoder resets or encounters errors, it immediately requests an IDR keyframe from the Host's encoder to restore the stream instantly.
+
+⚙️ Interface Segregation & On-Screen Connection Instructions
+- Settings Separation: Restructured the Settings panel inside the player client dashboard to hide Host-specific configurations (static pairing code PINs, unattended modes, encoder selectors, startup settings) and only expose the Signaling Server URL.
+- Detailed Connection Walkthroughs: Added a comprehensive on-screen "How to Connect?" overlay detailing step-by-step IP and port-forwarding instructions for same-network (LAN) and remote-network (WAN) sessions.
+
+🔒 Clean Session Disconnection & Firewall Hardening
+- UI-Close Event Sync: Added WebSocket close handlers on the Player daemon to monitor UI window exits and immediately terminate the active control session, cleanly removing the client from the Host UI list.
+- WAN-Mode Direct Block: Enforced loopback-only peer IP checks on the Host control listener during WAN sessions to reject unauthorized direct LAN connections.
+- Elevated Installer Configurations: Enforced UAC elevation on the C# setup installers to ensure Windows Firewall rules for UDP/TCP sharing ports are successfully registered.
+
+💻 Terminal Spawning & Subsystem Subversion
+- Terminal Flashing Prevention: Configured command spawning (ipconfig, cmd.exe) with the CREATE_NO_WINDOW flag on Windows to eliminate flashing console windows during subnet scanning and CLI sessions.
+- QuickEdit Freeze Prevention: Compiled binaries with the windows_subsystem = "windows" directive to remove console subsystems from release builds, preventing Windows QuickEdit mode from freezing background tasks.
+- Detached installer service spawning: Configured installers to spawn background watchdog and player processes using UseShellExecute = true, protecting background processes from parent installer exit signals.
 
 📡 Beacon & Pulse v1.1.2 - Release Notes
 =======================================

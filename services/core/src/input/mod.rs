@@ -389,6 +389,42 @@ pub fn inject_key_release(vk: u16, scan: u16, is_extended: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+pub fn release_all_modifiers() -> Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        VK_LCONTROL, VK_RCONTROL, VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN,
+    };
+    let modifiers = [
+        VK_LCONTROL,
+        VK_RCONTROL,
+        VK_LSHIFT,
+        VK_RSHIFT,
+        VK_LMENU,
+        VK_RMENU,
+        VK_LWIN,
+        VK_RWIN,
+    ];
+    let mut inputs = Vec::new();
+    for vk in modifiers {
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0xBEAC0D,
+                },
+            },
+        });
+    }
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+    Ok(())
+}
+
 #[cfg(not(windows))]
 fn inject_mouse_move(
     _x: f32,
@@ -423,6 +459,10 @@ fn inject_key(_vk: u16, _scan: u16, _pressed: bool, _is_extended: bool) -> Resul
 }
 #[cfg(not(windows))]
 pub fn inject_key_release(_vk: u16, _scan: u16, _is_extended: bool) -> Result<()> {
+    Ok(())
+}
+#[cfg(not(windows))]
+pub fn release_all_modifiers() -> Result<()> {
     Ok(())
 }
 

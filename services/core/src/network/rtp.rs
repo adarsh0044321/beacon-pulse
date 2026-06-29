@@ -15,14 +15,14 @@
 //! │  DataLen   [2]  = payload length                      │
 //! │  Payload  [N]   = H.264 Annex-B data chunk            │
 //! └──────────────────────────────────────────────────────┘
-//! Total header = 27 bytes.  Max payload per packet = 1373 bytes (fits 1400 MTU).
+//! Total header = 27 bytes.  Max payload per packet = 1173 bytes (fits 1200 MTU).
 
 use anyhow::{anyhow, Result};
 
 pub const MAGIC: u32 = 0x4C414E53; // "LANS"
 pub const VERSION: u8 = 1;
 pub const HEADER_SIZE: usize = 27;
-pub const MAX_PAYLOAD: usize = 1373;
+pub const MAX_PAYLOAD: usize = 1173;
 pub const FLAG_KEYFRAME: u8 = 0x01;
 pub const FLAG_FRAG_END: u8 = 0x02;
 pub const FLAG_PARITY: u8 = 0x04; // FEC parity packet marker

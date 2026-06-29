@@ -50,6 +50,7 @@ pub enum UiCommand {
     #[cfg(feature = "host")]
     StartShare {
         target: crate::CaptureTarget,
+        connection_mode: Option<String>,
     },
     #[cfg(feature = "host")]
     StopShare,
@@ -82,7 +83,6 @@ pub enum UiCommand {
     GetActiveClients,
     #[cfg(feature = "player")]
     DiscoverHosts,
-    #[cfg(feature = "host")]
     RequestKeyframe,
     /// Phase 3: apply new bitrate immediately (kbps)
     #[cfg(feature = "host")]
@@ -92,6 +92,7 @@ pub enum UiCommand {
     Shutdown,
     SaveSettings { settings: serde_json::Value },
     LoadSettings,
+    ReadRecentLogs { log_type: String, limit: usize },
     #[cfg(feature = "player")]
     SendInput {
         event: crate::network::InputMsg,
@@ -158,6 +159,9 @@ pub enum ServiceEvent {
     #[cfg(feature = "host")]
     ActiveShare {
         target: Option<crate::CaptureTarget>,
+        pairing_code: Option<String>,
+        pairing_expires_in: Option<u32>,
+        connection_mode: Option<String>,
     },
     #[cfg(feature = "host")]
     MonitorList {
@@ -212,6 +216,9 @@ pub enum ServiceEvent {
     SettingsSaved,
     SettingsLoaded {
         settings: serde_json::Value,
+    },
+    RecentLogs {
+        lines: Vec<String>,
     },
 
     // Capture state events
@@ -471,7 +478,16 @@ async fn dispatch_cmd(
         #[cfg(feature = "host")]
         UiCommand::GetActiveShare => {
             let target = state.active_target.lock().await.clone();
-            ServiceEvent::ActiveShare { target }
+            let pairing_pm = state.pairing_manager.read().await;
+            let pairing_code = pairing_pm.current_code();
+            let pairing_expires_in = pairing_pm.expires_in_secs();
+            let connection_mode = state.connection_mode.lock().await.clone();
+            ServiceEvent::ActiveShare {
+                target,
+                pairing_code,
+                pairing_expires_in,
+                connection_mode,
+            }
         }
         #[cfg(feature = "host")]
         UiCommand::ListMonitors => {
@@ -480,9 +496,11 @@ async fn dispatch_cmd(
         }
         // ── Start host stream ────────────────────────────────────────────────
         #[cfg(feature = "host")]
-        UiCommand::StartShare { target } => {
+        UiCommand::StartShare { target, connection_mode } => {
             let port = crate::network::DEFAULT_PORT;
             *state.active_target.lock().await = Some(target.clone());
+            let conn_mode_str = connection_mode.as_deref().unwrap_or("both").to_string();
+            *state.connection_mode.lock().await = Some(conn_mode_str);
 
             // Write target metadata to registry for watchdog recovery
             match &target {
@@ -537,6 +555,7 @@ async fn dispatch_cmd(
                 while let Some(ev) = host_event_rx.recv().await {
                     if let host_session::HostEvent::StreamStopped { .. } = &ev {
                         *state_clone.active_target.lock().await = None;
+                        *state_clone.connection_mode.lock().await = None;
                         let mut hs = state_clone.host_session.lock().await;
                         *hs = None;
                     }
@@ -556,10 +575,24 @@ async fn dispatch_cmd(
                     // This ensures the pairing code always appears on the host
                     // screen immediately after "Start Sharing" is clicked.
                     let unattended = crate::registry::read_dword("Unattended").unwrap_or(0) == 1;
+                    let use_static = crate::registry::read_dword("UseStaticCode").unwrap_or(0) == 1;
                     let code = {
                         let mut pm = state.pairing_manager.write().await;
                         if unattended {
                             if let Some(pin) = crate::registry::read_string("UnattendedPin") {
+                                if !pin.is_empty() {
+                                    pm.set_code(pin.clone());
+                                    Some(pin)
+                                } else {
+                                    pm.invalidate();
+                                    None
+                                }
+                            } else {
+                                pm.invalidate();
+                                None
+                            }
+                        } else if use_static {
+                            if let Some(pin) = crate::registry::read_string("StaticCode") {
                                 if !pin.is_empty() {
                                     pm.set_code(pin.clone());
                                     Some(pin)
@@ -576,25 +609,35 @@ async fn dispatch_cmd(
                             Some(generated)
                         }
                     };
+                    let conn_mode = connection_mode.as_deref().unwrap_or("both").to_lowercase();
+                    let run_lan = conn_mode == "lan" || conn_mode == "both";
+                    let run_wan = conn_mode == "wan" || conn_mode == "both";
+
                     if let Some(c) = code {
                         let pairing_code_str = c.clone();
-                        let signaling_url = crate::registry::read_string("SignalingServer")
-                            .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
-                        let stun_server = crate::registry::read_string("StunServer")
-                            .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+                        crate::registry::write_string("PairingCode", &pairing_code_str);
 
-                        tokio::spawn(async move {
-                            if let Err(e) = crate::network::signaling::run_host_signaling_loop(
-                                signaling_url,
-                                pairing_code_str,
-                                crate::network::CONTROL_PORT,
-                                stun_server,
-                            )
-                            .await
-                            {
-                                tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
-                            }
-                        });
+                        if run_wan {
+                            let signaling_url = crate::registry::read_string("SignalingServer")
+                                .unwrap_or_else(|| "ws://127.0.0.1:45188".to_string());
+                            let stun_server = crate::registry::read_string("StunServer")
+                                .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+
+                            let state_clone = Arc::clone(state);
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::network::signaling::run_host_signaling_loop(
+                                    signaling_url,
+                                    pairing_code_str,
+                                    crate::network::CONTROL_PORT,
+                                    stun_server,
+                                    state_clone,
+                                )
+                                .await
+                                {
+                                    tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                                }
+                            });
+                        }
 
                         let _ = push_tx.send(ServiceEvent::PairingCode {
                             code: if unattended {
@@ -602,7 +645,7 @@ async fn dispatch_cmd(
                             } else {
                                 c.clone()
                             },
-                            expires_in: if unattended { 999999 } else { 120 },
+                            expires_in: if unattended || use_static { 999999 } else { 120 },
                         });
                     } else {
                         let _ = push_tx.send(ServiceEvent::PairingCode {
@@ -611,19 +654,21 @@ async fn dispatch_cmd(
                         });
                     }
 
-                    // ── Start UDP broadcast advertiser ───────────────────────
-                    // Advertise the CONTROL_PORT (45101) so clients know the
-                    // TCP port to connect to for the handshake.
-                    let hostname = hostname::get()
-                        .map(|h| h.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| "Beacon".to_string());
-                    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-                    broadcast::start_broadcast_advertiser(
-                        hostname,
-                        crate::network::CONTROL_PORT,
-                        cancel_rx,
-                    );
-                    *state.broadcast_cancel.lock().await = Some(cancel_tx);
+                    if run_lan {
+                        // ── Start UDP broadcast advertiser ───────────────────────
+                        // Advertise the CONTROL_PORT (45101) so clients know the
+                        // TCP port to connect to for the handshake.
+                        let hostname = hostname::get()
+                            .map(|h| h.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "Beacon".to_string());
+                        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                        broadcast::start_broadcast_advertiser(
+                            hostname,
+                            crate::network::CONTROL_PORT,
+                            cancel_rx,
+                        );
+                        *state.broadcast_cancel.lock().await = Some(cancel_tx);
+                    }
 
                     // ── Phase 3: push EncoderReady ───────────────────────────
                     let hw_id = crate::logging::metrics::METRICS
@@ -668,6 +713,7 @@ async fn dispatch_cmd(
             crate::registry::write_string("LastTargetDisplay", "");
             crate::registry::write_string("LastSharingTarget", "");
             crate::registry::write_string("LastSharingMode", "");
+            crate::registry::delete_value("PairingCode");
 
             // Cancel the broadcast advertiser
             if let Some(cancel_tx) = state.broadcast_cancel.lock().await.take() {
@@ -677,6 +723,7 @@ async fn dispatch_cmd(
             if let Some(h) = session.take() {
                 h.stop();
             }
+            let _ = crate::network::listener::SHARE_STOP_CHANNEL.send(());
             ServiceEvent::ShareStopped {
                 reason: "User stopped".to_string(),
             }
@@ -693,30 +740,41 @@ async fn dispatch_cmd(
         } => {
             let mut resolved_host_ip = host_ip.clone();
             let mut resolved_stream_port = stream_port;
+            let mut resolved_host_candidates = None;
+            let mut player_prebound_socket = None;
+            let mut player_cipher = None;
+            let mut resolved_pairing_code = pairing_code.clone();
 
             // Check if it is a 6-digit WAN pairing code
             let is_wan_code = host_ip.len() == 6 && host_ip.chars().all(|c| c.is_ascii_digit());
 
             if is_wan_code {
+                if resolved_pairing_code.is_none() {
+                    resolved_pairing_code = Some(host_ip.clone());
+                }
                 info!("WAN connection requested via pairing code: {}. Connecting to signaling server...", host_ip);
                 let signaling_url = crate::registry::read_string("SignalingServer")
-                    .unwrap_or_else(|| "ws://127.0.0.1:8080".to_string());
+                    .unwrap_or_else(|| "ws://127.0.0.1:45188".to_string());
 
                 let local_proxy_port = 45105;
                 match crate::network::signaling::run_player_signaling_loop(
                     signaling_url,
                     host_ip.clone(),
                     local_proxy_port,
+                    recv_port,
                 )
                 .await
                 {
-                    Ok(public_host_addr) => {
+                    Ok(setup) => {
                         info!(
-                            "Successfully traversed NAT. Host public address is: {}",
-                            public_host_addr
+                            "Successfully traversed NAT. Discovered {} host candidates.",
+                            setup.host_candidates.len()
                         );
                         resolved_host_ip = "127.0.0.1".to_string();
                         resolved_stream_port = local_proxy_port;
+                        resolved_host_candidates = Some(setup.host_candidates);
+                        player_prebound_socket = Some(setup.socket);
+                        player_cipher = setup.cipher;
                     }
                     Err(e) => {
                         error!("WAN Traversal failed: {}", e);
@@ -727,15 +785,24 @@ async fn dispatch_cmd(
                 }
             }
 
-            let host_addr: std::net::SocketAddr =
-                match format!("{}:{}", resolved_host_ip, resolved_stream_port).parse() {
-                    Ok(a) => a,
-                    Err(_) => {
+            let host_addr = match tokio::net::lookup_host(format!("{}:{}", resolved_host_ip, resolved_stream_port)).await {
+                Ok(addrs) => {
+                    let mut addr_list: Vec<std::net::SocketAddr> = addrs.collect();
+                    addr_list.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+                    if let Some(addr) = addr_list.first() {
+                        *addr
+                    } else {
                         return ServiceEvent::Error {
-                            message: "Invalid host address".into(),
-                        }
+                            message: "Failed to resolve host address (no addresses found)".into(),
+                        };
                     }
-                };
+                }
+                Err(e) => {
+                    return ServiceEvent::Error {
+                        message: format!("Failed to resolve host address: {}", e),
+                    };
+                }
+            };
 
             // Bridge client events → push_tx
             let (client_ev_tx, mut client_ev_rx) =
@@ -762,7 +829,7 @@ async fn dispatch_cmd(
                                     );
                                     current_file = None;
                                 }
-                            }
+                             }
                         }
                         crate::client_session::ClientEvent::FileDownloadChunk { data } => {
                             if let Some((ref name, ref mut file)) = current_file {
@@ -798,8 +865,17 @@ async fn dispatch_cmd(
 
             // client_session::start() now does full TCP handshake before UDP recv
             let use_tls = tls.unwrap_or(false);
-            match client_session::start(recv_port, host_addr, pairing_code, use_tls, client_ev_tx)
-                .await
+            match client_session::start(
+                recv_port,
+                host_addr,
+                resolved_pairing_code,
+                use_tls,
+                client_ev_tx,
+                player_prebound_socket,
+                resolved_host_candidates,
+                player_cipher,
+            )
+            .await
             {
                 Ok(handle) => {
                     let mut cs = state.client_session.lock().await;
@@ -834,17 +910,20 @@ async fn dispatch_cmd(
         #[cfg(feature = "host")]
         UiCommand::GeneratePairingCode => {
             let unattended = crate::registry::read_dword("Unattended").unwrap_or(0) == 1;
+            let use_static = crate::registry::read_dword("UseStaticCode").unwrap_or(0) == 1;
             let mut pm = state.pairing_manager.write().await;
             if unattended {
                 if let Some(pin) = crate::registry::read_string("UnattendedPin") {
                     if !pin.is_empty() {
                         pm.set_code(pin.clone());
+                        crate::registry::write_string("PairingCode", &pin);
                         ServiceEvent::PairingCode {
                             code: "********".to_string(),
                             expires_in: 999999,
                         }
                     } else {
                         pm.invalidate();
+                        crate::registry::delete_value("PairingCode");
                         ServiceEvent::PairingCode {
                             code: "None (Unsecured)".to_string(),
                             expires_in: 0,
@@ -852,6 +931,55 @@ async fn dispatch_cmd(
                     }
                 } else {
                     pm.invalidate();
+                    crate::registry::delete_value("PairingCode");
+                    ServiceEvent::PairingCode {
+                        code: "None (Unsecured)".to_string(),
+                        expires_in: 0,
+                    }
+                }
+            } else if use_static {
+                if let Some(pin) = crate::registry::read_string("StaticCode") {
+                    if !pin.is_empty() {
+                        pm.set_code(pin.clone());
+                        crate::registry::write_string("PairingCode", &pin);
+                        // If sharing is active, also register the new pairing code with the signaling server!
+                        if state.host_session.lock().await.is_some() {
+                            let pairing_code_str = pin.clone();
+                            let signaling_url = crate::registry::read_string("SignalingServer")
+                                .unwrap_or_else(|| "ws://127.0.0.1:45188".to_string());
+                            let stun_server = crate::registry::read_string("StunServer")
+                                .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+                            let state_clone = Arc::clone(state);
+
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::network::signaling::run_host_signaling_loop(
+                                    signaling_url,
+                                    pairing_code_str,
+                                    crate::network::CONTROL_PORT,
+                                    stun_server,
+                                    state_clone,
+                                )
+                                .await
+                                {
+                                    tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                                }
+                            });
+                        }
+                        ServiceEvent::PairingCode {
+                            code: pin,
+                            expires_in: 999999,
+                        }
+                    } else {
+                        pm.invalidate();
+                        crate::registry::delete_value("PairingCode");
+                        ServiceEvent::PairingCode {
+                            code: "None (Unsecured)".to_string(),
+                            expires_in: 0,
+                        }
+                    }
+                } else {
+                    pm.invalidate();
+                    crate::registry::delete_value("PairingCode");
                     ServiceEvent::PairingCode {
                         code: "None (Unsecured)".to_string(),
                         expires_in: 0,
@@ -859,6 +987,32 @@ async fn dispatch_cmd(
                 }
             } else {
                 let code = pm.generate_code();
+                crate::registry::write_string("PairingCode", &code);
+                
+                // If sharing is active, also register the new pairing code with the signaling server!
+                if state.host_session.lock().await.is_some() {
+                    let pairing_code_str = code.clone();
+                    let signaling_url = crate::registry::read_string("SignalingServer")
+                        .unwrap_or_else(|| "ws://127.0.0.1:45188".to_string());
+                    let stun_server = crate::registry::read_string("StunServer")
+                        .unwrap_or_else(|| "stun.l.google.com:19302".to_string());
+                    let state_clone = Arc::clone(state);
+
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::network::signaling::run_host_signaling_loop(
+                            signaling_url,
+                            pairing_code_str,
+                            crate::network::CONTROL_PORT,
+                            stun_server,
+                            state_clone,
+                        )
+                        .await
+                        {
+                            tracing::warn!("WAN Traversal host signaling loop failed: {}", e);
+                        }
+                    });
+                }
+
                 ServiceEvent::PairingCode {
                     code,
                     expires_in: 120,
@@ -898,10 +1052,18 @@ async fn dispatch_cmd(
         }
 
         // ── Request keyframe ─────────────────────────────────────────────────
-        #[cfg(feature = "host")]
         UiCommand::RequestKeyframe => {
-            if let Some(h) = state.host_session.lock().await.as_ref() {
-                h.request_keyframe();
+            #[cfg(feature = "host")]
+            {
+                if let Some(h) = state.host_session.lock().await.as_ref() {
+                    h.request_keyframe();
+                }
+            }
+            #[cfg(feature = "player")]
+            {
+                if let Some(cs) = state.client_session.lock().await.as_ref() {
+                    let _ = cs.send_input(crate::network::ControlMessage::RequestKeyframe);
+                }
             }
             ServiceEvent::Stats {
                 fps: 0.0,
@@ -1067,6 +1229,9 @@ async fn dispatch_cmd(
             if let Some(indicator) = settings.get("indicator_mode").and_then(|v| v.as_str()) {
                 crate::registry::write_string("IndicatorMode", indicator);
             }
+            if let Some(signaling_server) = settings.get("signaling_server").and_then(|v| v.as_str()) {
+                crate::registry::write_string("SignalingServer", signaling_server);
+            }
 
             // Save to %APPDATA%\Beacon\settings.json
             if let Ok(appdata) = std::env::var("APPDATA") {
@@ -1134,6 +1299,7 @@ async fn dispatch_cmd(
                 ("static_code", "StaticCode", ""),
                 ("encoder", "Encoder", "software"),
                 ("indicator_mode", "IndicatorMode", "always_show"),
+                ("signaling_server", "SignalingServer", "ws://127.0.0.1:45188"),
             ];
 
             for (field_name, reg_key, default_str) in str_keys.iter() {
@@ -1142,12 +1308,37 @@ async fn dispatch_cmd(
                 } else {
                     None
                 };
-                let final_val = match val {
+                let mut final_val = match val {
                     Some(v) => v,
                     None => {
                         serde_json::Value::String(crate::registry::read_string(reg_key).unwrap_or_else(|| default_str.to_string()))
                     }
                 };
+                if *reg_key == "SignalingServer" {
+                    if let serde_json::Value::String(ref s) = final_val {
+                        let is_old_default = if s.contains(":8080") {
+                            if s.contains("127.0.0.1") || s.contains("localhost") || s.contains("::1") {
+                                true
+                            } else if let Some(host_part) = s.strip_prefix("ws://") {
+                                let host_part = host_part.split('/').next().unwrap_or(host_part);
+                                let host_str = host_part.split(':').next().unwrap_or(host_part);
+                                let cleaned_host = host_str.trim_start_matches('[').trim_end_matches(']');
+                                let local_ips = crate::network::broadcast::get_local_ips();
+                                local_ips.iter().any(|ip| ip == cleaned_host)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        if is_old_default {
+                            let upgraded = s.replace(":8080", ":45188");
+                            let _ = crate::registry::write_string("SignalingServer", &upgraded);
+                            final_val = serde_json::Value::String(upgraded);
+                        }
+                    }
+                }
                 settings_map.insert(field_name.to_string(), final_val);
             }
 
@@ -1165,6 +1356,55 @@ async fn dispatch_cmd(
             settings_map.insert("use_static_code".to_string(), final_use_static);
 
             ServiceEvent::SettingsLoaded { settings: serde_json::Value::Object(settings_map) }
+        }
+
+        UiCommand::ReadRecentLogs { log_type, limit } => {
+            let dir = crate::logging::init::log_dir();
+            if !dir.exists() {
+                return ServiceEvent::RecentLogs {
+                    lines: vec![format!("No logs directory found at {}.", dir.display())],
+                };
+            }
+            let filter_pattern = format!("{}.log", log_type);
+            let mut log_files = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+                            if filename.contains(&filter_pattern) {
+                                if let Ok(meta) = entry.metadata() {
+                                    if let Ok(mod_time) = meta.modified() {
+                                        log_files.push((path, mod_time));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if log_files.is_empty() {
+                return ServiceEvent::RecentLogs {
+                    lines: vec![format!("No log files found for type '{}'.", log_type)],
+                };
+            }
+            log_files.sort_by(|a, b| b.1.cmp(&a.1));
+            let latest_file = &log_files[0].0;
+            match std::fs::File::open(latest_file) {
+                Ok(file) => {
+                    use std::io::{BufRead, BufReader};
+                    let reader = BufReader::new(file);
+                    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                    let len = lines.len();
+                    let start = if len > limit { len - limit } else { 0 };
+                    ServiceEvent::RecentLogs {
+                        lines: lines[start..].to_vec(),
+                    }
+                }
+                Err(e) => ServiceEvent::RecentLogs {
+                    lines: vec![format!("Failed to open log file: {}", e)],
+                },
+            }
         }
 
         // ── Phase 3: Live bitrate change ──────────────────────────────────────
@@ -1736,17 +1976,16 @@ async fn tcp_scan_discover() -> Vec<discovery::DiscoveredHost> {
 fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
     let mut ips = Vec::new();
 
-    if let Ok(output) = std::process::Command::new("ipconfig").output() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if (trimmed.contains("IPv4") || trimmed.contains("IP Address"))
-                && trimmed.contains(": ")
-            {
-                if let Some(ip_str) = trimmed.split(": ").last() {
-                    if let Ok(ip) = ip_str.trim().parse::<std::net::Ipv4Addr>() {
-                        let o = ip.octets();
-                        if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
+    // 1. Try hostname lookup first to resolve local IPs
+    if let Ok(hostname) = hostname::get() {
+        let hostname_str = hostname.to_string_lossy();
+        use std::net::ToSocketAddrs;
+        if let Ok(socket_addrs) = (hostname_str.as_ref(), 0).to_socket_addrs() {
+            for addr in socket_addrs {
+                if let std::net::IpAddr::V4(ip) = addr.ip() {
+                    let o = ip.octets();
+                    if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
+                        if !ips.contains(&ip) {
                             ips.push(ip);
                         }
                     }
@@ -1755,7 +1994,44 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
         }
     }
 
-    // Fallback: default route detection (tries offline local broadcast/multicast first, then 8.8.8.8)
+    // 2. Parse ipconfig for all our IPs using absolute system32 path on Windows
+    #[cfg(windows)]
+    let ipconfig_path = {
+        let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        format!("{}\\{}\\{}", sys_root, "System32", "ipconfig.exe")
+    };
+    #[cfg(not(windows))]
+    let ipconfig_path = "ipconfig";
+
+    let mut cmd = std::process::Command::new(ipconfig_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    if let Ok(output) = cmd.output() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let trimmed = line.trim();
+            // Match standard or localized IPv4/IP Address lines
+            if (trimmed.contains("IPv4") || trimmed.contains("IP Address") || trimmed.contains("Adresse IPv4") || trimmed.contains("Dirección IPv4"))
+                && trimmed.contains(": ")
+            {
+                if let Some(ip_str) = trimmed.split(": ").last() {
+                    if let Ok(ip) = ip_str.trim().parse::<std::net::Ipv4Addr>() {
+                        let o = ip.octets();
+                        if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
+                            if !ips.contains(&ip) {
+                                ips.push(ip);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: default route detection (tries offline local broadcast/multicast first, then 8.8.8.8)
     if ips.is_empty() {
         if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
             let mut resolved = false;
@@ -1766,7 +2042,9 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
                         if let std::net::IpAddr::V4(ip) = local_addr.ip() {
                             let o = ip.octets();
                             if o[0] != 127 && !(o[0] == 169 && o[1] == 254) {
-                                ips.push(ip);
+                                if !ips.contains(&ip) {
+                                    ips.push(ip);
+                                }
                                 resolved = true;
                                 break;
                             }
@@ -1778,7 +2056,9 @@ fn get_local_ipv4s() -> Vec<std::net::Ipv4Addr> {
             if !resolved && socket.connect("8.8.8.8:53").is_ok() {
                 if let Ok(local_addr) = socket.local_addr() {
                     if let std::net::IpAddr::V4(ip) = local_addr.ip() {
-                        ips.push(ip);
+                        if !ips.contains(&ip) {
+                            ips.push(ip);
+                        }
                     }
                 }
             }
@@ -1800,15 +2080,16 @@ pub async fn run_web_server(
     is_player: bool,
     launch_browser: bool,
 ) -> Result<()> {
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
+    let listener = match crate::network::create_dual_stack_listener(port) {
+        Ok(l) => {
+            info!("Web / WebSocket server listening on dual-stack port {}", port);
+            l
+        }
         Err(e) => {
-            warn!("Web server failed to bind to {}: {}", addr, e);
+            warn!("Web server failed to bind to dual-stack port {}: {}", port, e);
             return Err(e.into());
         }
     };
-    info!("Web / WebSocket server listening on http://{}", addr);
 
     if launch_browser {
         open_browser(&format!("http://localhost:{}", port));
@@ -2049,6 +2330,17 @@ async fn handle_ws_client(
     }
 
     ws_writer_handle.abort();
+
+    #[cfg(feature = "player")]
+    {
+        // If we are compiled as a player client, and the UI client disconnected, leave the stream
+        tracing::info!("UI client disconnected from player daemon — leaving stream");
+        let mut cs = state.client_session.lock().await;
+        if let Some(h) = cs.take() {
+            h.stop();
+        }
+    }
+
     Ok(())
 }
 

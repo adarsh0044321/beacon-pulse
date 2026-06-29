@@ -58,13 +58,7 @@ export function FileManager() {
     loadDirectory('');
 
     // Listen to directory responses
-    let unlistenDir: any = null;
-    let unlistenAction: any = null;
-    let unlistenDownStart: any = null;
-    let unlistenDownChunk: any = null;
-    let unlistenDownEnd: any = null;
-
-    listen<any>('host_directory_list', (ev) => {
+    const unlistenDir = listen<any>('host_directory_list', (ev) => {
       const { path, entries: list, error: err } = ev.payload;
       setLoading(false);
       if (err) {
@@ -73,10 +67,10 @@ export function FileManager() {
         setCurrentPath(path);
         setEntries(list || []);
       }
-    }).then(un => unlistenDir = un);
+    });
 
     // Listen to delete/rename action finished responses
-    listen<any>('file_action_finished', (ev) => {
+    const unlistenAction = listen<any>('file_action_finished', (ev) => {
       setActionLoading(false);
       const { success, error: err } = ev.payload;
       if (success) {
@@ -85,15 +79,15 @@ export function FileManager() {
       } else {
         addToast('Operation Failed', err || 'File system operation failed.', 'error');
       }
-    }).then(un => unlistenAction = un);
+    });
 
     // Listen to file download progress from backend
-    listen<any>('file_download_start', (ev) => {
+    const unlistenDownStart = listen<any>('file_download_start', (ev) => {
       const { name, size } = ev.payload;
       setTransferStatus({ type: 'download', name, progress: 0 });
-    }).then(un => unlistenDownStart = un);
+    });
 
-    listen<any>('file_download_chunk', (ev) => {
+    const unlistenDownChunk = listen<any>('file_download_chunk', (ev) => {
       // Chunk arrived, we don't have direct index here, but we can animate progress increment or completion
       setTransferStatus(prev => {
         if (prev.type === 'download') {
@@ -102,22 +96,22 @@ export function FileManager() {
         }
         return prev;
       });
-    }).then(un => unlistenDownChunk = un);
+    });
 
-    listen<any>('file_download_end', () => {
+    const unlistenDownEnd = listen<any>('file_download_end', () => {
       setTransferStatus(prev => {
         addToast('Download Completed', `Successfully downloaded file ${prev.name} to your local Downloads folder.`, 'success');
         return { type: null, name: '', progress: 0 };
       });
       loadDirectory(currentPathRef.current);
-    }).then(un => unlistenDownEnd = un);
+    });
 
     return () => {
-      if (unlistenDir) unlistenDir();
-      if (unlistenAction) unlistenAction();
-      if (unlistenDownStart) unlistenDownStart();
-      if (unlistenDownChunk) unlistenDownChunk();
-      if (unlistenDownEnd) unlistenDownEnd();
+      unlistenDir.then(un => un());
+      unlistenAction.then(un => un());
+      unlistenDownStart.then(un => un());
+      unlistenDownChunk.then(un => un());
+      unlistenDownEnd.then(un => un());
     };
   }, [addToast]);
 
